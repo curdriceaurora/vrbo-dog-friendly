@@ -74,7 +74,11 @@ function chooseUrls(opts) {
   if (opts.targets.length) {
     return opts.targets.map((t) => {
       if (/^https?:\/\//.test(t)) return t;
-      const hit = all.find((u) => u.endsWith("/" + t));
+      // Match a whole path segment, tolerating a trailing slash or query.
+      // Note this is deliberately NOT a substring test: `includes("/123")`
+      // would happily match ".../1234" and check the wrong listing.
+      const re = new RegExp(`/${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[/?#]|$)`);
+      const hit = all.find((u) => re.test(u));
       return hit || `https://www.vrbo.com/${t}`;
     });
   }
@@ -95,22 +99,31 @@ function findChrome() {
   return bin;
 }
 
+async function portIsLive(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function waitForPort(port, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (res.ok) return true;
-    } catch {
-      /* not up yet */
-    }
+    if (await portIsLive(port)) return true;
     await sleep(300);
   }
   throw new Error(`Chrome did not open a debugging port on ${port}`);
 }
 
 function launchChrome(port) {
-  const profile = path.join(os.tmpdir(), "vdp-live-check-profile");
+  // Keyed to the port so two runs on different ports don't fight over one
+  // profile lock. Deliberately NOT unique-per-run: that strands a fresh
+  // multi-megabyte profile in tmpdir on every invocation, and reusing one
+  // keeps the cache warm. Stale locks come from Chrome being left running,
+  // which stopChrome() below is what actually fixes.
+  const profile = path.join(os.tmpdir(), `vdp-live-check-profile-${port}`);
   fs.mkdirSync(profile, { recursive: true });
   const child = spawn(
     findChrome(),
@@ -126,6 +139,33 @@ function launchChrome(port) {
   );
   child.unref();
   return child;
+}
+
+// Chrome is spawned detached and outlives a crashed or interrupted run, so
+// teardown has to be reachable from the signal handlers and the error path,
+// not just the happy path at the end of main().
+let chromeProc = null;
+
+function stopChrome() {
+  if (!chromeProc) return;
+  const proc = chromeProc;
+  chromeProc = null;
+  try {
+    process.kill(-proc.pid, "SIGTERM"); // detached: kill the whole group
+  } catch {
+    try {
+      proc.kill("SIGTERM");
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => {
+    stopChrome();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
 }
 
 // ---------- cdp ----------
@@ -193,7 +233,11 @@ const PANEL_EXPR = `(() => {
 })()`;
 
 async function checkListing(port, url, settleMs) {
-  const res = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
+  // Open blank, arm the document_start script, THEN navigate. Creating the
+  // tab on the listing directly would load it once, and the reload needed
+  // to pick up addScriptToEvaluateOnNewDocument would load it again —
+  // twice the bandwidth and twice the bot-detection surface per listing.
+  const res = await fetch(`http://127.0.0.1:${port}/json/new?about:blank`, { method: "PUT" });
   const tab = await res.json();
   const cdp = connect(tab.webSocketDebuggerUrl);
   await cdp.ready;
@@ -205,7 +249,7 @@ async function checkListing(port, url, settleMs) {
     // MAIN world at document_start, as "world": "MAIN" would give us.
     await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: readScript("page-bridge.js") });
     const loaded = cdp.once("Page.loadEventFired");
-    await cdp.send("Page.reload", {});
+    await cdp.send("Page.navigate", { url });
     await loaded;
     await sleep(3000); // Apollo cache populates asynchronously after mount
 
@@ -285,12 +329,25 @@ function report(results) {
 (async () => {
   const opts = parseArgs(process.argv.slice(2));
   const urls = chooseUrls(opts);
-  let chrome = null;
 
-  if (!opts.attach) {
-    chrome = launchChrome(opts.port);
+  if (opts.attach) {
+    if (!(await portIsLive(opts.port))) {
+      throw new Error(`--attach was given but nothing is listening on ${opts.port}.`);
+    }
+  } else {
+    // Refuse to reuse a debugging endpoint we did not start. Chrome cannot
+    // bind a port twice, so launching here would silently leave us driving
+    // whatever is already on it — quite possibly the user's own browser,
+    // in which case this would open tabs in it and close them again.
+    if (await portIsLive(opts.port)) {
+      throw new Error(
+        `Port ${opts.port} already has a Chrome debugging endpoint, which this run did not start.\n` +
+          `Pass --attach to target it deliberately, or --port <n> to use a different one.`
+      );
+    }
+    chromeProc = launchChrome(opts.port);
+    await waitForPort(opts.port, 20000);
   }
-  await waitForPort(opts.port, 20000);
 
   const results = [];
   for (const url of urls) {
@@ -306,19 +363,10 @@ function report(results) {
     allOk = report(results);
   }
 
-  if (chrome) {
-    try {
-      process.kill(-chrome.pid, "SIGTERM");
-    } catch {
-      try {
-        chrome.kill("SIGTERM");
-      } catch {
-        /* already gone */
-      }
-    }
-  }
+  stopChrome();
   process.exit(allOk ? 0 : 1);
 })().catch((e) => {
+  stopChrome();
   console.error("live-check failed:", e.message || e);
   process.exit(1);
 });
