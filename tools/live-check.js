@@ -30,10 +30,10 @@
 //     world. Exercises the scripts, the cross-world bridge and real
 //     listing data, but a manifest typo CANNOT fail this mode.
 //
-// Exit codes: 0 all passed, 1 a genuine failure, 2 inconclusive because
-// Vrbo served its bot challenge. Note the third one — Vrbo starts
-// challenging after roughly twenty listings in quick succession, and a
-// challenge page must never be reported as a code regression.
+// Exit codes: 0 all passed, 1 a genuine failure, 2 inconclusive (the site
+// served a bot challenge, or the URL served no listing data at all).
+// Neither inconclusive case is a code regression, and neither may be
+// reported as one.
 //
 // Requires Node 22+ (global fetch and WebSocket) and a Chrome binary.
 // Chrome opens a visible window: Vrbo serves fewer listings to headless.
@@ -55,16 +55,38 @@ let DELAY_MS = 4000; // pause between listings; Vrbo challenges rapid sequential
 const CHROME_CANDIDATES = [
   process.env.CHROME_BIN,
   ...(function cftFromPuppeteerCache() {
+    // Layout is <cache>/chrome/<channel-version>/<platform>/<exe>, and the
+    // platform directory varies. Hardcoding one of them meant silent
+    // fallback to branded Chrome — and therefore silent loss of
+    // manifest.json coverage — on every machine but an Apple Silicon Mac.
+    const EXE_BY_PLATFORM = {
+      "chrome-mac-arm64": ["Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+      "chrome-mac-x64": ["Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"],
+      "chrome-linux64": ["chrome"],
+      "chrome-win64": ["chrome.exe"],
+      "chrome-win32": ["chrome.exe"],
+    };
     const base = path.join(os.homedir(), ".cache", "puppeteer", "chrome");
+    const found = [];
+    let versions;
     try {
-      return fs
-        .readdirSync(base)
-        .sort()
-        .reverse()
-        .map((v) => path.join(base, v, "chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"));
+      versions = fs.readdirSync(base).sort().reverse(); // newest first
     } catch {
       return [];
     }
+    for (const version of versions) {
+      let platforms;
+      try {
+        platforms = fs.readdirSync(path.join(base, version));
+      } catch {
+        continue;
+      }
+      for (const platform of platforms) {
+        const tail = EXE_BY_PLATFORM[platform];
+        if (tail) found.push(path.join(base, version, platform, ...tail));
+      }
+    }
+    return found;
   })(),
   "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -160,6 +182,37 @@ async function waitForPort(port, timeoutMs) {
   throw new Error(`Chrome did not open a debugging port on ${port}`);
 }
 
+// A minimal control extension, loaded alongside the real one. It is the
+// only way to tell two very different situations apart, because both make
+// window.__vdpBridgeData absent:
+//
+//   the browser ignores --load-extension  -> emulate, manifest uncovered
+//   OUR manifest is broken (host match,   -> a real regression, and
+//   "world", file list, syntax)              exactly what real-load mode
+//                                            exists to catch
+//
+// Without the canary the second case silently took the first case's path
+// and could exit 0 — masking the defect the mode was added to detect.
+function writeCanaryExtension() {
+  const dir = path.join(os.tmpdir(), "vdp-live-check-canary");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "manifest.json"),
+    JSON.stringify(
+      {
+        manifest_version: 3,
+        name: "live-check canary",
+        version: "1.0.0",
+        content_scripts: [{ matches: ["<all_urls>"], js: ["canary.js"], world: "MAIN", run_at: "document_start" }],
+      },
+      null,
+      2
+    )
+  );
+  fs.writeFileSync(path.join(dir, "canary.js"), `window.__vdpCanary = true;\n`);
+  return dir;
+}
+
 function launchChrome(port) {
   // Keyed to the port so two runs on different ports don't fight over one
   // profile lock. Deliberately NOT unique-per-run: that strands a fresh
@@ -174,9 +227,9 @@ function launchChrome(port) {
       `--user-data-dir=${profile}`,
       `--remote-debugging-port=${port}`,
       // Honoured by Chromium and Chrome for Testing, silently ignored by
-      // branded Chrome 137+. We don't guess which we got — each listing
-      // probes for the extension and falls back to injection if absent.
-      `--load-extension=${ROOT}`,
+      // branded Chrome 137+. The canary rides along so we can tell
+      // "browser won't load extensions" from "our manifest is broken".
+      `--load-extension=${ROOT},${writeCanaryExtension()}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--window-size=1280,900",
@@ -279,6 +332,39 @@ const PANEL_EXPR = `(() => {
   });
 })()`;
 
+// What did the server actually give us? Three outcomes, and conflating
+// them produces false reports in both directions.
+//
+// A previous version treated "no PropertyInfo and under 400 characters"
+// as a bot challenge, which labelled every 404, redirect and sparse error
+// page a challenge. Only explicit challenge wording counts now; a page
+// that simply has no listing data is its own outcome, because that means
+// the URL is stale or erroring, not that we were blocked and not that the
+// extension is broken.
+const CHALLENGE_RE = /bot or not|human side|are you a human|unusual traffic|access denied|captcha|verify (you|that you)/i;
+
+async function classifyPage(cdp) {
+  const res = await cdp.send("Runtime.evaluate", {
+    returnByValue: true,
+    expression: `JSON.stringify({
+      url: location.href,
+      title: (document.title || "").slice(0, 120),
+      bodyText: (document.body ? document.body.innerText : "").slice(0, 600),
+      bodyLen: document.body ? document.body.innerText.length : 0,
+      hasPropertyInfo: !!(window.__APOLLO_STATE__ && Object.keys(window.__APOLLO_STATE__).some((k) => k.startsWith("PropertyInfo:")))
+    })`,
+  });
+  const s = JSON.parse(res.result.value);
+  if (CHALLENGE_RE.test(s.title) || CHALLENGE_RE.test(s.bodyText)) return { kind: "challenge", ...s };
+  if (!s.hasPropertyInfo) return { kind: "no-listing-data", ...s };
+  return { kind: "listing", ...s };
+}
+
+function pageStateResult(url, state) {
+  if (state.kind === "challenge") return { url, ok: false, blocked: true, state };
+  return { url, ok: false, unavailable: true, state };
+}
+
 async function checkListing(port, url, settleMs) {
   // Open blank, arm the document_start script, THEN navigate. Creating the
   // tab on the listing directly would load it once, and the reload needed
@@ -302,41 +388,53 @@ async function checkListing(port, url, settleMs) {
     await loaded;
     await sleep(3000); // Apollo cache populates asynchronously after mount
 
-    // Vrbo serves an interstitial bot challenge ("Bot or Not?") once it
-    // decides the traffic is automated — reliably, after roughly twenty
-    // listings in quick succession. That page carries an __APOLLO_STATE__
-    // with no PropertyInfo in it, so the bridge correctly produces
-    // nothing, and reporting that as a bridge fault sends whoever reads
-    // it hunting a regression that does not exist. Detect and label it.
-    const stateRes = await cdp.send("Runtime.evaluate", {
+    let state = await classifyPage(cdp);
+    if (state.kind !== "listing") return pageStateResult(url, state);
+
+    // Two independent signals. The canary is a throwaway extension loaded
+    // alongside ours, so it answers "can this browser load extensions at
+    // all" without depending on OUR manifest being correct.
+    const probe = await cdp.send("Runtime.evaluate", {
+      expression: `JSON.stringify({ canary: !!window.__vdpCanary, bridge: typeof window.__vdpBridgeData !== "undefined" })`,
       returnByValue: true,
-      expression: `JSON.stringify({
-        title: document.title.slice(0, 120),
-        bodyLen: document.body ? document.body.innerText.length : 0,
-        hasPropertyInfo: !!(window.__APOLLO_STATE__ && Object.keys(window.__APOLLO_STATE__).some((k) => k.startsWith("PropertyInfo:")))
-      })`,
     });
-    const state = JSON.parse(stateRes.result.value);
-    const CHALLENGE_RE = /bot or not|human side|are you a human|unusual traffic|access denied|captcha/i;
-    if (CHALLENGE_RE.test(state.title) || (!state.hasPropertyInfo && state.bodyLen < 400)) {
-      return { url, ok: false, blocked: true, state };
+    const { canary, bridge } = JSON.parse(probe.result.value);
+
+    if (canary && !bridge) {
+      // The browser demonstrably loads extensions — the canary is running
+      // on this very page — but ours did not start. That is a manifest
+      // defect: host match, "world", the js file list, or a syntax error
+      // in a content script. Falling back to injection here would hide
+      // precisely the regression this mode exists to catch, so it is a
+      // hard failure and emulation is NOT attempted.
+      return {
+        url,
+        ok: false,
+        mode: "extension",
+        failures: [
+          "extension did not load from manifest.json, though the canary extension loaded on the same page — " +
+            "check host matches, \"world\": \"MAIN\", the content_scripts file list, and each script for syntax errors",
+        ],
+      };
     }
 
-    const probe = await cdp.send("Runtime.evaluate", {
-      expression: `typeof window.__vdpBridgeData !== "undefined"`,
-      returnByValue: true,
-    });
-    let mode = probe.result.value ? "extension" : "emulated";
+    let mode = bridge ? "extension" : "emulated";
 
     if (mode === "emulated") {
-      // Branded Chrome ignored --load-extension. Reproduce by hand what
-      // the manifest declares, and say so in the report — this path does
-      // NOT verify manifest.json itself.
+      // Browser ignored --load-extension (no canary either). Reproduce by
+      // hand what the manifest declares, and say so in the report — this
+      // path does NOT verify manifest.json itself.
       await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: readScript("page-bridge.js") });
       const reloaded = cdp.once("Page.loadEventFired");
       await cdp.send("Page.reload", {});
       await reloaded;
       await sleep(3000);
+
+      // Re-classify: the reload is a second request, and it can be the one
+      // that gets challenged. Checking only before the reload turned that
+      // into a bogus hard failure complete with bridge and panel errors.
+      state = await classifyPage(cdp);
+      if (state.kind !== "listing") return pageStateResult(url, state);
 
       const { frameTree } = await cdp.send("Page.getFrameTree", {});
       const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
@@ -397,7 +495,13 @@ function report(results) {
     const id = r.url.replace(/^https:\/\/www\.vrbo\.com\//, "");
     console.log(`\n── ${id} ${"─".repeat(Math.max(0, 40 - id.length))}`);
     if (r.blocked) {
-      console.log(`   BLOCKED  Vrbo served a bot challenge ("${r.state.title}") — inconclusive, not an extension failure`);
+      console.log(`   BLOCKED  bot challenge ("${r.state.title}") — inconclusive, not an extension failure`);
+      continue;
+    }
+    if (r.unavailable) {
+      console.log(`   NO DATA  page served no listing data — title "${r.state.title}", ${r.state.bodyLen} chars`);
+      if (r.state.url !== r.url) console.log(`            redirected to ${r.state.url}`);
+      console.log(`            delisted, redirected or an error page; says nothing about the extension`);
       continue;
     }
     if (!r.ok) {
@@ -431,7 +535,8 @@ function report(results) {
   }
 
   const blocked = results.filter((r) => r.blocked);
-  const failed = results.filter((r) => !r.ok && !r.blocked);
+  const unavailable = results.filter((r) => r.unavailable);
+  const failed = results.filter((r) => !r.ok && !r.blocked && !r.unavailable);
   const passed = results.filter((r) => r.ok);
 
   // "passed" not "rendered": passing also requires a live bridge and an
@@ -447,7 +552,16 @@ function report(results) {
         `raise --delay (currently ${DELAY_MS}ms between listings).`
     );
   }
-  return { allOk: failed.length === 0 && blocked.length === 0, hardFailure: failed.length > 0 };
+  if (unavailable.length) {
+    console.log(
+      `Served no listing data (stale URL, redirect or error page — not an extension failure): ${unavailable.length}\n` +
+        `  ${unavailable.map((u) => u.url).join("\n  ")}`
+    );
+  }
+  return {
+    allOk: failed.length === 0 && blocked.length === 0 && unavailable.length === 0,
+    hardFailure: failed.length > 0,
+  };
 }
 
 // ---------- main ----------
@@ -486,7 +600,10 @@ function report(results) {
   let verdict;
   if (opts.json) {
     console.log(JSON.stringify(results, null, 2));
-    verdict = { allOk: results.every((r) => r.ok), hardFailure: results.some((r) => !r.ok && !r.blocked) };
+    verdict = {
+      allOk: results.every((r) => r.ok),
+      hardFailure: results.some((r) => !r.ok && !r.blocked && !r.unavailable),
+    };
   } else {
     verdict = report(results);
   }
