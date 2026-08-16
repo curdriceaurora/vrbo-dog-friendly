@@ -533,6 +533,12 @@ function report(results) {
     if (!r.ok) {
       for (const f of r.failures || [r.error || "unknown failure"]) console.log(`   FAIL  ${f}`);
       if (r.panel?.rendered) console.log(`   (a panel did render: ${r.panel.headline})`);
+      // A failure has to say how it was run: "emulated" means the scripts
+      // were hand-injected and manifest.json was never exercised, which
+      // changes what the failure can and cannot be evidence of.
+      if (r.mode) {
+        console.log(`   mode: ${r.mode}${r.mode === "emulated" ? " — scripts hand-injected, manifest.json NOT covered" : ""}`);
+      }
       continue;
     }
     console.log(`   ${r.panel.headline}`);
@@ -548,14 +554,24 @@ function report(results) {
     console.log(`     bridge: ${r.main.bridgeItems} items | isolation intact: ${!r.main.policyLeaked}`);
   }
 
-  // Only successful runs earn the banner. Deriving it from every result
-  // printed "Loaded from manifest.json ... all exercised" directly beneath
-  // a manifest failure, which is contradictory evidence.
-  const modes = new Set(results.filter((r) => r.ok).map((r) => r.mode).filter(Boolean));
-  if (modes.has("extension")) {
+  // Two different questions, and conflating them broke reporting in both
+  // directions.
+  //
+  // The success banner is a CLAIM about what was verified, so only a
+  // passing run may earn it — deriving it from every result printed
+  // "all exercised" directly beneath a manifest failure.
+  //
+  // The emulated caveat is a LIMITATION of how the run was performed, and
+  // it holds whether the run passed or failed. Restricting it to passing
+  // results too meant a FAILED emulated run disclosed no mode at all,
+  // concealing that the scripts were hand-injected and that manifest.json
+  // went untested — exactly when that context matters most.
+  const passedModes = new Set(results.filter((r) => r.ok).map((r) => r.mode).filter(Boolean));
+  const allModes = new Set(results.map((r) => r.mode).filter(Boolean));
+  if (passedModes.has("extension")) {
     console.log(`\nLoaded from manifest.json (real unpacked load) — script order, "world": "MAIN" and host matching all exercised.`);
   }
-  if (modes.has("emulated")) {
+  if (allModes.has("emulated")) {
     console.log(
       `\nThis browser ignored --load-extension, so the content scripts were injected by hand.\n` +
         `manifest.json itself is NOT covered by that path. For a real load:\n` +
@@ -639,8 +655,10 @@ function report(results) {
   }
 
   stopChrome();
-  // 0 = all good, 1 = a genuine extension failure, 2 = inconclusive
-  // (blocked). A bot challenge must not read as a code regression.
+  // 0 = all good, 1 = a genuine extension failure (a manifest that would
+  // not load counts), 2 = inconclusive: either a bot challenge or a URL
+  // that served no listing data within the Apollo budget. Neither
+  // inconclusive case may read as a code regression.
   process.exit(verdict.allOk ? 0 : verdict.hardFailure ? 1 : 2);
 })().catch((e) => {
   stopChrome();
