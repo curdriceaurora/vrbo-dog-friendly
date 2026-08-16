@@ -63,10 +63,22 @@
       // outside the page's navigation/dialog furniture.
       const OFF_LIMITS = 'nav, header, footer, [role="navigation"], [role="dialog"], [role="menu"], [role="tablist"]';
 
+      // Climb looking for a section heading, bounded by how much text the
+      // ancestor holds rather than by a fixed depth. Depth alone is the
+      // wrong axis in both directions: Vrbo nests buttons several wrapper
+      // divs deep, so a shallow cap misses real toggles, while climbing
+      // to a section/[id] container (or far enough to reach one) lands on
+      // something big enough that "house rules" appears SOMEWHERE in it on
+      // every listing — at which point this returns true for everything
+      // and we're back to clicking the whole page.
+      const MAX_SECTION_CHARS = 3000;
+
       function inRelevantSection(el) {
         let node = el.parentElement;
-        for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
-          if (SECTION_CTX_RE.test((node.textContent || "").slice(0, 600))) return true;
+        for (let i = 0; i < 8 && node; i++, node = node.parentElement) {
+          const text = node.textContent || "";
+          if (text.length > MAX_SECTION_CHARS) break;
+          if (SECTION_CTX_RE.test(text)) return true;
         }
         return false;
       }
