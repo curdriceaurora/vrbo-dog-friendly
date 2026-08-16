@@ -45,11 +45,30 @@ const ROOT = path.join(__dirname, "..");
 const LISTINGS = path.join(__dirname, "live-listings.txt");
 const DEFAULT_SAMPLE = 5;
 
+// Chrome for Testing and Chromium first: they still honour
+// --load-extension, which lets this actually load the extension from
+// manifest.json instead of emulating it. Branded Chrome is the fallback.
+// Get one with:  npx @puppeteer/browsers install chrome@stable
 const CHROME_CANDIDATES = [
   process.env.CHROME_BIN,
+  ...(function cftFromPuppeteerCache() {
+    const base = path.join(os.homedir(), ".cache", "puppeteer", "chrome");
+    try {
+      return fs
+        .readdirSync(base)
+        .sort()
+        .reverse()
+        .map((v) => path.join(base, v, "chrome-mac-arm64", "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing"));
+    } catch {
+      return [];
+    }
+  })(),
+  "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/usr/bin/google-chrome",
-  "/usr/bin/chromium",
 ].filter(Boolean);
 
 // ---------- args ----------
@@ -150,6 +169,10 @@ function launchChrome(port) {
     [
       `--user-data-dir=${profile}`,
       `--remote-debugging-port=${port}`,
+      // Honoured by Chromium and Chrome for Testing, silently ignored by
+      // branded Chrome 137+. We don't guess which we got — each listing
+      // probes for the extension and falls back to injection if absent.
+      `--load-extension=${ROOT}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--window-size=1280,900",
@@ -266,31 +289,50 @@ async function checkListing(port, url, settleMs) {
     await cdp.send("Page.enable", {});
     await cdp.send("Runtime.enable", {});
 
-    // MAIN world at document_start, as "world": "MAIN" would give us.
-    await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: readScript("page-bridge.js") });
+    // Navigate with nothing injected. If --load-extension took, the real
+    // content scripts are already running and anything we observe came
+    // from manifest.json — which is the only way to exercise script
+    // order, "world": "MAIN" and host matching.
     const loaded = cdp.once("Page.loadEventFired");
     await cdp.send("Page.navigate", { url });
     await loaded;
     await sleep(3000); // Apollo cache populates asynchronously after mount
 
-    const { frameTree } = await cdp.send("Page.getFrameTree", {});
-    const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
-      frameId: frameTree.frame.id,
-      worldName: "vdp-isolated",
+    const probe = await cdp.send("Runtime.evaluate", {
+      expression: `typeof window.__vdpBridgeData !== "undefined"`,
+      returnByValue: true,
     });
+    let mode = probe.result.value ? "extension" : "emulated";
 
-    // A CDP isolated world has no chrome.* APIs; a real content script
-    // does. Stub only what content.js touches so the script under test
-    // runs unmodified.
-    await cdp.send("Runtime.evaluate", {
-      contextId: executionContextId,
-      expression: `globalThis.chrome = { storage: { local: { set() {} } }, runtime: { onMessage: { addListener() {} } } };`,
-    });
+    if (mode === "emulated") {
+      // Branded Chrome ignored --load-extension. Reproduce by hand what
+      // the manifest declares, and say so in the report — this path does
+      // NOT verify manifest.json itself.
+      await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: readScript("page-bridge.js") });
+      const reloaded = cdp.once("Page.loadEventFired");
+      await cdp.send("Page.reload", {});
+      await reloaded;
+      await sleep(3000);
 
-    for (const file of ["extract.js", "content.js"]) {
-      const out = await cdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
-      if (out.exceptionDetails) {
-        return { url, ok: false, failures: [`${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}`] };
+      const { frameTree } = await cdp.send("Page.getFrameTree", {});
+      const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+        frameId: frameTree.frame.id,
+        worldName: "vdp-isolated",
+      });
+
+      // A CDP isolated world has no chrome.* APIs; a real content script
+      // does. Stub only what content.js touches so the script under test
+      // runs unmodified.
+      await cdp.send("Runtime.evaluate", {
+        contextId: executionContextId,
+        expression: `globalThis.chrome = { storage: { local: { set() {} } }, runtime: { onMessage: { addListener() {} } } };`,
+      });
+
+      for (const file of ["extract.js", "content.js"]) {
+        const out = await cdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
+        if (out.exceptionDetails) {
+          return { url, ok: false, mode, failures: [`${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}`] };
+        }
       }
     }
 
@@ -315,7 +357,7 @@ async function checkListing(port, url, settleMs) {
     else if (main.bridgeItems === 0) failures.push("page-bridge produced a payload but extracted 0 Apollo items");
     if (main.policyLeaked) failures.push("isolated-world state leaked into MAIN (world boundary broken)");
 
-    return { url, ok: failures.length === 0, failures, panel, main };
+    return { url, ok: failures.length === 0, mode, failures, panel, main };
   } catch (e) {
     return { url, ok: false, failures: [String(e.message || e)] };
   } finally {
@@ -346,6 +388,18 @@ function report(results) {
     }
     console.log(`     ${r.panel.badge}`);
     console.log(`     bridge: ${r.main.bridgeItems} items | isolation intact: ${!r.main.policyLeaked}`);
+  }
+
+  const modes = new Set(results.map((r) => r.mode).filter(Boolean));
+  if (modes.has("extension")) {
+    console.log(`\nLoaded from manifest.json (real unpacked load) — script order, "world": "MAIN" and host matching all exercised.`);
+  }
+  if (modes.has("emulated")) {
+    console.log(
+      `\nThis browser ignored --load-extension, so the content scripts were injected by hand.\n` +
+        `manifest.json itself is NOT covered by that path. For a real load:\n` +
+        `  npx @puppeteer/browsers install chrome@stable   (then re-run, or set CHROME_BIN)`
+    );
   }
 
   const failed = results.filter((r) => !r.ok);

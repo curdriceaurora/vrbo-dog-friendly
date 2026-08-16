@@ -128,18 +128,32 @@ stayed out of the MAIN world. A rendered panel on its own proves little:
 the DOM fallback can paint a convincing one while the bridge is entirely
 broken.
 
-**It is not a real extension load.** Branded Google Chrome stopped
-honouring `--load-extension` in 137 (measured here on Chrome 151, where
-`--enable-unsafe-extension-debugging` does not restore it). That removal
-is specific to branded Chrome — Chromium and Chrome for Testing still
-support the switch for exactly this purpose — so a real unpacked load is
-achievable on those binaries; this script just doesn't do it yet.
-What it does instead is reproduce by hand what the manifest declares:
-`page-bridge.js` into the MAIN world at document_start, `extract.js` and
-`content.js` into a real isolated world. That covers the scripts, the
-cross-world bridge and real listing data, but *not* `manifest.json`
-itself — script order, `"world": "MAIN"`, host matching. Verify those by
-loading unpacked at `chrome://extensions`.
+### Two modes, and why it matters which one you got
+
+The harness always passes `--load-extension` and then probes the page to
+see whether it took. It reports which mode ran, and they are not
+equivalent:
+
+**Real load** — the extension is loaded from `manifest.json` and nothing
+is injected. This is the only mode that exercises the manifest itself:
+content-script order, `"world": "MAIN"`, and host matching. Branded
+Google Chrome stopped honouring `--load-extension` in 137 (measured on
+Chrome 151, where `--enable-unsafe-extension-debugging` does not restore
+it), but that removal is specific to branded Chrome. Chromium and Chrome
+for Testing still support the switch for exactly this purpose:
+
+```
+npx @puppeteer/browsers install chrome@stable
+```
+
+The harness prefers such a binary automatically, or set `CHROME_BIN`.
+
+**Emulated fallback** — on branded Chrome, the scripts are injected by
+hand: `page-bridge.js` into the MAIN world at document_start,
+`extract.js` and `content.js` into a real isolated world. That still
+covers the scripts, the cross-world bridge and real listing data, but
+**not `manifest.json`** — a manifest typo cannot fail this mode. The run
+says so explicitly when it happens.
 
 ## Known limitations
 
