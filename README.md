@@ -89,7 +89,9 @@ produced the result ("listing data" vs. "visible page text only").
   content script hasn't responded yet)
 - `icons/` — extension icons
 - `test/extract.test.js` — fixture tests for the parsing layer
-- `test/live-listings.txt` — real listing URLs for manual verification
+- `tools/live-listings.txt` — real listing URLs for manual verification
+- `tools/live-check.js` — drives those listings in Chrome over the
+  DevTools protocol and reports the panel each one renders
 
 ## Tests
 
@@ -98,14 +100,87 @@ node --test
 ```
 
 No dependencies and no build step — Node's built-in runner against
-`extract.js`. `test/live-listings.txt` holds real listing URLs for
-manual end-to-end checks; it is not touched by `node --test`, which
-stays offline and deterministic. The fixtures are phrased the way hosts actually write these
-rules, and exist mainly to pin down the ambiguous cases: conditional
-restrictions that read like bans ("no pets over 30 lbs"), "no pet fee"
-(dog-friendly) versus "no pets" (not), and the same weight limit restated
-in a second unit, which must not be reported as the listing contradicting
-itself.
+`extract.js`. Offline, deterministic, and safe to run anywhere: it needs
+neither Chrome nor a network. (The live harness deliberately lives in
+`tools/`, not `test/`, because `node --test` treats *every* `.js` file
+under a `test/` directory as a test file.)
+
+The fixtures are phrased the way hosts actually write these rules, and
+exist mainly to pin down the ambiguous cases: conditional restrictions
+that read like bans ("no pets over 30 lbs"), "no pet fee" (dog-friendly)
+versus "no pets" (not), and the same weight limit restated in a second
+unit, which must not be reported as the listing contradicting itself.
+
+## Checking against real listings
+
+```
+node tools/live-check.js
+```
+
+Samples 5 URLs from `tools/live-listings.txt` (`--all`, `--sample N`, or
+specific listing ids also work), drives them in Chrome, and prints the
+panel each one produced. Needs Node 22+ and Chrome, and opens a visible
+window — Vrbo serves less to headless.
+
+A listing only passes if the panel rendered *and* `page-bridge.js` ran in
+the MAIN world with a non-empty Apollo payload *and* isolated-world state
+stayed out of the MAIN world. A rendered panel on its own proves little:
+the DOM fallback can paint a convincing one while the bridge is entirely
+broken.
+
+**Vrbo rate-limits this.** After roughly twenty listings in quick
+succession it starts serving an interstitial bot challenge ("Bot or
+Not?") instead of the listing, and the block then persists for a while
+across the whole IP, not just the offending browser profile. That page
+has no `PropertyInfo` in its Apollo state, so the bridge legitimately
+produces nothing — which looks exactly like a regression if you aren't
+told. The harness detects the challenge and reports those listings as
+`BLOCKED … inconclusive` rather than failed, and exits **2**:
+
+| exit | meaning |
+|---|---|
+| 0 | every listing passed |
+| 1 | a genuine extension failure, including a manifest that would not load |
+| 2 | inconclusive — a bot challenge, or a URL that served no listing data |
+
+The two inconclusive causes are reported separately (`BLOCKED` vs
+`NO DATA`), because they call for different responses: wait and retry
+versus check whether the URL is still good.
+
+Runs are paced `--delay` ms apart (default 4000) for the same reason.
+Work in small batches, and re-run blocked listings later rather than
+retrying immediately.
+
+### Two modes, and why it matters which one you got
+
+The harness always passes `--load-extension` and then probes the page to
+see whether it took. It reports which mode ran, and they are not
+equivalent:
+
+**Real load** — the extension is loaded from `manifest.json` and nothing
+is injected. This is the only mode that exercises the manifest itself:
+content-script order, `"world": "MAIN"`, and host matching. Branded
+Google Chrome stopped honouring `--load-extension` in 137 (measured on
+Chrome 151, where `--enable-unsafe-extension-debugging` does not restore
+it), but that removal is specific to branded Chrome. Chromium and Chrome
+for Testing still support the switch for exactly this purpose:
+
+```
+npx @puppeteer/browsers install chrome@stable --path "$HOME/.cache/puppeteer"
+```
+
+`--path` is required. Without it the CLI installs into the *current
+directory*, which is not the location the harness searches, so the new
+browser goes undiscovered and runs silently fall back to branded Chrome
+and the emulated path. The harness picks up anything in that cache
+automatically, or set `CHROME_BIN` to a binary of your choice.
+
+**Emulated fallback** — on branded Chrome, the scripts are injected by
+hand: `page-bridge.js` into the MAIN world at document_start,
+`extract.js` and `content.js` into a real isolated world. That still
+covers the scripts, the cross-world bridge and real listing data, but
+**not `manifest.json`** — a manifest typo cannot fail this mode. The run
+says so explicitly when it happens.
 
 ## Known limitations
 
