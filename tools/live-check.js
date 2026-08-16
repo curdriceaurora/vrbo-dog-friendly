@@ -14,26 +14,28 @@
 // it there silently enrolled a slow, network-dependent, Chrome-dependent
 // script into the offline suite.
 //
-// WHAT THIS IS NOT: a real extension load. Branded Google Chrome stopped
-// honouring --load-extension in 137 (measured here on Chrome 151, where
-// --enable-unsafe-extension-debugging does not bring it back). That
-// removal is specific to branded Chrome: Chromium and Chrome for Testing
-// still support the switch precisely so automation can use it, so a real
-// unpacked load IS achievable on those binaries — it just isn't what this
-// script does today. Instead this reproduces what the manifest declares,
-// by hand, over the DevTools protocol:
+// TWO MODES, and the run tells you which one you got:
 //
-//   page-bridge.js  -> MAIN world, document_start   (addScriptToEvaluateOnNewDocument + reload)
-//   extract.js      -> isolated world               (Page.createIsolatedWorld)
-//   content.js      -> isolated world, after load
+//   "extension" — --load-extension took, so the extension is loaded from
+//     manifest.json and NOTHING is injected. Only this mode exercises the
+//     manifest itself: content-script order, "world": "MAIN", host
+//     matching. Branded Chrome stopped honouring the switch in 137
+//     (measured on Chrome 151; --enable-unsafe-extension-debugging does
+//     not restore it), but Chromium and Chrome for Testing still do, and
+//     those are preferred when present.
 //
-// So it exercises the real scripts, the real cross-world event bridge and
-// real listing data, but it does NOT verify manifest.json itself — script
-// order, "world": "MAIN", or host matching. A green run here does not
-// prove the extension loads correctly in Chrome; check that by hand at
-// chrome://extensions.
+//   "emulated" — the browser ignored the switch, so the scripts are
+//     injected by hand over CDP: page-bridge.js into MAIN at
+//     document_start, extract.js and content.js into a real isolated
+//     world. Exercises the scripts, the cross-world bridge and real
+//     listing data, but a manifest typo CANNOT fail this mode.
 //
-// Requires Node 22+ (global fetch and WebSocket) and Google Chrome.
+// Exit codes: 0 all passed, 1 a genuine failure, 2 inconclusive because
+// Vrbo served its bot challenge. Note the third one — Vrbo starts
+// challenging after roughly twenty listings in quick succession, and a
+// challenge page must never be reported as a code regression.
+//
+// Requires Node 22+ (global fetch and WebSocket) and a Chrome binary.
 // Chrome opens a visible window: Vrbo serves fewer listings to headless.
 
 const fs = require("fs");
@@ -44,6 +46,7 @@ const { spawn } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const LISTINGS = path.join(__dirname, "live-listings.txt");
 const DEFAULT_SAMPLE = 5;
+let DELAY_MS = 4000; // pause between listings; Vrbo challenges rapid sequential loads
 
 // Chrome for Testing and Chromium first: they still honour
 // --load-extension, which lets this actually load the extension from
@@ -83,7 +86,7 @@ function positiveInt(raw, flag) {
 }
 
 function parseArgs(argv) {
-  const opts = { sample: DEFAULT_SAMPLE, all: false, attach: false, port: 9222, json: false, targets: [] };
+  const opts = { sample: DEFAULT_SAMPLE, all: false, attach: false, port: 9222, json: false, delay: DELAY_MS, targets: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--all") opts.all = true;
@@ -91,6 +94,7 @@ function parseArgs(argv) {
     else if (a === "--json") opts.json = true;
     else if (a === "--sample") opts.sample = positiveInt(argv[++i], "--sample");
     else if (a === "--port") opts.port = positiveInt(argv[++i], "--port");
+    else if (a === "--delay") opts.delay = positiveInt(argv[++i], "--delay");
     else if (a.startsWith("--")) throw new Error(`unknown flag ${a}`);
     else opts.targets.push(a);
   }
@@ -298,6 +302,26 @@ async function checkListing(port, url, settleMs) {
     await loaded;
     await sleep(3000); // Apollo cache populates asynchronously after mount
 
+    // Vrbo serves an interstitial bot challenge ("Bot or Not?") once it
+    // decides the traffic is automated — reliably, after roughly twenty
+    // listings in quick succession. That page carries an __APOLLO_STATE__
+    // with no PropertyInfo in it, so the bridge correctly produces
+    // nothing, and reporting that as a bridge fault sends whoever reads
+    // it hunting a regression that does not exist. Detect and label it.
+    const stateRes = await cdp.send("Runtime.evaluate", {
+      returnByValue: true,
+      expression: `JSON.stringify({
+        title: document.title.slice(0, 120),
+        bodyLen: document.body ? document.body.innerText.length : 0,
+        hasPropertyInfo: !!(window.__APOLLO_STATE__ && Object.keys(window.__APOLLO_STATE__).some((k) => k.startsWith("PropertyInfo:")))
+      })`,
+    });
+    const state = JSON.parse(stateRes.result.value);
+    const CHALLENGE_RE = /bot or not|human side|are you a human|unusual traffic|access denied|captcha/i;
+    if (CHALLENGE_RE.test(state.title) || (!state.hasPropertyInfo && state.bodyLen < 400)) {
+      return { url, ok: false, blocked: true, state };
+    }
+
     const probe = await cdp.send("Runtime.evaluate", {
       expression: `typeof window.__vdpBridgeData !== "undefined"`,
       returnByValue: true,
@@ -372,6 +396,10 @@ function report(results) {
   for (const r of results) {
     const id = r.url.replace(/^https:\/\/www\.vrbo\.com\//, "");
     console.log(`\n── ${id} ${"─".repeat(Math.max(0, 40 - id.length))}`);
+    if (r.blocked) {
+      console.log(`   BLOCKED  Vrbo served a bot challenge ("${r.state.title}") — inconclusive, not an extension failure`);
+      continue;
+    }
     if (!r.ok) {
       for (const f of r.failures || [r.error || "unknown failure"]) console.log(`   FAIL  ${f}`);
       if (r.panel?.rendered) console.log(`   (a panel did render: ${r.panel.headline})`);
@@ -402,12 +430,24 @@ function report(results) {
     );
   }
 
-  const failed = results.filter((r) => !r.ok);
+  const blocked = results.filter((r) => r.blocked);
+  const failed = results.filter((r) => !r.ok && !r.blocked);
+  const passed = results.filter((r) => r.ok);
+
   // "passed" not "rendered": passing also requires a live bridge and an
   // intact world boundary, not just a panel on screen.
-  console.log(`\n${results.length - failed.length}/${results.length} listings passed.`);
+  console.log(`\n${passed.length}/${results.length} listings passed.`);
   if (failed.length) console.log(`Failed: ${failed.map((f) => f.url).join(", ")}`);
-  return failed.length === 0;
+  if (blocked.length) {
+    console.log(
+      `Blocked by bot challenge (inconclusive, says nothing about the extension): ${blocked.length}\n` +
+        `  ${blocked.map((b) => b.url).join("\n  ")}\n` +
+        `Vrbo starts challenging after roughly twenty listings in quick succession, and the\n` +
+        `block persists for a while. Re-run the blocked ones later, in smaller batches, or\n` +
+        `raise --delay (currently ${DELAY_MS}ms between listings).`
+    );
+  }
+  return { allOk: failed.length === 0 && blocked.length === 0, hardFailure: failed.length > 0 };
 }
 
 // ---------- main ----------
@@ -435,22 +475,26 @@ function report(results) {
     await waitForPort(opts.port, 20000);
   }
 
+  DELAY_MS = opts.delay;
   const results = [];
-  for (const url of urls) {
+  for (const [i, url] of urls.entries()) {
+    if (i > 0) await sleep(opts.delay); // pace, so we don't provoke the challenge
     if (!opts.json) process.stderr.write(`checking ${url} …\n`);
     results.push(await checkListing(opts.port, url, 8000));
   }
 
-  let allOk;
+  let verdict;
   if (opts.json) {
     console.log(JSON.stringify(results, null, 2));
-    allOk = results.every((r) => r.ok);
+    verdict = { allOk: results.every((r) => r.ok), hardFailure: results.some((r) => !r.ok && !r.blocked) };
   } else {
-    allOk = report(results);
+    verdict = report(results);
   }
 
   stopChrome();
-  process.exit(allOk ? 0 : 1);
+  // 0 = all good, 1 = a genuine extension failure, 2 = inconclusive
+  // (blocked). A bot challenge must not read as a code regression.
+  process.exit(verdict.allOk ? 0 : verdict.hardFailure ? 1 : 2);
 })().catch((e) => {
   stopChrome();
   console.error("live-check failed:", e.message || e);

@@ -128,6 +128,25 @@ stayed out of the MAIN world. A rendered panel on its own proves little:
 the DOM fallback can paint a convincing one while the bridge is entirely
 broken.
 
+**Vrbo rate-limits this.** After roughly twenty listings in quick
+succession it starts serving an interstitial bot challenge ("Bot or
+Not?") instead of the listing, and the block then persists for a while
+across the whole IP, not just the offending browser profile. That page
+has no `PropertyInfo` in its Apollo state, so the bridge legitimately
+produces nothing — which looks exactly like a regression if you aren't
+told. The harness detects the challenge and reports those listings as
+`BLOCKED … inconclusive` rather than failed, and exits **2**:
+
+| exit | meaning |
+|---|---|
+| 0 | every listing passed |
+| 1 | a genuine extension failure |
+| 2 | inconclusive — at least one listing was blocked |
+
+Runs are paced `--delay` ms apart (default 4000) for the same reason.
+Work in small batches, and re-run blocked listings later rather than
+retrying immediately.
+
 ### Two modes, and why it matters which one you got
 
 The harness always passes `--load-extension` and then probes the page to
