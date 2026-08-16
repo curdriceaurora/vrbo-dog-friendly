@@ -404,6 +404,9 @@ async function checkListing(port, url, settleMs) {
   const cdp = connect(tab.webSocketDebuggerUrl);
   await cdp.ready;
 
+  // Declared out here so the catch below can still report it.
+  let mode = null;
+
   try {
     await cdp.send("Page.enable", {});
     await cdp.send("Runtime.enable", {});
@@ -446,7 +449,7 @@ async function checkListing(port, url, settleMs) {
       };
     }
 
-    let mode = bridge ? "extension" : "emulated";
+    mode = bridge ? "extension" : "emulated";
 
     if (mode === "emulated") {
       // Browser ignored --load-extension (no canary either). Reproduce by
@@ -507,7 +510,12 @@ async function checkListing(port, url, settleMs) {
 
     return { url, ok: failures.length === 0, mode, failures, panel, main };
   } catch (e) {
-    return { url, ok: false, failures: [String(e.message || e)] };
+    // Carry the mode out with the exception. A CDP timeout, navigation
+    // race or evaluation error after mode detection is still a result
+    // whose interpretation depends on how the run was performed, and
+    // scoping `mode` inside the try silently dropped that context.
+    // Stays null when we failed before detection — unknown, not assumed.
+    return { url, ok: false, mode, failures: [String(e.message || e)] };
   } finally {
     cdp.close();
     await fetch(`http://127.0.0.1:${port}/json/close/${tab.id}`).catch(() => {});
