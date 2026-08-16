@@ -89,8 +89,8 @@ produced the result ("listing data" vs. "visible page text only").
   content script hasn't responded yet)
 - `icons/` — extension icons
 - `test/extract.test.js` — fixture tests for the parsing layer
-- `test/live-listings.txt` — real listing URLs for manual verification
-- `test/live-check.js` — drives those listings in Chrome over the
+- `tools/live-listings.txt` — real listing URLs for manual verification
+- `tools/live-check.js` — drives those listings in Chrome over the
   DevTools protocol and reports the panel each one renders
 
 ## Tests
@@ -100,33 +100,46 @@ node --test
 ```
 
 No dependencies and no build step — Node's built-in runner against
-`extract.js`. This suite is offline and deterministic.
+`extract.js`. Offline, deterministic, and safe to run anywhere: it needs
+neither Chrome nor a network. (The live harness deliberately lives in
+`tools/`, not `test/`, because `node --test` treats *every* `.js` file
+under a `test/` directory as a test file.)
 
-For an end-to-end check against real listings:
+The fixtures are phrased the way hosts actually write these rules, and
+exist mainly to pin down the ambiguous cases: conditional restrictions
+that read like bans ("no pets over 30 lbs"), "no pet fee" (dog-friendly)
+versus "no pets" (not), and the same weight limit restated in a second
+unit, which must not be reported as the listing contradicting itself.
+
+## Checking against real listings
 
 ```
-node test/live-check.js
+node tools/live-check.js
 ```
 
-That samples 5 URLs from `test/live-listings.txt` (`--all`, `--sample N`,
-or specific listing ids also work), drives them in Chrome, and prints
-the panel each one produced. Exits non-zero if any listing fails to
-render. Needs Node 22+ and Chrome, and opens a visible window — Vrbo
-serves less to headless.
+Samples 5 URLs from `tools/live-listings.txt` (`--all`, `--sample N`, or
+specific listing ids also work), drives them in Chrome, and prints the
+panel each one produced. Needs Node 22+ and Chrome, and opens a visible
+window — Vrbo serves less to headless.
 
-**It is not a real extension load.** Chrome 137+ ignores the
-`--load-extension` switch and there is no supported way to script an
-unpacked install, so `live-check.js` reproduces by hand what the
-manifest declares: `page-bridge.js` into the MAIN world at
-document_start, `extract.js` and `content.js` into a real isolated
-world. That covers the scripts, the cross-world bridge and real listing
-data, but *not* `manifest.json` itself — script order, `"world": "MAIN"`,
-host matching. Verify those by loading unpacked at `chrome://extensions`. The fixtures are phrased the way hosts actually write these
-rules, and exist mainly to pin down the ambiguous cases: conditional
-restrictions that read like bans ("no pets over 30 lbs"), "no pet fee"
-(dog-friendly) versus "no pets" (not), and the same weight limit restated
-in a second unit, which must not be reported as the listing contradicting
-itself.
+A listing only passes if the panel rendered *and* `page-bridge.js` ran in
+the MAIN world with a non-empty Apollo payload *and* isolated-world state
+stayed out of the MAIN world. A rendered panel on its own proves little:
+the DOM fallback can paint a convincing one while the bridge is entirely
+broken.
+
+**It is not a real extension load.** Branded Google Chrome stopped
+honouring `--load-extension` in 137 (measured here on Chrome 151, where
+`--enable-unsafe-extension-debugging` does not restore it). That removal
+is specific to branded Chrome — Chromium and Chrome for Testing still
+support the switch for exactly this purpose — so a real unpacked load is
+achievable on those binaries; this script just doesn't do it yet.
+What it does instead is reproduce by hand what the manifest declares:
+`page-bridge.js` into the MAIN world at document_start, `extract.js` and
+`content.js` into a real isolated world. That covers the scripts, the
+cross-world bridge and real listing data, but *not* `manifest.json`
+itself — script order, `"world": "MAIN"`, host matching. Verify those by
+loading unpacked at `chrome://extensions`.
 
 ## Known limitations
 

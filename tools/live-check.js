@@ -2,18 +2,26 @@
 //
 // End-to-end check against real Vrbo listings.
 //
-//   node test/live-check.js                 # 5 random listings
-//   node test/live-check.js --all           # every URL in live-listings.txt
-//   node test/live-check.js --sample 3
-//   node test/live-check.js 3550839 5316114 # specific ids (or full URLs)
-//   node test/live-check.js --attach        # use a Chrome already on --port
-//   node test/live-check.js --json          # machine-readable output
+//   node tools/live-check.js                 # 5 random listings
+//   node tools/live-check.js --all           # every URL in live-listings.txt
+//   node tools/live-check.js --sample 3
+//   node tools/live-check.js 3550839 5316114 # specific ids (or full URLs)
+//   node tools/live-check.js --attach        # use a Chrome already on --port
+//   node tools/live-check.js --json          # machine-readable output
 //
-// WHAT THIS IS NOT: a real extension load. Chrome 137+ ignores the
-// --load-extension switch, and --enable-unsafe-extension-debugging does
-// not bring it back (verified on Chrome 151), so there is no supported
-// way to script an unpacked install. Instead this reproduces what the
-// manifest declares, by hand, over the DevTools protocol:
+// This lives in tools/ rather than test/ on purpose: `node --test` treats
+// EVERY .js file under a directory named test/ as a test file, so parking
+// it there silently enrolled a slow, network-dependent, Chrome-dependent
+// script into the offline suite.
+//
+// WHAT THIS IS NOT: a real extension load. Branded Google Chrome stopped
+// honouring --load-extension in 137 (measured here on Chrome 151, where
+// --enable-unsafe-extension-debugging does not bring it back). That
+// removal is specific to branded Chrome: Chromium and Chrome for Testing
+// still support the switch precisely so automation can use it, so a real
+// unpacked load IS achievable on those binaries — it just isn't what this
+// script does today. Instead this reproduces what the manifest declares,
+// by hand, over the DevTools protocol:
 //
 //   page-bridge.js  -> MAIN world, document_start   (addScriptToEvaluateOnNewDocument + reload)
 //   extract.js      -> isolated world               (Page.createIsolatedWorld)
@@ -46,6 +54,15 @@ const CHROME_CANDIDATES = [
 
 // ---------- args ----------
 
+function positiveInt(raw, flag) {
+  // parseInt("nope") is NaN and parseInt("0"|"-2") is falsy/negative; any
+  // of those used to yield an empty selection, which then "passed".
+  if (!/^\d+$/.test(String(raw ?? "").trim())) throw new Error(`${flag} needs a positive integer, got ${JSON.stringify(raw)}`);
+  const n = Number(raw);
+  if (n < 1) throw new Error(`${flag} needs a positive integer, got ${n}`);
+  return n;
+}
+
 function parseArgs(argv) {
   const opts = { sample: DEFAULT_SAMPLE, all: false, attach: false, port: 9222, json: false, targets: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -53,8 +70,8 @@ function parseArgs(argv) {
     if (a === "--all") opts.all = true;
     else if (a === "--attach") opts.attach = true;
     else if (a === "--json") opts.json = true;
-    else if (a === "--sample") opts.sample = parseInt(argv[++i], 10);
-    else if (a === "--port") opts.port = parseInt(argv[++i], 10);
+    else if (a === "--sample") opts.sample = positiveInt(argv[++i], "--sample");
+    else if (a === "--port") opts.port = positiveInt(argv[++i], "--port");
     else if (a.startsWith("--")) throw new Error(`unknown flag ${a}`);
     else opts.targets.push(a);
   }
@@ -71,6 +88,9 @@ function readListings() {
 
 function chooseUrls(opts) {
   const all = readListings();
+  // An empty corpus must be an error, not a vacuous pass: every downstream
+  // check is an .every() over the results, which is true for zero results.
+  if (!all.length) throw new Error(`${path.basename(LISTINGS)} contains no listing URLs.`);
   if (opts.targets.length) {
     return opts.targets.map((t) => {
       if (/^https?:\/\//.test(t)) return t;
@@ -270,7 +290,7 @@ async function checkListing(port, url, settleMs) {
     for (const file of ["extract.js", "content.js"]) {
       const out = await cdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
       if (out.exceptionDetails) {
-        return { url, ok: false, error: `${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}` };
+        return { url, ok: false, failures: [`${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}`] };
       }
     }
 
@@ -285,9 +305,19 @@ async function checkListing(port, url, settleMs) {
     });
     const main = JSON.parse(mainRes.result.value);
 
-    return { url, ok: panel.rendered, panel, main };
+    // A rendered panel alone is far too weak. The DOM fallback can paint a
+    // perfectly good panel from visible page text while the MAIN-world
+    // bridge is completely broken — which is the single property this
+    // harness exists to cover, so it must be asserted, not merely printed.
+    const failures = [];
+    if (!panel.rendered) failures.push("panel did not render");
+    if (!main.bridgeRan) failures.push("page-bridge produced no payload in the MAIN world (no __APOLLO_STATE__, or it never ran)");
+    else if (main.bridgeItems === 0) failures.push("page-bridge produced a payload but extracted 0 Apollo items");
+    if (main.policyLeaked) failures.push("isolated-world state leaked into MAIN (world boundary broken)");
+
+    return { url, ok: failures.length === 0, failures, panel, main };
   } catch (e) {
-    return { url, ok: false, error: String(e.message || e) };
+    return { url, ok: false, failures: [String(e.message || e)] };
   } finally {
     cdp.close();
     await fetch(`http://127.0.0.1:${port}/json/close/${tab.id}`).catch(() => {});
@@ -301,8 +331,8 @@ function report(results) {
     const id = r.url.replace(/^https:\/\/www\.vrbo\.com\//, "");
     console.log(`\n── ${id} ${"─".repeat(Math.max(0, 40 - id.length))}`);
     if (!r.ok) {
-      console.log(`   FAIL  ${r.error || "panel did not render"}`);
-      if (r.main) console.log(`         bridge ran: ${r.main.bridgeRan} (${r.main.bridgeItems} items)`);
+      for (const f of r.failures || [r.error || "unknown failure"]) console.log(`   FAIL  ${f}`);
+      if (r.panel?.rendered) console.log(`   (a panel did render: ${r.panel.headline})`);
       continue;
     }
     console.log(`   ${r.panel.headline}`);
@@ -319,7 +349,9 @@ function report(results) {
   }
 
   const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length}/${results.length} listings rendered a panel.`);
+  // "passed" not "rendered": passing also requires a live bridge and an
+  // intact world boundary, not just a panel on screen.
+  console.log(`\n${results.length - failed.length}/${results.length} listings passed.`);
   if (failed.length) console.log(`Failed: ${failed.map((f) => f.url).join(", ")}`);
   return failed.length === 0;
 }
