@@ -1,0 +1,47 @@
+# Live Vrbo listings used for manual end-to-end verification.
+#
+# These are NOT used by `node --test` — that suite is offline and runs
+# against fixtures. This list is the corpus for checking the extension
+# against real pages, where the failures are different in kind: lazy-
+# mounted sections, <br>-delimited description HTML, and page chrome
+# that reads as pet-related.
+#
+# Canonical URLs only. The originals carried query strings with travel
+# dates, guest counts and search context; none of that is needed to load
+# a listing, so it is deliberately stripped.
+#
+# Route shapes vary on purpose (/<id>, /<id>ha, /pdp/lo/<id>) since the
+# manifest matches all of www.vrbo.com.
+#
+# One URL per line; blank lines and # comments ignored.
+https://www.vrbo.com/1245792
+https://www.vrbo.com/1779556
+https://www.vrbo.com/2328142
+https://www.vrbo.com/2488800
+https://www.vrbo.com/2755283
+https://www.vrbo.com/2847771
+https://www.vrbo.com/3107598
+https://www.vrbo.com/3261567
+https://www.vrbo.com/3550839
+https://www.vrbo.com/3681637
+https://www.vrbo.com/3893563
+https://www.vrbo.com/4170033
+https://www.vrbo.com/4463133
+https://www.vrbo.com/4506368
+https://www.vrbo.com/4712045
+https://www.vrbo.com/4747066
+https://www.vrbo.com/4750934
+https://www.vrbo.com/4946576
+https://www.vrbo.com/5010990
+https://www.vrbo.com/5026628
+https://www.vrbo.com/5092427
+https://www.vrbo.com/5122540
+https://www.vrbo.com/5123742
+https://www.vrbo.com/5125095
+https://www.vrbo.com/5125460
+https://www.vrbo.com/5125917
+https://www.vrbo.com/5316114
+https://www.vrbo.com/5327349
+https://www.vrbo.com/5395097
+https://www.vrbo.com/9623963ha
+https://www.vrbo.com/pdp/lo/114888296

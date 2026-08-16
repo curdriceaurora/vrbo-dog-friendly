@@ -89,6 +89,7 @@ produced the result ("listing data" vs. "visible page text only").
   content script hasn't responded yet)
 - `icons/` — extension icons
 - `test/extract.test.js` — fixture tests for the parsing layer
+- `test/live-listings.txt` — real listing URLs for manual verification
 
 ## Tests
 
@@ -97,7 +98,9 @@ node --test
 ```
 
 No dependencies and no build step — Node's built-in runner against
-`extract.js`. The fixtures are phrased the way hosts actually write these
+`extract.js`. `test/live-listings.txt` holds real listing URLs for
+manual end-to-end checks; it is not touched by `node --test`, which
+stays offline and deterministic. The fixtures are phrased the way hosts actually write these
 rules, and exist mainly to pin down the ambiguous cases: conditional
 restrictions that read like bans ("no pets over 30 lbs"), "no pet fee"
 (dog-friendly) versus "no pets" (not), and the same weight limit restated
