@@ -90,6 +90,8 @@ produced the result ("listing data" vs. "visible page text only").
 - `icons/` — extension icons
 - `test/extract.test.js` — fixture tests for the parsing layer
 - `test/live-listings.txt` — real listing URLs for manual verification
+- `test/live-check.js` — drives those listings in Chrome over the
+  DevTools protocol and reports the panel each one renders
 
 ## Tests
 
@@ -98,9 +100,28 @@ node --test
 ```
 
 No dependencies and no build step — Node's built-in runner against
-`extract.js`. `test/live-listings.txt` holds real listing URLs for
-manual end-to-end checks; it is not touched by `node --test`, which
-stays offline and deterministic. The fixtures are phrased the way hosts actually write these
+`extract.js`. This suite is offline and deterministic.
+
+For an end-to-end check against real listings:
+
+```
+node test/live-check.js
+```
+
+That samples 5 URLs from `test/live-listings.txt` (`--all`, `--sample N`,
+or specific listing ids also work), drives them in Chrome, and prints
+the panel each one produced. Exits non-zero if any listing fails to
+render. Needs Node 22+ and Chrome, and opens a visible window — Vrbo
+serves less to headless.
+
+**It is not a real extension load.** Chrome 137+ ignores the
+`--load-extension` switch and there is no supported way to script an
+unpacked install, so `live-check.js` reproduces by hand what the
+manifest declares: `page-bridge.js` into the MAIN world at
+document_start, `extract.js` and `content.js` into a real isolated
+world. That covers the scripts, the cross-world bridge and real listing
+data, but *not* `manifest.json` itself — script order, `"world": "MAIN"`,
+host matching. Verify those by loading unpacked at `chrome://extensions`. The fixtures are phrased the way hosts actually write these
 rules, and exist mainly to pin down the ambiguous cases: conditional
 restrictions that read like bans ("no pets over 30 lbs"), "no pet fee"
 (dog-friendly) versus "no pets" (not), and the same weight limit restated
