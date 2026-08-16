@@ -140,8 +140,12 @@ told. The harness detects the challenge and reports those listings as
 | exit | meaning |
 |---|---|
 | 0 | every listing passed |
-| 1 | a genuine extension failure |
-| 2 | inconclusive — at least one listing was blocked |
+| 1 | a genuine extension failure, including a manifest that would not load |
+| 2 | inconclusive — a bot challenge, or a URL that served no listing data |
+
+The two inconclusive causes are reported separately (`BLOCKED` vs
+`NO DATA`), because they call for different responses: wait and retry
+versus check whether the URL is still good.
 
 Runs are paced `--delay` ms apart (default 4000) for the same reason.
 Work in small batches, and re-run blocked listings later rather than
@@ -162,10 +166,14 @@ it), but that removal is specific to branded Chrome. Chromium and Chrome
 for Testing still support the switch for exactly this purpose:
 
 ```
-npx @puppeteer/browsers install chrome@stable
+npx @puppeteer/browsers install chrome@stable --path "$HOME/.cache/puppeteer"
 ```
 
-The harness prefers such a binary automatically, or set `CHROME_BIN`.
+`--path` is required. Without it the CLI installs into the *current
+directory*, which is not the location the harness searches, so the new
+browser goes undiscovered and runs silently fall back to branded Chrome
+and the emulated path. The harness picks up anything in that cache
+automatically, or set `CHROME_BIN` to a binary of your choice.
 
 **Emulated fallback** — on branded Chrome, the scripts are injected by
 hand: `page-bridge.js` into the MAIN world at document_start,

@@ -30,10 +30,12 @@
 //     world. Exercises the scripts, the cross-world bridge and real
 //     listing data, but a manifest typo CANNOT fail this mode.
 //
-// Exit codes: 0 all passed, 1 a genuine failure, 2 inconclusive (the site
-// served a bot challenge, or the URL served no listing data at all).
-// Neither inconclusive case is a code regression, and neither may be
-// reported as one.
+// Exit codes:
+//   0  every listing passed
+//   1  a genuine extension failure (including a manifest that would not load)
+//   2  inconclusive — a bot challenge, or a URL that served no listing
+//      data within the Apollo budget. Neither is a code regression and
+//      neither may be reported as one.
 //
 // Requires Node 22+ (global fetch and WebSocket) and a Chrome binary.
 // Chrome opens a visible window: Vrbo serves fewer listings to headless.
@@ -51,7 +53,10 @@ let DELAY_MS = 4000; // pause between listings; Vrbo challenges rapid sequential
 // Chrome for Testing and Chromium first: they still honour
 // --load-extension, which lets this actually load the extension from
 // manifest.json instead of emulating it. Branded Chrome is the fallback.
-// Get one with:  npx @puppeteer/browsers install chrome@stable
+// Get one with:
+//   npx @puppeteer/browsers install chrome@stable --path "$HOME/.cache/puppeteer"
+// The --path matters: without it the CLI installs into the CURRENT
+// directory, which is not searched here.
 const CHROME_CANDIDATES = [
   process.env.CHROME_BIN,
   ...(function cftFromPuppeteerCache() {
@@ -343,6 +348,12 @@ const PANEL_EXPR = `(() => {
 // extension is broken.
 const CHALLENGE_RE = /bot or not|human side|are you a human|unusual traffic|access denied|captcha|verify (you|that you)/i;
 
+// page-bridge.js gives Apollo 31 × 350ms ≈ 10.9s to populate before it
+// stops polling. Anything less here means the harness gives up while the
+// extension under test is still legitimately waiting, and reports a slow
+// listing as though it served no data.
+const APOLLO_BUDGET_MS = 12000;
+
 async function classifyPage(cdp) {
   const res = await cdp.send("Runtime.evaluate", {
     returnByValue: true,
@@ -355,9 +366,27 @@ async function classifyPage(cdp) {
     })`,
   });
   const s = JSON.parse(res.result.value);
+  // Listing data settles it. Checking the challenge wording first meant a
+  // host writing "please verify that you comply with the house rules" got
+  // their perfectly valid listing reported as a bot challenge. A challenge
+  // page has no PropertyInfo, so this ordering costs nothing and stops the
+  // weak body-text markers from overriding hard evidence.
+  if (s.hasPropertyInfo) return { kind: "listing", ...s };
   if (CHALLENGE_RE.test(s.title) || CHALLENGE_RE.test(s.bodyText)) return { kind: "challenge", ...s };
-  if (!s.hasPropertyInfo) return { kind: "no-listing-data", ...s };
-  return { kind: "listing", ...s };
+  return { kind: "no-listing-data", ...s };
+}
+
+// Keep asking until listing data shows up, the page turns out to be a
+// challenge, or we run past what page-bridge itself would wait for. A flat
+// sleep declared slow-but-valid listings dead.
+async function waitForListingData(cdp, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  let state = await classifyPage(cdp);
+  while (state.kind === "no-listing-data" && Date.now() < deadline) {
+    await sleep(500);
+    state = await classifyPage(cdp);
+  }
+  return state;
 }
 
 function pageStateResult(url, state) {
@@ -386,9 +415,8 @@ async function checkListing(port, url, settleMs) {
     const loaded = cdp.once("Page.loadEventFired");
     await cdp.send("Page.navigate", { url });
     await loaded;
-    await sleep(3000); // Apollo cache populates asynchronously after mount
-
-    let state = await classifyPage(cdp);
+    // Apollo populates asynchronously; poll rather than guess a duration.
+    let state = await waitForListingData(cdp, APOLLO_BUDGET_MS);
     if (state.kind !== "listing") return pageStateResult(url, state);
 
     // Two independent signals. The canary is a throwaway extension loaded
@@ -410,7 +438,7 @@ async function checkListing(port, url, settleMs) {
       return {
         url,
         ok: false,
-        mode: "extension",
+        mode: "manifest-failure",
         failures: [
           "extension did not load from manifest.json, though the canary extension loaded on the same page — " +
             "check host matches, \"world\": \"MAIN\", the content_scripts file list, and each script for syntax errors",
@@ -428,12 +456,10 @@ async function checkListing(port, url, settleMs) {
       const reloaded = cdp.once("Page.loadEventFired");
       await cdp.send("Page.reload", {});
       await reloaded;
-      await sleep(3000);
-
       // Re-classify: the reload is a second request, and it can be the one
       // that gets challenged. Checking only before the reload turned that
       // into a bogus hard failure complete with bridge and panel errors.
-      state = await classifyPage(cdp);
+      state = await waitForListingData(cdp, APOLLO_BUDGET_MS);
       if (state.kind !== "listing") return pageStateResult(url, state);
 
       const { frameTree } = await cdp.send("Page.getFrameTree", {});
@@ -522,7 +548,10 @@ function report(results) {
     console.log(`     bridge: ${r.main.bridgeItems} items | isolation intact: ${!r.main.policyLeaked}`);
   }
 
-  const modes = new Set(results.map((r) => r.mode).filter(Boolean));
+  // Only successful runs earn the banner. Deriving it from every result
+  // printed "Loaded from manifest.json ... all exercised" directly beneath
+  // a manifest failure, which is contradictory evidence.
+  const modes = new Set(results.filter((r) => r.ok).map((r) => r.mode).filter(Boolean));
   if (modes.has("extension")) {
     console.log(`\nLoaded from manifest.json (real unpacked load) — script order, "world": "MAIN" and host matching all exercised.`);
   }
@@ -530,7 +559,8 @@ function report(results) {
     console.log(
       `\nThis browser ignored --load-extension, so the content scripts were injected by hand.\n` +
         `manifest.json itself is NOT covered by that path. For a real load:\n` +
-        `  npx @puppeteer/browsers install chrome@stable   (then re-run, or set CHROME_BIN)`
+        `  npx @puppeteer/browsers install chrome@stable --path "$HOME/.cache/puppeteer"\n` +
+        `  (--path is required; without it the browser lands in the current directory and is not found)`
     );
   }
 
