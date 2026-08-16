@@ -13,7 +13,15 @@
   // ---------- shared text helpers ----------
 
   function getSentences(text) {
-    return text
+    return String(text)
+      // Vrbo's "About this property" blob arrives from Apollo as raw HTML
+      // with <br> as its ONLY separator and no newlines at all (measured
+      // live: 1869 chars, 44 <br>, 0 \n). Without this the whole blob is
+      // one "sentence", blows past the 400-char cap below, and is dropped
+      // entirely — and any fragment that did survive carried visible
+      // "<br><br>" into the panel.
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?[a-z][^>]*>/gi, " ")
       .split(/(?<=[.!?])\s+(?=[A-Z0-9])|\n+/)
       .map((s) => s.replace(/\s+/g, " ").trim())
       .filter((s) => s.length > 0 && s.length < 400);
@@ -54,6 +62,11 @@
       for (const it of petItems) {
         const priority = priorityForItem(it);
         const trustWholesale = isDedicatedPetsHeader(it);
+        // Vrbo emits the section label as its own value, so the amenities
+        // "Pets" row yields a literal "Pets" string. It carries no
+        // information and was showing up as an "Other pet note" on every
+        // single listing.
+        if ((it.text || "").trim().toLowerCase() === (it.header || "").trim().toLowerCase()) continue;
         for (const sentence of getSentences(it.text)) {
           if (trustWholesale || isPetRelated(sentence)) {
             bucket.push({ text: sentence, source: it.section || it.header || "Listing data", priority });
@@ -183,6 +196,13 @@
       new RegExp(`\\b(?:up to|maximum of|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM}\\s*${PET}\\b`, "i"),
       new RegExp(`\\b${NUM}\\s*${PET}\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
       new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?:\\s*total)?\\b`, "i"),
+      // "Two Dogs up to 50lbs welcome" — the count leads and the
+      // allowance word only arrives after an intervening weight clause,
+      // so the qualifier can't be required adjacent to the noun. Bounded
+      // to the same sentence and 40 characters so it stays a local claim.
+      new RegExp(`\\b${NUM}\\s+${PET}\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?)\\b)`, "i"),
+      // "Pets allowed: dogs (limit 2 total)" — count without a repeated noun.
+      new RegExp(`\\blimit(?:ed)?\\s*(?:to\\s*)?${NUM}\\s*total\\b`, "i"),
     ];
 
     const WEIGHT_RE = [

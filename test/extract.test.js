@@ -74,6 +74,38 @@ test("max dogs", async (t) => {
     assert.strictEqual(policyFor("2 dogs max.").maxDogs, 2);
     assert.strictEqual(policyFor("two dogs total").maxDogs, 2);
   });
+
+  // Both observed live on vrbo.com/3550839 and /5092427.
+  await t.test("count separated from its allowance word by a weight clause", () => {
+    assert.strictEqual(policyFor("Two Dogs up to 50lbs welcome, (non-refundable dog fees apply).").maxDogs, 2);
+  });
+
+  await t.test("count stated without repeating the noun", () => {
+    assert.strictEqual(policyFor("Pets allowed: dogs (limit 2 total)").maxDogs, 2);
+  });
+
+  await t.test("a bare count near an unrelated word is not a dog count", () => {
+    assert.strictEqual(policyFor("Dogs are great. The home sleeps 8 guests comfortably.").maxDogs, null);
+  });
+});
+
+test("HTML in Apollo text", async (t) => {
+  // The About blob arrives as raw HTML whose only separator is <br>.
+  const blob =
+    "Escape to the beach!<br><br>Two Dogs up to 50lbs welcome, (non-refundable dog fees apply; pre-registration is required).<br><br>" +
+    "Private pool and elevator. ".repeat(20);
+
+  await t.test("<br> is treated as a sentence break, not swallowed by the length cap", () => {
+    const p = extractPolicy([{ text: blob, source: "About this property", priority: 3 }]);
+    assert.strictEqual(p.maxDogs, 2);
+    assert.strictEqual(p.weightPerDog, "50 lbs");
+    assert.strictEqual(p.preReg, true);
+  });
+
+  await t.test("no raw markup reaches the rendered notes", () => {
+    const p = extractPolicy([{ text: "Dog Friendly | Private Pool<br><br>Escape to Nautilus.", source: "About this property", priority: 3 }]);
+    assert.ok(!p.otherNotes.some((n) => /<br|<\/?[a-z]+>/i.test(n.text)), "found markup in notes: " + JSON.stringify(p.otherNotes));
+  });
 });
 
 test("weight limit", async (t) => {
@@ -175,6 +207,13 @@ test("buildCorpus", async (t) => {
     const entries = buildCorpus(payload, ["Dogs allowed per the page."]);
     assert.strictEqual(entries[0].text, "No aggressive breeds.");
     assert.strictEqual(entries[entries.length - 1].source, "Visible page text");
+  });
+
+  await t.test("drops a value that merely repeats its own section label", () => {
+    // Every live listing sampled emitted a bare "Pets" string under the
+    // "Pets" header, which surfaced as a contentless note.
+    const entries = buildCorpus({ items: [{ header: "Pets", section: "Property amenities", text: "Pets" }] }, []);
+    assert.deepStrictEqual(entries, []);
   });
 
   await t.test("de-dupes identical text, keeping the higher-priority source", () => {

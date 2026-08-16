@@ -1,0 +1,5 @@
+.DS_Store
+
+# Test corpus derived from a private chat export: carries real names,
+# message excerpts and timestamps. Not for a public repo.
+test/vrbo_unique_listings.csv

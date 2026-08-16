@@ -39,6 +39,15 @@
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
 
   function looksLikeListingPage() {
+    // Apollo payload first. On a freshly-loaded listing NONE of the DOM
+    // signals below exist yet — House Rules and the amenities block are
+    // lazy-mounted, so document.body.innerText is still just nav chrome
+    // (measured on a live listing: 6.7KB pre-scroll vs 27KB after, with
+    // "house rules" absent from the former). Gating on the DOM therefore
+    // suppressed the panel until the user scrolled, even though the
+    // bridge had already handed us the full policy — which is the exact
+    // dependency reading the Apollo cache was meant to remove.
+    if (latestApolloPayload && latestApolloPayload.items && latestApolloPayload.items.length) return true;
     if (document.querySelector('[data-stid*="pet"]')) return true;
     const bodyText = document.body ? document.body.innerText : "";
     return /house rules/i.test(bodyText) || /pet(s)? (allowed|policy|friendly)/i.test(bodyText);
@@ -126,9 +135,28 @@
     }
   }
 
+  // Vrbo's search widget sits INSIDE <main>, and its pet-filter checkbox
+  // ("I am traveling with pets", "If checked, only properties that allow
+  // pets will be shown") is pet-related by every keyword test — it was
+  // landing in the panel's notes as though the host had written it about
+  // this property. Scoping to <main> isn't enough; what separates it from
+  // listing prose is that it lives in form controls, which listing prose
+  // never does. So walk text nodes and skip those subtrees.
+  const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], #vdp-panel';
+
   function collectDomPetSentences() {
-    const bodyText = document.body ? document.body.innerText : "";
-    return getSentences(bodyText).filter(isPetRelated);
+    const root = document.querySelector("main") || document.body;
+    if (!root) return [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const parts = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.textContent && node.textContent.trim();
+      if (!text) continue;
+      if (node.parentElement && node.parentElement.closest(DOM_EXCLUDE)) continue;
+      parts.push(text);
+    }
+    return getSentences(parts.join("\n")).filter(isPetRelated);
   }
 
   // ---------- DOM helpers (jump-to-source) ----------
