@@ -34,16 +34,9 @@
 
   // ---------- text gathering: DOM (fallback layer) ----------
 
-  function getSentences(text) {
-    return text
-      .split(/(?<=[.!?])\s+(?=[A-Z0-9])|\n+/)
-      .map((s) => s.replace(/\s+/g, " ").trim())
-      .filter((s) => s.length > 0 && s.length < 400);
-  }
-
-  function isPetRelated(s) {
-    return /\b(pets?|dogs?|canine)\b/i.test(s);
-  }
+  // Parsing/extraction lives in extract.js (loaded ahead of this script in
+  // the same isolated world) so it can be unit-tested without a browser.
+  const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
 
   function looksLikeListingPage() {
     if (document.querySelector('[data-stid*="pet"]')) return true;
@@ -61,11 +54,30 @@
     suppressObserver = true;
     try {
       const TOGGLE_TEXT_RE = /^(show more|show all|see more|see all|view more|view all|read more|expand|more( details| rules| info)?)$/i;
+      // Sections whose collapsed content is plausibly pet-relevant.
+      const SECTION_CTX_RE = /house rules|polic|amenit|about this (property|space|listing)|important information|\bpets?\b|\bdogs?\b/i;
+      // aria-expanded="false" is used by plenty of chrome that has nothing
+      // to do with the listing — account menus, date pickers, currency
+      // switchers, filter drawers. Clicking those opened UI at random, so
+      // a collapsed element now also has to sit in a relevant section and
+      // outside the page's navigation/dialog furniture.
+      const OFF_LIMITS = 'nav, header, footer, [role="navigation"], [role="dialog"], [role="menu"], [role="tablist"]';
+
+      function inRelevantSection(el) {
+        let node = el.parentElement;
+        for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+          if (SECTION_CTX_RE.test((node.textContent || "").slice(0, 600))) return true;
+        }
+        return false;
+      }
+
       const candidates = Array.from(document.querySelectorAll('button, [role="button"], a, [aria-expanded]')).filter((el) => {
         if (!(el.offsetParent !== null || el.getClientRects().length > 0)) return false;
+        if (el.closest(OFF_LIMITS)) return false;
         const label = (el.textContent || el.getAttribute("aria-label") || "").trim();
-        if (el.getAttribute("aria-expanded") === "false") return true;
-        return TOGGLE_TEXT_RE.test(label);
+        if (TOGGLE_TEXT_RE.test(label)) return true;
+        if (el.getAttribute("aria-expanded") === "false") return inRelevantSection(el);
+        return false;
       });
 
       for (const el of candidates.slice(0, 25)) {
@@ -105,231 +117,6 @@
   function collectDomPetSentences() {
     const bodyText = document.body ? document.body.innerText : "";
     return getSentences(bodyText).filter(isPetRelated);
-  }
-
-  // ---------- corpus assembly ----------
-
-  // Priority order (higher = trusted first): a dedicated "Pets" row under
-  // House Rules or Amenities is most reliable; freeform notes and the
-  // About-property description come next; visible DOM text is the
-  // catch-all fallback.
-  function priorityForItem(item) {
-    if (/^pets?$/i.test(item.header || "")) return 5;
-    if (/house rules \/ policies/i.test(item.section || "")) return 4;
-    if (/about this property/i.test(item.section || "")) return 3;
-    return 2;
-  }
-
-  function buildCorpus(apolloPayload) {
-    const bucket = []; // { text, source, priority }
-    if (apolloPayload && Array.isArray(apolloPayload.items)) {
-      // Items explicitly categorized under a "Pets" header by Vrbo/the
-      // host are trusted wholesale — a sentence like "No aggressive
-      // breeds or pit bulls" is clearly pet-relevant in that context even
-      // though it doesn't literally contain the word "pet" or "dog", so
-      // we don't want the generic keyword filter to drop it. Everything
-      // else (About-property prose, freeform notes, DOM fallback) is a
-      // mixed-topic blob, so it still needs the keyword filter to avoid
-      // pulling in unrelated sentences.
-      const isDedicatedPetsHeader = (it) => /^pets?$/i.test(it.header || "");
-      const petItems = apolloPayload.items.filter((it) => isDedicatedPetsHeader(it) || /\b(pets?|dogs?)\b/i.test(it.text));
-      for (const it of petItems) {
-        const priority = priorityForItem(it);
-        const trustWholesale = isDedicatedPetsHeader(it);
-        for (const sentence of getSentences(it.text)) {
-          if (trustWholesale || isPetRelated(sentence)) {
-            bucket.push({ text: sentence, source: it.section || it.header || "Listing data", priority });
-          }
-        }
-      }
-    }
-    for (const sentence of collectDomPetSentences()) {
-      bucket.push({ text: sentence, source: "Visible page text", priority: 1 });
-    }
-
-    // De-dupe by normalized text, keeping the highest-priority occurrence.
-    const byText = new Map();
-    for (const entry of bucket) {
-      const key = entry.text.toLowerCase();
-      const existing = byText.get(key);
-      if (!existing || entry.priority > existing.priority) byText.set(key, entry);
-    }
-    return Array.from(byText.values()).sort((a, b) => b.priority - a.priority);
-  }
-
-  // ---------- extraction ----------
-
-  const WORD_NUMS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
-  const NUM_RE = `(\\d+|${Object.keys(WORD_NUMS).join("|")})`;
-
-  function toNumber(numStr) {
-    const lower = numStr.toLowerCase();
-    if (WORD_NUMS[lower] !== undefined) return WORD_NUMS[lower];
-    return parseInt(numStr, 10);
-  }
-
-  function extractPolicy(entries) {
-    // entries: [{ text, source, priority }, ...] already sorted by priority
-    const result = {
-      found: entries.length > 0,
-      petsAllowed: null,
-      petsAllowedSnippet: null,
-      petsAllowedSource: null,
-      maxDogs: null,
-      maxDogsSnippet: null,
-      maxDogsSource: null,
-      maxDogsAlternates: [],
-      weightPerDog: null,
-      weightSnippet: null,
-      weightSource: null,
-      weightAlternates: [],
-      preReg: null,
-      preRegSnippet: null,
-      preRegSource: null,
-      fee: null,
-      feeSnippet: null,
-      feeSource: null,
-      feeAlternates: [],
-      noFeeMentioned: false,
-      deposit: null,
-      depositSnippet: null,
-      depositSource: null,
-      otherNotes: [], // [{text, source}] — pet-relevant sentences not used elsewhere
-      entries,
-    };
-
-    // "No pets" etc., but NOT when it's actually a conditional restriction
-    // like "no pets over 30 lbs" / "no pets without prior approval" —
-    // those mean pets ARE allowed, just with a condition.
-    const NOT_ALLOWED_RE = /\bno\s+pets?\b(?!\s*(?:over|above|larger|bigger|heavier|weighing|without|unless|except))|\bpets?\s+(?:are\s+)?not\s+(?:allowed|permitted)\b(?!\s*(?:over|above|without|unless|except))|\bpet[-\s]?free\b/i;
-    const ALLOWED_RE = /\bpets?\s+(?:are\s+)?(?:allowed|permitted|welcome)\b|\bdog[-\s]?friendly\b|\bpet[-\s]?friendly\b/i;
-
-    const MAX_DOGS_RE = [
-      new RegExp(`\\b(?:up to|maximum of|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM_RE}\\s*(?:dogs?|pets?)\\b`, "i"),
-      new RegExp(`\\b${NUM_RE}\\s*(?:dogs?|pets?)\\s*(?:max(?:imum)?|allowed|permitted|total)\\b`, "i"),
-      new RegExp(`\\blimit\\s*${NUM_RE}\\s*(?:dogs?|pets?)(?:\\s*total)?\\b`, "i"),
-    ];
-
-    const WEIGHT_RE = [
-      /\b(\d{1,3})\s*(?:lbs?\.?|pounds?)\s*(?:per (?:dog|pet)|each|max(?:imum)?|or (?:less|under)|weight limit)\b/i,
-      /\bweight limit\s*(?:of|is|:)?\s*(\d{1,3})\s*(?:lbs?\.?|pounds?)\b/i,
-      /\b(?:up to|under|less than|max(?:imum)?(?:\s+of)?)\s*(\d{1,3})\s*(?:lbs?\.?|pounds?)\b/i,
-      /\bcombined weight of\s*(\d{1,3})\s*(?:lbs?\.?|pounds?)\b/i,
-    ];
-
-    const PREREG_RE = /\b(pre-?register|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+registered|registration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
-
-    const FEE_RE = [
-      /\$\s?(\d{1,4}(?:\.\d{2})?)\s*(?:one[-\s]?time|non[-\s]?refundable)?\s*(?:\+\s*tax\s*)?(?:pet|dog)\s*fee/i,
-      /(?:pet|dog)\s*fee\s*(?:of|is|:)?\s*\$\s?(\d{1,4}(?:\.\d{2})?)/i,
-      /\$\s?(\d{1,4}(?:\.\d{2})?)\s*per\s*(?:pet|dog)(?:\s*per\s*(night|stay|day))?/i,
-    ];
-    const NO_FEE_RE = /\bno\s+(?:additional\s+)?(?:pet|dog)\s*fee\b|\bpets?\s+(?:stay\s+)?free\b/i;
-    const DEPOSIT_RE = /\$\s?(\d{1,4}(?:\.\d{2})?)\s*(?:refundable\s*)?(?:pet|dog)\s*deposit|(?:pet|dog)\s*deposit\s*(?:of|is|:)?\s*\$\s?(\d{1,4}(?:\.\d{2})?)/i;
-
-    function record(field, snippetField, sourceField, altField, value, entry) {
-      if (result[field] === null) {
-        result[field] = value;
-        result[snippetField] = entry.text;
-        result[sourceField] = entry.source;
-      } else if (result[field] !== value && !result[altField].some((a) => a.value === value)) {
-        result[altField].push({ value, snippet: entry.text, source: entry.source });
-      }
-    }
-
-    for (const entry of entries) {
-      const s = entry.text;
-      let usedForField = false;
-
-      if (result.petsAllowed === null) {
-        if (NOT_ALLOWED_RE.test(s)) {
-          result.petsAllowed = false;
-          result.petsAllowedSnippet = s;
-          result.petsAllowedSource = entry.source;
-          usedForField = true;
-        } else if (ALLOWED_RE.test(s)) {
-          result.petsAllowed = true;
-          result.petsAllowedSnippet = s;
-          result.petsAllowedSource = entry.source;
-          usedForField = true;
-        }
-      }
-
-      for (const re of MAX_DOGS_RE) {
-        const m = s.match(re);
-        if (m) {
-          record("maxDogs", "maxDogsSnippet", "maxDogsSource", "maxDogsAlternates", toNumber(m[1]), entry);
-          usedForField = true;
-          break;
-        }
-      }
-
-      for (const re of WEIGHT_RE) {
-        const m = s.match(re);
-        if (m) {
-          record("weightPerDog", "weightSnippet", "weightSource", "weightAlternates", `${m[1]} lbs`, entry);
-          usedForField = true;
-          break;
-        }
-      }
-
-      if (PREREG_RE.test(s)) {
-        if (result.preReg === null) {
-          result.preReg = true;
-          result.preRegSnippet = s;
-          result.preRegSource = entry.source;
-        }
-        usedForField = true;
-      }
-
-      for (const re of FEE_RE) {
-        const m = s.match(re);
-        if (m) {
-          const suffix = m[2] ? ` per ${m[2]}` : "";
-          record("fee", "feeSnippet", "feeSource", "feeAlternates", `$${m[1]}${suffix}`, entry);
-          usedForField = true;
-          break;
-        }
-      }
-
-      if (NO_FEE_RE.test(s)) {
-        if (!result.noFeeMentioned) {
-          result.noFeeMentioned = true;
-          if (!result.feeSnippet) {
-            result.feeSnippet = s;
-            result.feeSource = entry.source;
-          }
-        }
-        usedForField = true;
-      }
-
-      const depMatch = s.match(DEPOSIT_RE);
-      if (depMatch && result.deposit === null) {
-        result.deposit = `$${depMatch[1] || depMatch[2]}`;
-        result.depositSnippet = s;
-        result.depositSource = entry.source;
-        usedForField = true;
-      }
-
-      if (!usedForField) {
-        result.otherNotes.push({ text: s, source: entry.source });
-      }
-    }
-
-    if (result.fee === null && result.noFeeMentioned) {
-      result.fee = "No fee mentioned";
-    }
-
-    // Cap and de-dupe other notes.
-    const seenNotes = new Set();
-    result.otherNotes = result.otherNotes.filter((n) => {
-      const key = n.text.toLowerCase();
-      if (seenNotes.has(key)) return false;
-      seenNotes.add(key);
-      return true;
-    }).slice(0, 6);
-
-    return result;
   }
 
   // ---------- DOM helpers (jump-to-source) ----------
@@ -377,7 +164,11 @@
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
-  function row(label, valueHtml, tone, snippet, source, alternates) {
+  // `value` is always escaped. Today every caller passes a literal or a
+  // digits-only regex capture, so nothing can break out — but escaping
+  // here means a future pattern that captures freeform listing text
+  // can't turn into an injection point.
+  function row(label, value, tone, snippet, source, alternates) {
     const toneClass = tone ? `vdp-tone-${tone}` : "";
     const jumpAttr = snippet ? `data-snippet="${encodeURIComponent(snippet)}" data-source="${encodeURIComponent(source || "")}"` : "";
     const jumpBtn = snippet ? `<button class="vdp-jump" ${jumpAttr} title="Show where this was found">source</button>` : "";
@@ -390,7 +181,7 @@
     return `<div class="vdp-row-wrap">
       <div class="vdp-row">
         <span class="vdp-label">${label}</span>
-        <span class="vdp-value ${toneClass}">${valueHtml}</span>
+        <span class="vdp-value ${toneClass}">${escapeHtml(value)}</span>
         ${jumpBtn}
       </div>
       ${altHtml}
@@ -521,7 +312,7 @@
     isScanning = true;
     try {
       await expandCollapsedSections();
-      const entries = buildCorpus(latestApolloPayload);
+      const entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
       const policy = extractPolicy(entries);
       window.__vdpLastPolicy = policy;
       chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: location.href });
@@ -558,24 +349,20 @@
 
   // SPA navigation detection, several independent layers since no single
   // one is bulletproof on every SPA:
-  //  1. Patch history.pushState/replaceState. Works for the vast majority
-  //     of React-router-style navigations, since `history` is a live
-  //     browsing-context object shared with the page, not a JS-realm-local
-  //     copy — but if the page captured a reference to the original
-  //     function before this script ran, our patch wouldn't see that call.
-  //  2. popstate (back/forward navigation).
+  //  1. A history.pushState/replaceState patch — but it has to live in
+  //     page-bridge.js, NOT here. Content scripts run in an isolated
+  //     world, and property assignments there aren't visible to the
+  //     page's realm, so patching `history` from this script would only
+  //     ever intercept our own calls, never Vrbo's router. The bridge
+  //     patches it in the MAIN world and dispatches vdp-locationchange,
+  //     which we pick up below (window events cross the world boundary
+  //     even though object mutations don't).
+  //  2. popstate (back/forward navigation). Event listeners DO fire in
+  //     the isolated world, so this one works from here.
   //  3. A cheap interval poll of location.href as a permission-free
   //     backstop that catches anything the other two miss.
   //  4. The MutationObserver below also indirectly catches navigation,
   //     since the DOM changes regardless of how the URL changed.
-  for (const method of ["pushState", "replaceState"]) {
-    const original = history[method];
-    history[method] = function (...args) {
-      const ret = original.apply(this, args);
-      window.dispatchEvent(new Event("vdp-locationchange"));
-      return ret;
-    };
-  }
   window.addEventListener("popstate", () => window.dispatchEvent(new Event("vdp-locationchange")));
   window.addEventListener("vdp-locationchange", onUrlMaybeChanged);
   setInterval(onUrlMaybeChanged, 1000);

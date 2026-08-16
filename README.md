@@ -77,13 +77,32 @@ produced the result ("listing data" vs. "visible page text only").
   own JS world to read Apollo data, one isolated for the UI/DOM logic)
 - `page-bridge.js` — reads `window.__APOLLO_STATE__`, walks it for
   pet-relevant text, dispatches it to the content script
-- `content.js` — merges Apollo data + expanded/visible DOM text,
-  extracts the structured fields, renders the floating panel
+- `extract.js` — the parsing layer (sentence splitting, corpus assembly,
+  all the pet-policy regexes). Deliberately free of DOM and `chrome.*`
+  calls so it can be unit-tested under Node; loaded as the first content
+  script in the isolated world, where it exposes itself as `VDPExtract`
+- `content.js` — merges Apollo data + expanded/visible DOM text, calls
+  into `extract.js`, renders the floating panel
 - `content.css` — panel styles
 - `popup.html` / `popup.js` / `popup.css` — toolbar popup summary
   (falls back to the last cached result in `chrome.storage.local` if the
   content script hasn't responded yet)
 - `icons/` — extension icons
+- `test/extract.test.js` — fixture tests for the parsing layer
+
+## Tests
+
+```
+node --test
+```
+
+No dependencies and no build step — Node's built-in runner against
+`extract.js`. The fixtures are phrased the way hosts actually write these
+rules, and exist mainly to pin down the ambiguous cases: conditional
+restrictions that read like bans ("no pets over 30 lbs"), "no pet fee"
+(dog-friendly) versus "no pets" (not), and the same weight limit restated
+in a second unit, which must not be reported as the listing contradicting
+itself.
 
 ## Known limitations
 
@@ -101,12 +120,23 @@ produced the result ("listing data" vs. "visible page text only").
   Vrbo.com itself has been tested against live listings — if those
   sites use a different internal data shape, the extension will still
   fall back to visible-text scanning there.
+- **The parser is English-only, even where it's unit-aware.** Weights in
+  `kg` and fees in `€`/`£`/`A$`/`NZ$` are recognized, so the
+  English-language sister sites (Stayz, Bookabach) parse correctly. But
+  every surrounding phrase it keys off — "up to", "weight limit of",
+  "pet fee", "prior approval" — is still English, so German or French
+  prose on FeWo-direkt/Abritel will mostly land in "Other pet notes"
+  rather than the structured fields. Localizing those lead-ins is the
+  remaining work for real international support.
 - No dedicated background script watches for SPA navigation; instead
-  the content script combines a `history.pushState`/`replaceState`
-  patch, `popstate`, a cheap 1-second `location.href` poll, and DOM
-  mutation observation, so navigating between listings without a full
-  page reload is covered by several overlapping, low-cost checks rather
-  than one that could silently fail.
+  `page-bridge.js` patches `history.pushState`/`replaceState` in the
+  page's own JS world (patching it from the content script would be a
+  no-op — isolated worlds don't share object mutations with the page, so
+  it would only ever catch our own calls) and signals the content script
+  by event, which combines it with `popstate`, a cheap 1-second
+  `location.href` poll, and DOM mutation observation. Navigating between
+  listings without a full page reload is covered by several overlapping,
+  low-cost checks rather than one that could silently fail.
 - Doesn't call any Vrbo API beyond what the page itself already loaded —
   nothing is sent anywhere.
 

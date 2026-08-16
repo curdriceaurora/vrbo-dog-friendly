@@ -27,6 +27,7 @@
 (() => {
   const REQUEST_EVENT = "vdp-request-apollo-data";
   const DATA_EVENT = "vdp-apollo-data";
+  const NAV_EVENT = "vdp-locationchange";
 
   let lastPayloadKey = null;
 
@@ -125,9 +126,7 @@
     return payload;
   }
 
-  // Poll aggressively at first (Apollo cache populates async after mount),
-  // then settle into a slow background poll to catch SPA navigation to a
-  // different listing.
+  // Poll aggressively at first (Apollo cache populates async after mount).
   let attempts = 0;
   const fastPoll = setInterval(() => {
     attempts++;
@@ -137,11 +136,51 @@
     }
   }, 350);
 
-  setInterval(() => tryDispatch(false), 2500);
+  // Slow background poll to catch SPA navigation to a different listing.
+  // extractFromApollo() walks the whole PropertyInfo graph, so running it
+  // flat-out forever burns CPU on a page that has long since settled:
+  // back off while the payload keeps coming back identical, and skip the
+  // walk entirely in a backgrounded tab. Any real navigation resets the
+  // interval, and the content script's explicit request still forces an
+  // immediate dispatch regardless.
+  const POLL_MIN_MS = 2500;
+  const POLL_MAX_MS = 20000;
+  let pollDelay = POLL_MIN_MS;
+  let lastPollUrl = location.href;
+
+  (function slowPoll() {
+    setTimeout(() => {
+      if (location.href !== lastPollUrl) {
+        lastPollUrl = location.href;
+        pollDelay = POLL_MIN_MS;
+      }
+      if (document.visibilityState !== "hidden") {
+        const before = lastPayloadKey;
+        tryDispatch(false);
+        pollDelay = lastPayloadKey === before ? Math.min(pollDelay * 2, POLL_MAX_MS) : POLL_MIN_MS;
+      }
+      slowPoll();
+    }, pollDelay);
+  })();
 
   // Respond on demand, in case the isolated content script's listener
   // attaches after we already dispatched once.
   window.addEventListener(REQUEST_EVENT, () => {
     tryDispatch(true);
   });
+
+  // SPA navigation signal for the content script. This patch has to live
+  // here in the MAIN world: an isolated-world content script gets its own
+  // JS realm, so assigning history.pushState there would never intercept
+  // Vrbo's own router calls. Events dispatched on window, unlike object
+  // mutations, do cross into the isolated world.
+  for (const method of ["pushState", "replaceState"]) {
+    const original = history[method];
+    if (typeof original !== "function") continue;
+    history[method] = function (...args) {
+      const ret = original.apply(this, args);
+      window.dispatchEvent(new Event(NAV_EVENT));
+      return ret;
+    };
+  }
 })();

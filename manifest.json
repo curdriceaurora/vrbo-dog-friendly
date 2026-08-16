@@ -46,7 +46,7 @@
         "*://www.bookabach.co.nz/*",
         "*://www.stayz.com.au/*"
       ],
-      "js": ["content.js"],
+      "js": ["extract.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
     }
