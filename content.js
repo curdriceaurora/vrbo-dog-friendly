@@ -570,10 +570,11 @@
   window.addEventListener("vdp-locationchange", onUrlMaybeChanged);
   setInterval(onUrlMaybeChanged, 1000);
 
-  // MutationObserver, attached to document.documentElement which permanently
-  // survives SPA DOM swaps. Debounced with a hard cap so continuously-animating
-  // widgets can't starve us of a rescan. Suppressed while we click things ourselves.
+  // MutationObserver, attached to document.body which permanently survives
+  // SPA <main> swaps. Panel is attached to document.documentElement (outside body)
+  // so panel DOM mutations never trigger this observer. Debounced with a hard cap.
   function startObserver() {
+    const target = document.body || document.documentElement;
     observer = new MutationObserver(() => {
       if (suppressObserver) return;
       const now = Date.now();
@@ -587,7 +588,7 @@
         scheduleRescan(900);
       }
     });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
+    observer.observe(target, { childList: true, subtree: true });
   }
   startObserver();
 
