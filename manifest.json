@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vrbow-wow: Vrbo Dog Policy Callout",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Surfaces dog-friendliness details (dog limit, weight limit, pre-registration, fees) directly on Vrbo listing pages.",
   "icons": {
     "16": "icons/icon16.png",

@@ -45,7 +45,7 @@ It displays a single summary card with all extracted pet policy details.
 
 ## Installation
 
-1. Download **`vrbow-wow-v1.0.0.zip`** from [Releases](https://github.com/curdriceaurora/vrbo-dog-friendly/releases).
+1. Download **`vrbow-wow-v1.0.1.zip`** from [Releases](https://github.com/curdriceaurora/vrbo-dog-friendly/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser (Chrome 111+, Brave, Edge, or Arc).
 4. Turn on **Developer mode** using the toggle in the top-right corner.
