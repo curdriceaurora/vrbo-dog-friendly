@@ -89,10 +89,15 @@ When you visit a listing on `vrbo.com`, the policy card opens in the bottom-righ
 - **Vrbo Only**: This extension operates only on `vrbo.com` property listings. It does not run on Airbnb, Expedia, or other booking websites.
 - **Search Alternative**: To search across properties with custom pet filters (such as dog weight, pet count, or fee limits), use [BringFido](https://www.bringfido.com).
 
+## Development and Support
+
+- **AI Vibecoded**: This project was built and vibecoded with AI.
+- **As-Is Software**: The extension works as intended. The author provides no guarantee of ongoing support, updates, or maintenance.
+
 ---
 
 - [Release Notes & Changelog](CHANGELOG.md)
 - [Privacy Policy](PRIVACY.md)
 - [License](LICENSE)
 
-> **Note**: Vrbow is an independent open-source tool. It is not affiliated with or endorsed by Vrbo or Expedia Group. Always verify the host's original house rules before you book a property.
+> **Note**: Vrbow is an independent open-source tool. It is not affiliated with or endorsed by Vrbo or Expedia Group. No support is guaranteed. Always verify the host's original house rules before you book a property.
