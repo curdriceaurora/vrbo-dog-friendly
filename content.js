@@ -85,25 +85,26 @@
   // click adds another one beside it. Our leftovers must stay ours.
   const ownedDialogs = new WeakSet();
 
-  const DIALOG_WATCH_MS = 2500;
+  // Watched for the FULL budget, with no early exit. An earlier version
+  // stopped once two polls were quiet, which is the same "it will have
+  // mounted by now" guess as the original fixed 400ms wait — just with a
+  // bigger number, and it missed a dialog mounting at 1.7s exactly as the
+  // 400ms version missed one at 700ms. Any threshold is wrong for some
+  // page, and the early exit was optimising a cost that is not paid on
+  // normal listings anyway: this whole pass only runs when we have no pet
+  // data, or when the user explicitly asked for a rescan.
+  const DIALOG_WATCH_MS = 4000;
   const DIALOG_POLL_MS = 250;
-  // Watch at least this long before concluding nothing is coming, so a
-  // dialog that mounts late still gets caught — but don't spend the full
-  // budget on the common case where no dialog opens at all.
-  const DIALOG_MIN_WATCH_MS = 1200;
 
   // Clicking a control and waiting a fixed 400ms assumed the dialog mounts
   // within it. Vrbo's did; a slower one (measured at 700ms) was missed
   // entirely. Watch for a while instead, handling each dialog as it
   // appears, and stop early once things go quiet.
   async function harvestAndCloseDialogs(preexisting) {
-    const startedAt = Date.now();
-    const deadline = startedAt + DIALOG_WATCH_MS;
+    const deadline = Date.now() + DIALOG_WATCH_MS;
     const handledThisPass = new Set();
-    let quietPolls = 0;
 
     while (Date.now() < deadline) {
-      let sawNew = false;
       for (const dialog of visibleDialogs()) {
         const isOurs = ownedDialogs.has(dialog) || !preexisting.has(dialog);
         if (!isOurs) continue;
@@ -115,16 +116,10 @@
           // text reaches the corpus.
           const text = dialog.innerText || "";
           if (text.trim()) harvestedDialogText.push(text);
-          sawNew = true;
         }
         // Retried on later polls if the close didn't take.
         closeDialog(dialog);
       }
-      quietPolls = sawNew ? 0 : quietPolls + 1;
-      // Settled: nothing new for two polls, and we've watched long enough
-      // that a late mount would have shown up. Without the elapsed check
-      // this ran the full budget on every listing where no dialog opens.
-      if (quietPolls >= 2 && Date.now() - startedAt >= DIALOG_MIN_WATCH_MS) break;
       await new Promise((r) => setTimeout(r, DIALOG_POLL_MS));
     }
     return handledThisPass.size;
@@ -140,24 +135,28 @@
         /* fall through to Escape */
       }
     }
-    // Escape as a fallback. Without it, a dialog whose close control we
-    // don't recognise stays open over the listing — which is the whole
-    // bug this was meant to fix, just narrowed to markup we didn't expect.
-    //
-    // Aimed at the dialog first and only escalated to document if that
-    // didn't take: an Escape on document is heard by every listener on the
-    // page, including one belonging to a dialog the user opened themselves.
-    const escape = (target) => {
+    // Escape as a fallback, for a dialog whose close control we don't
+    // recognise. It bubbles from the dialog up to document by design —
+    // that is how it reaches the site's handler — but that same handler
+    // is usually global and closes whatever dialog IT considers topmost,
+    // which can be one the user opened themselves. There is no way to
+    // reach the site's handler without that risk, so only take it when no
+    // foreign dialog is open. Leaving ours up is the lesser harm; closing
+    // the user's is us breaking their page.
+    const escape = (bubbles) => {
       for (const type of ["keydown", "keyup"]) {
-        target.dispatchEvent(
-          new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true })
-        );
+        dialog.dispatchEvent(new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles, cancelable: true }));
       }
+      return !dialog.getClientRects().length;
     };
-    escape(dialog);
-    if (!dialog.getClientRects().length) return true;
-    escape(document);
-    return !dialog.getClientRects().length;
+
+    // Non-bubbling first: reaches a handler attached to this dialog and
+    // nothing else, so it can never disturb another dialog on the page.
+    if (escape(false)) return true;
+
+    const foreignOpen = visibleDialogs().some((d) => d !== dialog && !ownedDialogs.has(d));
+    if (foreignOpen) return false;
+    return escape(true);
   }
 
   async function expandCollapsedSections() {
