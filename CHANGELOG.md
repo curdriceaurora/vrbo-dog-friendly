@@ -19,7 +19,7 @@ All notable changes to **Vrbow** are documented in this file.
 - **Strict Listing Filtering**: Enforced route-level regex matching so the extension executes only on actual listing pages (`/<id>`, `/pdp/lo/<id>`, `/vacation-rentals/p/<id>`). Suppresses panel injection and popup queries on the homepage, search pages, and account pages.
 - **SPA Cross-Listing Bleed Prevention**: In `page-bridge.js`, Apollo GraphQL extraction is now locked to `PropertyInfo:<currentListingId>`. If listing B is loading in the same tab, stale cached data from listing A is never displayed.
 - **Client-Side Fast Polling**: Automatically resets and starts fast polling whenever SPA navigation occurs so slow-mounting GraphQL payloads are captured immediately.
-- **Permanent Observer Attachment**: Attached `MutationObserver` directly to `document.documentElement` so it survives client-side router `<main>` DOM swaps without detachment.
+- **Feedback-Free Observer Scope**: Attached `MutationObserver` to `document.body` (surviving SPA `<main>` swaps while isolating Vrbow's panel on `document.documentElement` to prevent observer feedback loops).
 
 ### 📄 Documentation & Licensing
 - Added standard permissive [MIT License](LICENSE).
