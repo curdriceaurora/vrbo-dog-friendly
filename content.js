@@ -77,6 +77,59 @@
     return Array.from(document.querySelectorAll('[role="dialog"]')).filter((d) => d.getClientRects().length > 0);
   }
 
+  // Dialogs this extension caused to open, remembered across passes.
+  //
+  // Without this, a dialog we opened but failed to handle in time gets
+  // treated as pre-existing by the NEXT pass — grandfathered as the
+  // user's own — so it is never harvested and never closed, and a second
+  // click adds another one beside it. Our leftovers must stay ours.
+  const ownedDialogs = new WeakSet();
+
+  const DIALOG_WATCH_MS = 2500;
+  const DIALOG_POLL_MS = 250;
+  // Watch at least this long before concluding nothing is coming, so a
+  // dialog that mounts late still gets caught — but don't spend the full
+  // budget on the common case where no dialog opens at all.
+  const DIALOG_MIN_WATCH_MS = 1200;
+
+  // Clicking a control and waiting a fixed 400ms assumed the dialog mounts
+  // within it. Vrbo's did; a slower one (measured at 700ms) was missed
+  // entirely. Watch for a while instead, handling each dialog as it
+  // appears, and stop early once things go quiet.
+  async function harvestAndCloseDialogs(preexisting) {
+    const startedAt = Date.now();
+    const deadline = startedAt + DIALOG_WATCH_MS;
+    const handledThisPass = new Set();
+    let quietPolls = 0;
+
+    while (Date.now() < deadline) {
+      let sawNew = false;
+      for (const dialog of visibleDialogs()) {
+        const isOurs = ownedDialogs.has(dialog) || !preexisting.has(dialog);
+        if (!isOurs) continue;
+        if (!handledThisPass.has(dialog)) {
+          handledThisPass.add(dialog);
+          ownedDialogs.add(dialog);
+          // Harvest every pass it is still open: collectDomPetSentences
+          // skips [role="dialog"] subtrees, so this is the only way the
+          // text reaches the corpus.
+          const text = dialog.innerText || "";
+          if (text.trim()) harvestedDialogText.push(text);
+          sawNew = true;
+        }
+        // Retried on later polls if the close didn't take.
+        closeDialog(dialog);
+      }
+      quietPolls = sawNew ? 0 : quietPolls + 1;
+      // Settled: nothing new for two polls, and we've watched long enough
+      // that a late mount would have shown up. Without the elapsed check
+      // this ran the full budget on every listing where no dialog opens.
+      if (quietPolls >= 2 && Date.now() - startedAt >= DIALOG_MIN_WATCH_MS) break;
+      await new Promise((r) => setTimeout(r, DIALOG_POLL_MS));
+    }
+    return handledThisPass.size;
+  }
+
   function closeDialog(dialog) {
     const closer = dialog.querySelector('[aria-label*="close" i], button[title*="close" i]');
     if (closer) {
@@ -90,11 +143,20 @@
     // Escape as a fallback. Without it, a dialog whose close control we
     // don't recognise stays open over the listing — which is the whole
     // bug this was meant to fix, just narrowed to markup we didn't expect.
-    for (const type of ["keydown", "keyup"]) {
-      const ev = new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true });
-      dialog.dispatchEvent(ev);
-      document.dispatchEvent(ev);
-    }
+    //
+    // Aimed at the dialog first and only escalated to document if that
+    // didn't take: an Escape on document is heard by every listener on the
+    // page, including one belonging to a dialog the user opened themselves.
+    const escape = (target) => {
+      for (const type of ["keydown", "keyup"]) {
+        target.dispatchEvent(
+          new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true })
+        );
+      }
+    };
+    escape(dialog);
+    if (!dialog.getClientRects().length) return true;
+    escape(document);
     return !dialog.getClientRects().length;
   }
 
@@ -162,15 +224,7 @@
       // way we found it. The dialog is worth reading — Vrbo's amenities
       // dialog carries ~1.4KB of exactly the content the fallback wants —
       // but leaving it up covers the listing the user was reading.
-      for (const dialog of visibleDialogs()) {
-        if (dialogsBefore.has(dialog)) continue;
-        const text = dialog.innerText || "";
-        if (text.trim()) harvestedDialogText.push(text);
-        closeDialog(dialog);
-      }
-      if (harvestedDialogText.length) {
-        await new Promise((r) => setTimeout(r, 250));
-      }
+      await harvestAndCloseDialogs(dialogsBefore);
 
       // Nudge any empty lazyload placeholders (Vrbo mounts content on
       // intersection) into view momentarily, then restore scroll.
