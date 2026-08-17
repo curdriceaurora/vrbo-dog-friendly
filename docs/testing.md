@@ -10,8 +10,7 @@ node --check content.js && node --check extract.js && node --check page-bridge.j
 ```
 
 No dependencies, no build step, no Chrome and no network — JavaScript syntax
-validation plus Node's built-in test runner against `extract.js`. Enforced in CI
-under the `offline-tests` job. Safe to run anywhere.
+validation plus Node's built-in test runner against `extract.js`. Safe to run anywhere.
 
 The fixtures are phrased the way hosts actually write these rules, and
 exist mainly to pin down the ambiguous cases: conditional restrictions
