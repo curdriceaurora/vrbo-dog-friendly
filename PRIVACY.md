@@ -1,13 +1,13 @@
-# Privacy Policy for Vrbow-wow
+# Privacy Policy for Vrbow
 
 **Last updated:** August 17, 2026
 
-**Vrbow-wow** ("the Extension") is committed to protecting your privacy. This Privacy Policy explains our practices regarding user information.
+**Vrbow** ("the Extension") is committed to protecting your privacy. This Privacy Policy explains our practices regarding user information.
 
 ---
 
 ### 1. Data Collection and Transmission
-- **No Personal Data Collected:** Vrbow-wow does not collect, record, track, or harvest any personal information, browsing history, user credentials, booking details, or payment data.
+- **No Personal Data Collected:** Vrbow does not collect, record, track, or harvest any personal information, browsing history, user credentials, booking details, or payment data.
 - **Zero External Transmission:** The Extension makes **zero network requests** to external servers. All text parsing, data extraction, and user interface rendering occur 100% locally within your web browser.
 
 ---
