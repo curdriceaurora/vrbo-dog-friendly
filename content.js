@@ -30,6 +30,7 @@
   let isScanning = false;
   let mutationFirstSeenAt = 0;
   let suppressObserver = false;
+  let pendingRescan = false;
   let observer = null;
 
   // ---------- text gathering: DOM (fallback layer) ----------
@@ -78,13 +79,23 @@
 
   function closeDialog(dialog) {
     const closer = dialog.querySelector('[aria-label*="close" i], button[title*="close" i]');
-    if (!closer) return false;
-    try {
-      closer.click();
-      return true;
-    } catch (e) {
-      return false;
+    if (closer) {
+      try {
+        closer.click();
+        if (!dialog.getClientRects().length) return true;
+      } catch (e) {
+        /* fall through to Escape */
+      }
     }
+    // Escape as a fallback. Without it, a dialog whose close control we
+    // don't recognise stays open over the listing — which is the whole
+    // bug this was meant to fix, just narrowed to markup we didn't expect.
+    for (const type of ["keydown", "keyup"]) {
+      const ev = new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true, cancelable: true });
+      dialog.dispatchEvent(ev);
+      document.dispatchEvent(ev);
+    }
+    return !dialog.getClientRects().length;
   }
 
   async function expandCollapsedSections() {
@@ -399,12 +410,27 @@
   // ---------- scan orchestration ----------
 
   async function scan(force) {
-    if (isScanning) return;
+    // Don't drop a scan request that lands while one is in flight. The
+    // expand pass can hold the lock for a couple of seconds, and the
+    // rescan onUrlMaybeChanged schedules at 1200ms falls inside exactly
+    // that window — so a dropped request meant a listing could keep the
+    // previous one's panel until some unrelated mutation happened to
+    // trigger another scan.
+    if (isScanning) {
+      pendingRescan = true;
+      return;
+    }
     if (!force && !looksLikeListingPage()) {
       removePanel();
       return;
     }
     isScanning = true;
+    // Everything below describes THIS listing. scan() awaits, and an SPA
+    // hop during an await leaves the rest of this function computing an
+    // answer for a page that is no longer on screen — so bail rather than
+    // render it. onUrlMaybeChanged has already cleared state and queued a
+    // fresh scan for the new listing.
+    const startUrl = location.href;
     try {
       // Decide whether to poke the DOM by asking whether we actually have
       // pet information yet — not merely whether the Apollo payload was
@@ -416,14 +442,20 @@
       let entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
       if (!entries.length || force) {
         await expandCollapsedSections();
+        if (location.href !== startUrl) return;
         entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
       }
+      if (location.href !== startUrl) return;
       const policy = extractPolicy(entries);
       window.__vdpLastPolicy = policy;
-      chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: location.href });
+      chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: startUrl });
       renderPanel(policy);
     } finally {
       isScanning = false;
+      if (pendingRescan) {
+        pendingRescan = false;
+        scheduleRescan(300);
+      }
     }
   }
 
