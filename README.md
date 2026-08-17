@@ -1,33 +1,43 @@
 # Vrbo Dog Policy Callout
 
-A Chrome extension that pulls the dog rules out of a Vrbo listing and puts
-them in one always-visible card — instead of leaving them scattered across
-House Rules, Amenities and "About this property".
+A Chrome extension that extracts pet policies from Vrbo listings and shows them in an always-visible summary card.
 
 <img src="docs/panel-dog-friendly.png" alt="Callout showing max dogs 2, weight limit 50 lbs, pre-registration required" width="420">
 
-Every value has a **source** link that jumps to and highlights the exact
-sentence it came from, so you can check anything before booking.
+## Problem
 
-## What it shows
+Vrbo property listings do not display dog rules in one standard location.
+Hosts write pet rules across different sections:
+- House Rules
+- Amenities
+- "About this property" description
 
-- Whether pets are allowed
-- Max number of dogs, and the per-dog weight limit
-- Whether the host needs advance notice or pre-registration
-- Pet fee, and any refundable deposit shown separately
-- **Other pet notes** — breed limits, crate and leash rules, anything that
-  doesn't fit a field above, so nothing is silently dropped
+Important pet policy details are frequently hidden behind collapsed sections or "See more" buttons.
+Hosts also write conflicting pet rules across different sections of the same listing.
 
-When a listing contradicts itself — and hosts do this more than you'd
-expect — the card flags it rather than quietly picking one number:
+## Need
 
-> ⚠ Listing also states elsewhere: **75 lbs** (About this property)
+Travelers with dogs must verify pet policies before they book a property.
+Users need to quickly identify:
+- If pets are permitted
+- Maximum number of allowed dogs
+- Weight limits per dog
+- Required pet fees and refundable deposits
+- Pre-registration or prior approval requirements
 
-<img src="docs/panel-not-allowed.png" alt="Callout reading: Pets are not allowed" width="420">
+Manual review of every section on multiple listings takes time and causes missed restrictions.
 
-Conditional wording is handled: *"no pets over 30 lbs"* and *"no pets
-without prior approval"* mean pets **are** allowed with a condition, and
-are not reported as a ban. Neither is *"no pet fee"*.
+## How This Extension Helps
+
+This extension automatically reads listing data when the page loads.
+It displays a single summary card with all extracted pet policy details.
+
+- **Immediate Visibility**: Shows the complete pet policy instantly without manual scrolling or menu expansion.
+- **Structured Fields**: Converts raw text into clear fields for dog count, weight limit, fees, and approval requirements.
+- **Source Verification**: Provides a clickable **source** link next to each value that scrolls to and highlights the exact sentence on the page.
+- **Contradiction Alerts**: Flags discrepancies when rules in one section disagree with rules in another section.
+- **Comprehensive Notes**: Collects all remaining pet-related sentences (such as breed restrictions or leash rules) into an expandable notes section.
+- **Local Operation**: Operates locally in your browser with zero external network requests.
 
 ## In use
 
