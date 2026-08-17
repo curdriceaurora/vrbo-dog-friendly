@@ -97,8 +97,7 @@ runs in the page's own JS world to reach `__APOLLO_STATE__`;
 `content.js` merges that with visible text and renders the card.
 
 ```
-node --test
+node --check content.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node --test
 ```
 
-34 offline tests, no Chrome and no network. See [docs/testing.md](docs/testing.md)
-for the live harness that drives real listings.
+34 offline tests and JavaScript syntax checks with zero dependencies, no Chrome, and no network. Enforced automatically in CI via the `offline-tests` GitHub Actions workflow. See [docs/testing.md](docs/testing.md) for the live harness that drives real listings.
