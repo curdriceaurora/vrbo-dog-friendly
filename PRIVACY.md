@@ -21,12 +21,12 @@ The Extension requests the following browser permissions strictly to perform its
 ---
 
 ### 3. Third-Party Sharing
-Vrbow-wow does not sell, rent, monetize, or transfer any user data to third parties.
+Vrbow does not sell, rent, monetize, or transfer any user data to third parties.
 
 ---
 
 ### 4. Contact and Open Source
-Vrbow-wow is an open-source project. You can inspect the source code at:  
-[https://github.com/curdriceaurora/vrbo-dog-friendly](https://github.com/curdriceaurora/vrbo-dog-friendly)
+Vrbow is an open-source project. You can inspect the source code at:  
+[https://github.com/curdriceaurora/vrbow](https://github.com/curdriceaurora/vrbow)
 
 If you have questions about this policy, you can open an issue on the repository.
