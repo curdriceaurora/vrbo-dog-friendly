@@ -1,4 +1,4 @@
-# Vrbo Dog Policy Callout
+# Vrbow-wow: Vrbo Dog Policy Callout
 
 A Chrome extension that extracts pet policies from Vrbo listings and shows them in an always-visible summary card.
 
@@ -48,7 +48,7 @@ It displays a single summary card with all extracted pet policy details.
 Load the extension directly into Chrome (Chrome 111+ or any Chromium-based browser like Brave, Edge, Arc):
 
 ### Option 1: From GitHub Release (Quickest)
-1. Download `vrbo-dog-friendly-v1.0.0.zip` from [Releases](https://github.com/curdriceaurora/vrbo-dog-friendly/releases).
+1. Download `vrbow-wow-v1.0.0.zip` from [Releases](https://github.com/curdriceaurora/vrbo-dog-friendly/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Enable **Developer mode** using the toggle in the top-right corner.
