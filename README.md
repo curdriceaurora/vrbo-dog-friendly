@@ -5,7 +5,7 @@
 # <p align="center">Vrbow: Vrbo Dog Policy Callout</p>
 
 <p align="center">
-  <strong>A Chrome extension that extracts pet policies from Vrbo listings and shows them in an always-visible summary card.</strong>
+  <strong>A Chrome extension that extracts pet rules from Vrbo listings and shows them in a summary card.</strong>
 </p>
 
 <p align="center">
@@ -14,40 +14,42 @@
 
 ## Problem
 
-Vrbo property listings do not display dog rules in one standard location.
+Vrbo property listings do not show dog rules in one standard location.
 Hosts write pet rules across different sections:
 - House Rules
 - Amenities
-- "About this property" description
+- Property description ("About this property")
 
-Important pet policy details are frequently hidden behind collapsed sections or "See more" buttons.
-Hosts also write conflicting pet rules across different sections of the same listing.
+Important pet rules are often hidden behind collapsed menus or "See more" buttons.
+Hosts can also write conflicting pet rules in different sections of the same listing.
 
 ## Need
 
-Travelers with dogs must verify pet policies before they book a property.
-Users need to quickly identify:
-- If pets are permitted
+Travelers with dogs must verify pet rules before they book a property.
+Users need to quickly find:
+- If pets are allowed
 - Maximum number of allowed dogs
 - Weight limits per dog
-- Required pet fees and refundable deposits
+- Required pet fees and deposits
 - Pre-registration or prior approval requirements
 
-Manual review of every section on multiple listings takes time and causes missed restrictions.
+Reading every section on multiple listings takes time and causes missed restrictions.
 
-## How This Extension Helps
+## Solution
 
 This extension automatically reads listing data when the page loads.
-It displays a single summary card with all extracted pet policy details.
+It shows a single summary card with all extracted pet policy details.
 
-- **Immediate Visibility**: Shows the complete pet policy instantly without manual scrolling or menu expansion.
-- **Structured Fields**: Converts raw text into clear fields for dog count, weight limit, fees, and approval requirements.
-- **Source Verification**: Provides a clickable **source** link next to each value that scrolls to and highlights the exact sentence on the page.
-- **Contradiction Alerts**: Flags discrepancies when rules in one section disagree with rules in another section.
-- **Comprehensive Notes**: Collects all remaining pet-related sentences (such as breed restrictions or leash rules) into an expandable notes section.
-- **Local Operation**: Operates locally in your browser with zero external network requests.
+- **Immediate Visibility**: Shows the pet policy without manual scrolling or menu clicks.
+- **Structured Fields**: Converts text into fields for dog count, weight limit, fees, and approval rules.
+- **Source Verification**: Provides a clickable **source** link that jumps to and highlights the text on the page.
+- **Contradiction Alerts**: Flags conflicts when rules in one section disagree with rules in another section.
+- **Extra Notes**: Collects all other pet sentences (such as leash rules or breed limits) in an expandable drawer.
+- **Local Operation**: Runs locally in your browser with zero network requests.
 
-<img src="docs/panel-not-allowed.png" alt="Callout showing pets not allowed policy" width="420">
+<p align="center">
+  <img src="docs/panel-not-allowed.png" alt="Callout showing pets not allowed policy" width="420">
+</p>
 
 ---
 
@@ -55,29 +57,30 @@ It displays a single summary card with all extracted pet policy details.
 
 1. Download **`vrbow-v1.0.1.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
-3. Open `chrome://extensions` in your browser (Chrome 111+, Brave, Edge, or Arc).
-4. Turn on **Developer mode** using the toggle in the top-right corner.
-5. Click **Load unpacked** (top-left) and select the unzipped folder.
+3. Open `chrome://extensions` in your browser.
+4. Turn on **Developer mode** in the top-right corner.
+5. Click **Load unpacked** in the top-left corner.
+6. Select the unzipped folder.
 
 ---
 
 ## How to Use
 
 ### 1. Automatic On-Page Card
-Whenever you visit a listing page on `vrbo.com`, the policy card automatically loads in the bottom-right corner:
+When you visit a listing on `vrbo.com`, the policy card opens in the bottom-right corner:
 
 ![The callout appearing automatically as a Vrbo listing loads](docs/demo.gif)
 
-- **Source verification**: Click the **source** link next to any extracted value (dog limit, weight, fee, deposit) to automatically jump to and highlight the exact sentence in the listing where that value was found.
-- **Other pet notes**: Click **Other pet notes** to expand raw sentences containing extra guidelines (such as leash rules, crate requirements, or breed restrictions).
-- **Contradiction alerts (⚠️)**: If the host wrote conflicting rules in different sections (e.g. 50 lbs in House Rules vs 75 lbs in About this property), the card alerts you and shows both sources.
-- **Collapse / Minimize**: Click the card header to collapse it to a compact bar, or click **×** to dismiss it.
-- **↻ Rescan**: Click the refresh icon to re-run extraction if a listing was slow to load.
-- **Source indicator**: The footer displays whether the data came from the listing's structured data or visible page text fallback.
+- **Source verification**: Click the **source** link next to any value to highlight the original text on the page.
+- **Other pet notes**: Click **Other pet notes** to read extra guidelines (such as leash rules or crate requirements).
+- **Contradiction alerts (⚠️)**: The card alerts you if the host wrote conflicting rules in different sections.
+- **Minimize / Close**: Click the header to collapse the card, or click **×** to remove it.
+- **Rescan (↻)**: Click the refresh icon to re-run extraction if a listing loads slowly.
+- **Data Source**: The footer shows if data came from structured listing data or visible page text.
 
 ### 2. Browser Toolbar Popup
 - Pin the extension icon to your Chrome toolbar.
-- Clicking the extension icon on any active Vrbo listing opens a quick popup summary with the same dog policy details.
+- Click the extension icon on any active Vrbo listing to view the dog policy summary.
 
 ---
 
@@ -85,4 +88,4 @@ Whenever you visit a listing page on `vrbo.com`, the policy card automatically l
 - [Privacy Policy](PRIVACY.md)
 - [License](LICENSE)
 
-> **Note**: Vrbow is an independent open-source helper tool and is not affiliated with or endorsed by Vrbo or Expedia Group. Always verify the host's original house rules and policies before completing a booking.
+> **Note**: Vrbow is an independent open-source tool. It is not affiliated with or endorsed by Vrbo or Expedia Group. Always verify the host's original house rules before you book a property.

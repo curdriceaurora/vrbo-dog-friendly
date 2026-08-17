@@ -1,94 +1,60 @@
-# Testing
+# Testing Guide
 
-Two layers: offline fixture tests for the parser, and a live harness that
-drives real listings in Chrome.
+This document describes how to test the extension.
+Testing has two parts: offline unit tests and a live browser test harness.
 
-## Offline tests
+---
 
-```
+## 1. Offline Tests
+
+Run this command in your terminal:
+
+```bash
 node --check content.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node --test
 ```
 
-No dependencies, no build step, no Chrome and no network — JavaScript syntax
-validation plus Node's built-in test runner against `extract.js`. Safe to run anywhere.
+### Details
+- Requires no external dependencies or network connection.
+- Validates JavaScript syntax for all extension files.
+- Executes 34 unit tests against `extract.js` using Node's test runner.
+- Verifies rule extraction, weight limits, fees, deposits, and contradiction detection.
 
-The fixtures are phrased the way hosts actually write these rules, and
-exist mainly to pin down the ambiguous cases: conditional restrictions
-that read like bans ("no pets over 30 lbs"), "no pet fee" (dog-friendly)
-versus "no pets" (not), and the same weight limit restated in a second
-unit, which must not be reported as the listing contradicting itself.
+---
 
-The live harness deliberately lives in `tools/`, not `test/`, because
-`node --test` treats *every* `.js` file under a `test/` directory as a
-test file.
+## 2. Live Browser Test Harness
 
-## Live harness
+Run this command to test live Vrbo listings in Chrome:
 
-```
+```bash
 node tools/live-check.js
 ```
 
-Samples 5 URLs from `tools/live-listings.txt` (`--all`, `--sample N`, or
-specific listing ids also work), drives them in Chrome, and prints the
-panel each one produced. Needs Node 22+ and Chrome, and opens a visible
-window — Vrbo serves less to headless.
+### Options
+- Test a specific listing: `node tools/live-check.js 2688106`
+- Test multiple listings: `node tools/live-check.js --sample 5`
+- Test all listings: `node tools/live-check.js --all`
 
-A listing passes only if the panel rendered **and** `page-bridge.js`
-produced a non-empty Apollo payload in the MAIN world **and**
-isolated-world state stayed out of the MAIN world. A rendered panel alone
-proves little: the DOM fallback can paint a convincing one while the
-bridge is entirely broken.
+### Verification Criteria
+A listing passes only when:
+1. The extension renders the summary card.
+2. `page-bridge.js` extracts structured Apollo data from the page world.
+3. Isolated-world script variables remain separate from the page world.
 
-| exit | meaning |
-|---|---|
-| 0 | every listing passed |
-| 1 | a genuine extension failure, including a manifest that would not load |
-| 2 | inconclusive — a bot challenge, or a URL that served no listing data |
+### Exit Codes
+| Exit Code | Meaning | Description |
+|---|---|---|
+| `0` | Pass | All listings passed verification. |
+| `1` | Failure | The extension or manifest failed to execute. |
+| `2` | Inconclusive | The page showed a bot challenge or served no data. |
 
-The two inconclusive causes are reported separately (`BLOCKED` vs
-`NO DATA`) because they call for different responses: wait and retry
-versus check whether the URL is still good.
+---
 
-### Two modes, and why it matters which one you got
+## Rate Limiting
 
-The harness always passes `--load-extension`, then probes the page to see
-whether it took. It reports which mode ran, and they are not equivalent.
+Vrbo can show bot verification pages after many rapid requests.
+The harness waits 4000 ms between listings by default.
+To change the delay:
 
-**Real load** — the extension loads from `manifest.json` and nothing is
-injected. This is the only mode that exercises the manifest itself:
-content-script order, `"world": "MAIN"`, host matching. A canary
-extension rides along so that a broken manifest cannot masquerade as
-"this browser won't load extensions" and quietly downgrade to emulation.
-
-**Emulated fallback** — the scripts are injected by hand:
-`page-bridge.js` into the MAIN world at document_start, `extract.js` and
-`content.js` into a real isolated world. Still covers the scripts, the
-cross-world bridge and real listing data, but a manifest typo **cannot**
-fail this mode.
-
-Branded Google Chrome stopped honouring `--load-extension` in 137
-(measured on Chrome 151, where `--enable-unsafe-extension-debugging` does
-not restore it). That removal is specific to branded Chrome — Chromium
-and Chrome for Testing still support it:
-
+```bash
+node tools/live-check.js --sample 5 --delay 5000
 ```
-npx @puppeteer/browsers install chrome@stable --path "$HOME/.cache/puppeteer"
-```
-
-`--path` is required. Without it the CLI installs into the *current
-directory*, which is not where the harness looks, so the new browser goes
-undiscovered and runs silently fall back to the emulated path. Set
-`CHROME_BIN` to override.
-
-### Rate limiting
-
-Vrbo starts serving an interstitial bot challenge ("Bot or Not?") after
-roughly twenty listings in quick succession, and the block then persists
-for a while across the whole IP, not just the offending browser profile.
-That page has no `PropertyInfo` in its Apollo state, so the bridge
-legitimately produces nothing — which looks exactly like a regression if
-you aren't told. The harness detects it and reports `BLOCKED …
-inconclusive`.
-
-Runs are paced `--delay` ms apart (default 4000). Work in small batches
-and re-run blocked listings later rather than retrying immediately.
