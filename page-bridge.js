@@ -126,15 +126,22 @@
     return payload;
   }
 
-  // Poll aggressively at first (Apollo cache populates async after mount).
-  let attempts = 0;
-  const fastPoll = setInterval(() => {
-    attempts++;
-    const payload = tryDispatch(false);
-    if ((payload && payload.items && payload.items.length > 5) || attempts > 30) {
-      clearInterval(fastPoll);
-    }
-  }, 350);
+  // Poll aggressively at first and whenever navigation occurs
+  // (Apollo cache populates async after mount / GraphQL response).
+  let fastPollTimer = null;
+  function startFastPoll() {
+    if (fastPollTimer) clearInterval(fastPollTimer);
+    let attempts = 0;
+    fastPollTimer = setInterval(() => {
+      attempts++;
+      const payload = tryDispatch(false);
+      if ((payload && payload.items && payload.items.length > 5) || attempts > 30) {
+        clearInterval(fastPollTimer);
+        fastPollTimer = null;
+      }
+    }, 350);
+  }
+  startFastPoll();
 
   // Slow background poll to catch SPA navigation to a different listing.
   // extractFromApollo() walks the whole PropertyInfo graph, so running it
@@ -153,6 +160,7 @@
       if (location.href !== lastPollUrl) {
         lastPollUrl = location.href;
         pollDelay = POLL_MIN_MS;
+        startFastPoll();
       }
       if (document.visibilityState !== "hidden") {
         const before = lastPayloadKey;
@@ -164,9 +172,10 @@
   })();
 
   // Respond on demand, in case the isolated content script's listener
-  // attaches after we already dispatched once.
+  // attaches after we already dispatched once or after an SPA hop.
   window.addEventListener(REQUEST_EVENT, () => {
     tryDispatch(true);
+    startFastPoll();
   });
 
   // SPA navigation signal for the content script. This patch has to live
@@ -179,6 +188,7 @@
     if (typeof original !== "function") continue;
     history[method] = function (...args) {
       const ret = original.apply(this, args);
+      startFastPoll();
       window.dispatchEvent(new Event(NAV_EVENT));
       return ret;
     };

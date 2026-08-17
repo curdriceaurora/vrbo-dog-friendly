@@ -54,19 +54,7 @@
   }
 
   function looksLikeListingPage() {
-    if (!isListingUrl(location.href)) return false;
-    // Apollo payload first. On a freshly-loaded listing NONE of the DOM
-    // signals below exist yet — House Rules and the amenities block are
-    // lazy-mounted, so document.body.innerText is still just nav chrome
-    // (measured on a live listing: 6.7KB pre-scroll vs 27KB after, with
-    // "house rules" absent from the former). Gating on the DOM therefore
-    // suppressed the panel until the user scrolled, even though the
-    // bridge had already handed us the full policy — which is the exact
-    // dependency reading the Apollo cache was meant to remove.
-    if (latestApolloPayload && latestApolloPayload.items && latestApolloPayload.items.length) return true;
-    if (document.querySelector('[data-stid*="pet"]')) return true;
-    const bodyText = document.body ? document.body.innerText : "";
-    return /house rules/i.test(bodyText) || /pet(s)? (allowed|policy|friendly)/i.test(bodyText);
+    return isListingUrl(location.href);
   }
 
   // Click anything that looks like a "show more / read more / expand"
