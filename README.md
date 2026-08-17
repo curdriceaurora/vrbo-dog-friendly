@@ -81,4 +81,8 @@ Whenever you visit a listing page on `vrbo.com`, the policy card automatically l
 
 ---
 
+- [Release Notes & Changelog](CHANGELOG.md)
+- [Privacy Policy](PRIVACY.md)
+- [License](LICENSE)
+
 > **Note**: Vrbow is an independent open-source helper tool and is not affiliated with or endorsed by Vrbo or Expedia Group. Always verify the host's original house rules and policies before completing a booking.
