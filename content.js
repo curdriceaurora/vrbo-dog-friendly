@@ -535,6 +535,10 @@
       latestApolloPayload = null;
       harvestedDialogText = [];
       harvestedForUrl = null;
+      if (observer) {
+        observer.disconnect();
+        startObserver();
+      }
       window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
       scheduleRescan(1200);
       setTimeout(() => scan(false), 3200);

@@ -81,11 +81,23 @@
     }
   }
 
+  function getListingIdFromUrl() {
+    const m = /\/(\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(location.pathname);
+    return m ? m[1] : null;
+  }
+
   function extractFromApollo() {
     const state = window.__APOLLO_STATE__;
     if (!state || typeof state !== "object") return null;
 
-    const infoKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
+    const currentId = getListingIdFromUrl();
+    let infoKey = null;
+    if (currentId) {
+      infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${currentId.toLowerCase()}`);
+    }
+    if (!infoKey) {
+      infoKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
+    }
     if (!infoKey) return null;
     const root = state[infoKey];
     if (!root) return null;

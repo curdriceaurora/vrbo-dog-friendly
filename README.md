@@ -78,3 +78,7 @@ Whenever you visit a listing page on `vrbo.com`, the policy card automatically l
 ### 2. Browser Toolbar Popup
 - Pin the extension icon to your Chrome toolbar.
 - Clicking the extension icon on any active Vrbo listing opens a quick popup summary with the same dog policy details.
+
+---
+
+> **Note**: Vrbow is an independent open-source helper tool and is not affiliated with or endorsed by Vrbo or Expedia Group. Always verify the host's original house rules and policies before completing a booking.
