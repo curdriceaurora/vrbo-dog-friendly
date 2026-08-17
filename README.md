@@ -60,8 +60,6 @@ Whenever you visit a listing page on `vrbo.com`, the policy card automatically l
 
 ![The callout appearing automatically as a Vrbo listing loads](docs/demo.gif)
 
-<img src="docs/listing-context.jpg" alt="The callout in the corner of a Vrbo listing page" width="820">
-
 - **Source verification**: Click the **source** link next to any extracted value (dog limit, weight, fee, deposit) to automatically jump to and highlight the exact sentence in the listing where that value was found.
 - **Other pet notes**: Click **Other pet notes** to expand raw sentences containing extra guidelines (such as leash rules, crate requirements, or breed restrictions).
 - **Contradiction alerts (⚠️)**: If the host wrote conflicting rules in different sections (e.g. 50 lbs in House Rules vs 75 lbs in About this property), the card alerts you and shows both sources.
