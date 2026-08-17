@@ -59,8 +59,33 @@
   // restore scroll position. Best-effort; safe to no-op if nothing found.
   // The MutationObserver is suppressed while this runs so our own DOM
   // pokes don't trigger a feedback loop of rescans.
+  // Text harvested from dialogs this pass opened, since closing them again
+  // takes the content back out of the DOM.
+  let harvestedDialogText = [];
+
+  function visibleDialogs() {
+    return Array.from(document.querySelectorAll('[role="dialog"]')).filter((d) => d.getClientRects().length > 0);
+  }
+
+  function closeDialog(dialog) {
+    const closer = dialog.querySelector('[aria-label*="close" i], button[title*="close" i]');
+    if (!closer) return false;
+    try {
+      closer.click();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   async function expandCollapsedSections() {
     suppressObserver = true;
+    harvestedDialogText = [];
+    // Some of what we click opens a dialog rather than expanding in place —
+    // Vrbo's "See all" is a plain button with no aria-haspopup to filter on,
+    // and it puts a full-screen amenities dialog over the listing. Note
+    // which dialogs were already open so we only touch our own.
+    const dialogsBefore = new Set(visibleDialogs());
     try {
       const TOGGLE_TEXT_RE = /^(show more|show all|see more|see all|view more|view all|read more|expand|more( details| rules| info)?)$/i;
       // Sections whose collapsed content is plausibly pet-relevant.
@@ -112,6 +137,20 @@
         await new Promise((r) => setTimeout(r, 400));
       }
 
+      // Take the text out of anything we opened, then put the page back the
+      // way we found it. The dialog is worth reading — Vrbo's amenities
+      // dialog carries ~1.4KB of exactly the content the fallback wants —
+      // but leaving it up covers the listing the user was reading.
+      for (const dialog of visibleDialogs()) {
+        if (dialogsBefore.has(dialog)) continue;
+        const text = dialog.innerText || "";
+        if (text.trim()) harvestedDialogText.push(text);
+        closeDialog(dialog);
+      }
+      if (harvestedDialogText.length) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+
       // Nudge any empty lazyload placeholders (Vrbo mounts content on
       // intersection) into view momentarily, then restore scroll.
       const placeholders = Array.from(document.querySelectorAll(".lazyload-wrapper, [id]"))
@@ -156,6 +195,9 @@
       if (node.parentElement && node.parentElement.closest(DOM_EXCLUDE)) continue;
       parts.push(text);
     }
+    // Dialogs we opened and closed again are no longer walkable, so their
+    // text comes from the harvest instead.
+    for (const text of harvestedDialogText) parts.push(text);
     return getSentences(parts.join("\n")).filter(isPetRelated);
   }
 
@@ -351,18 +393,18 @@
     }
     isScanning = true;
     try {
-      // The expand pass only exists to reveal lazy-mounted DOM for the
-      // fallback path. When the bridge has already handed us listing data
-      // it buys nothing — and it costs a lot: one of the controls it
-      // clicks on Vrbo opens the full-screen "Property amenities" dialog,
-      // which stays open over the listing the user was reading. Measured
-      // against a live listing with and without the extension, the dialog
-      // is ours. Every listing verified so far had a populated payload
-      // (112-161 items), so this skips the DOM poking in the normal case
-      // and keeps it for when we genuinely need the fallback.
-      const haveListingData = !!(latestApolloPayload && latestApolloPayload.items && latestApolloPayload.items.length);
-      if (!haveListingData) await expandCollapsedSections();
-      const entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      // Decide whether to poke the DOM by asking whether we actually have
+      // pet information yet — not merely whether the Apollo payload was
+      // non-empty. A payload can be well populated with unrelated text
+      // while the pet policy sits behind a "See all" control, and keying
+      // on item count alone reported "No dog policy details detected" on
+      // exactly those listings. A forced rescan always expands, since the
+      // user asking for one is asking us to look harder.
+      let entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      if (!entries.length || force) {
+        await expandCollapsedSections();
+        entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      }
       const policy = extractPolicy(entries);
       window.__vdpLastPolicy = policy;
       chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: location.href });
