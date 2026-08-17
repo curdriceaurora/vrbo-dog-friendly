@@ -61,7 +61,16 @@
   // pokes don't trigger a feedback loop of rescans.
   // Text harvested from dialogs this pass opened, since closing them again
   // takes the content back out of the DOM.
+  //
+  // Tagged with the URL it came from, and ignored the moment that stops
+  // matching. Harvested text is the one piece of listing content that
+  // outlives the DOM it came from, so on an SPA hop to another listing it
+  // would otherwise be presented as the new property's pet policy — and
+  // because it also satisfies the "do we have pet data yet" gate, the new
+  // listing's own dialog would never be opened. Someone could book on it.
+  // The URL tag holds even if the navigation detector misses the change.
   let harvestedDialogText = [];
+  let harvestedForUrl = null;
 
   function visibleDialogs() {
     return Array.from(document.querySelectorAll('[role="dialog"]')).filter((d) => d.getClientRects().length > 0);
@@ -81,6 +90,7 @@
   async function expandCollapsedSections() {
     suppressObserver = true;
     harvestedDialogText = [];
+    harvestedForUrl = location.href;
     // Some of what we click opens a dialog rather than expanding in place —
     // Vrbo's "See all" is a plain button with no aria-haspopup to filter on,
     // and it puts a full-screen amenities dialog over the listing. Note
@@ -196,8 +206,11 @@
       parts.push(text);
     }
     // Dialogs we opened and closed again are no longer walkable, so their
-    // text comes from the harvest instead.
-    for (const text of harvestedDialogText) parts.push(text);
+    // text comes from the harvest instead — but only while we are still on
+    // the listing it was taken from.
+    if (harvestedForUrl === location.href) {
+      for (const text of harvestedDialogText) parts.push(text);
+    }
     return getSentences(parts.join("\n")).filter(isPetRelated);
   }
 
@@ -424,6 +437,8 @@
       lastScannedUrl = location.href;
       removePanel();
       latestApolloPayload = null;
+      harvestedDialogText = [];
+      harvestedForUrl = null;
       window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
       scheduleRescan(1200);
       setTimeout(() => scan(false), 3200);
