@@ -351,7 +351,17 @@
     }
     isScanning = true;
     try {
-      await expandCollapsedSections();
+      // The expand pass only exists to reveal lazy-mounted DOM for the
+      // fallback path. When the bridge has already handed us listing data
+      // it buys nothing — and it costs a lot: one of the controls it
+      // clicks on Vrbo opens the full-screen "Property amenities" dialog,
+      // which stays open over the listing the user was reading. Measured
+      // against a live listing with and without the extension, the dialog
+      // is ours. Every listing verified so far had a populated payload
+      // (112-161 items), so this skips the DOM poking in the normal case
+      // and keeps it for when we genuinely need the fallback.
+      const haveListingData = !!(latestApolloPayload && latestApolloPayload.items && latestApolloPayload.items.length);
+      if (!haveListingData) await expandCollapsedSections();
       const entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
       const policy = extractPolicy(entries);
       window.__vdpLastPolicy = policy;
