@@ -40,25 +40,42 @@ It sits out of the way in the corner, over the listing you were reading:
 
 <img src="docs/listing-context.jpg" alt="The callout in the corner of a Vrbo listing page" width="820">
 
-## Install
+## Installation
 
-Not on the Web Store — load it unpacked:
+Load the extension directly into Chrome (Chrome 111+ or any Chromium-based browser like Brave, Edge, Arc):
 
-1. Open `chrome://extensions` (Chrome 111+).
-2. Turn on **Developer mode**, top right.
-3. Click **Load unpacked** and pick this folder.
-4. Open any `vrbo.com` listing. The card appears on its own.
+### Option 1: From GitHub Release (Quickest)
+1. Download `vrbo-dog-friendly-v1.0.0.zip` from [Releases](https://github.com/curdriceaurora/vrbo-dog-friendly/releases).
+2. Unzip the file into a folder on your computer.
+3. Open `chrome://extensions` in your browser.
+4. Enable **Developer mode** using the toggle in the top-right corner.
+5. Click **Load unpacked** (top-left) and select the unzipped folder.
 
-## Using it
+### Option 2: From Source / Git
+1. Clone or download this repository:
+   ```bash
+   git clone https://github.com/curdriceaurora/vrbo-dog-friendly.git
+   ```
+2. Open `chrome://extensions` and enable **Developer mode**.
+3. Click **Load unpacked** and select the repository directory.
 
-- **source** — jumps to the sentence a value came from and highlights it.
-- **Other pet notes** — click to expand the sentences that didn't map to a field.
-- **↻** — rescan, if a listing was still loading.
-- **×** — dismiss. Click the header to collapse it instead.
-- The toolbar icon shows the same summary in a popup.
+---
 
-The footer says where the answer came from — the listing's own data, or
-visible page text only.
+## How to Use
+
+### 1. Automatic On-Page Card
+Whenever you visit a listing page on `vrbo.com` (or regional sites like `stayz.com.au`, `fewo-direkt.de`, `abritel.fr`, `bookabach.co.nz`), the policy card automatically loads in the bottom-right corner:
+
+- **Source verification**: Click the **source** link next to any extracted value (dog limit, weight, fee, deposit) to automatically jump to and highlight the exact sentence in the listing where that value was found.
+- **Other pet notes**: Click **Other pet notes** to expand raw sentences containing extra guidelines (such as leash rules, crate requirements, or breed restrictions).
+- **Contradiction alerts (⚠️)**: If the host wrote conflicting rules in different sections (e.g. 50 lbs in House Rules vs 75 lbs in About this property), the card alerts you and shows both sources.
+- **Collapse / Minimize**: Click the card header to collapse it to a compact bar, or click **×** to dismiss it.
+- **↻ Rescan**: Click the refresh icon to re-run extraction if a listing was slow to load.
+- **Source indicator**: The footer displays whether the data came from the listing's structured data (`__APOLLO_STATE__`) or visible page text fallback.
+
+### 2. Browser Toolbar Popup
+- Pin the extension icon to your Chrome toolbar.
+- Clicking the extension icon on any active Vrbo listing opens a quick popup summary with the same dog policy details.
 
 ## How it reads the page
 
