@@ -1,8 +1,16 @@
-# Vrbow: Vrbo Dog Policy Callout
+<p align="center">
+  <img src="icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
+</p>
 
-A Chrome extension that extracts pet policies from Vrbo listings and shows them in an always-visible summary card.
+# <p align="center">Vrbow: Vrbo Dog Policy Callout</p>
 
-<img src="docs/panel-dog-friendly.png" alt="Callout showing max dogs 2, weight limit 50 lbs, pre-registration required" width="420">
+<p align="center">
+  <strong>A Chrome extension that extracts pet policies from Vrbo listings and shows them in an always-visible summary card.</strong>
+</p>
+
+<p align="center">
+  <img src="docs/panel-dog-friendly.png" alt="Callout showing max dogs 2, weight limit 50 lbs, pre-registration required" width="420">
+</p>
 
 ## Problem
 
