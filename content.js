@@ -535,10 +535,6 @@
       latestApolloPayload = null;
       harvestedDialogText = [];
       harvestedForUrl = null;
-      if (observer) {
-        observer.disconnect();
-        startObserver();
-      }
       window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
       scheduleRescan(1200);
       setTimeout(() => scan(false), 3200);
@@ -574,12 +570,10 @@
   window.addEventListener("vdp-locationchange", onUrlMaybeChanged);
   setInterval(onUrlMaybeChanged, 1000);
 
-  // MutationObserver, scoped to the narrowest reasonable root and debounced
-  // with a hard cap so continuously-animating widgets (carousels, maps)
-  // can't starve us of a rescan forever. Suppressed while we're clicking
-  // things ourselves in expandCollapsedSections to avoid feedback loops.
+  // MutationObserver, attached to document.documentElement which permanently
+  // survives SPA DOM swaps. Debounced with a hard cap so continuously-animating
+  // widgets can't starve us of a rescan. Suppressed while we click things ourselves.
   function startObserver() {
-    const root = document.querySelector("main") || document.body || document.documentElement;
     observer = new MutationObserver(() => {
       if (suppressObserver) return;
       const now = Date.now();
@@ -593,7 +587,7 @@
         scheduleRescan(900);
       }
     });
-    observer.observe(root, { childList: true, subtree: true });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
   }
   startObserver();
 

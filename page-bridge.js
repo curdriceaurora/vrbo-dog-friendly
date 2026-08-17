@@ -82,8 +82,11 @@
   }
 
   function getListingIdFromUrl() {
-    const m = /\/(\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(location.pathname);
-    return m ? m[1] : null;
+    const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(location.pathname);
+    if (!m) return null;
+    let id = m[1];
+    if (/^p\d+/i.test(id)) id = id.slice(1);
+    return id;
   }
 
   function extractFromApollo() {
@@ -91,13 +94,9 @@
     if (!state || typeof state !== "object") return null;
 
     const currentId = getListingIdFromUrl();
-    let infoKey = null;
-    if (currentId) {
-      infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${currentId.toLowerCase()}`);
-    }
-    if (!infoKey) {
-      infoKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
-    }
+    if (!currentId) return null;
+
+    const infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${currentId.toLowerCase()}`);
     if (!infoKey) return null;
     const root = state[infoKey];
     if (!root) return null;
