@@ -84,6 +84,13 @@ When you visit a listing on `vrbo.com`, the policy card opens in the bottom-righ
 
 ---
 
+## Scope and Alternatives
+
+- **Vrbo Only**: This extension operates only on `vrbo.com` property listings. It does not run on Airbnb, Expedia, or other booking websites.
+- **Search Alternative**: To search across properties with custom pet filters (such as dog weight, pet count, or fee limits), use [BringFido](https://www.bringfido.com).
+
+---
+
 - [Release Notes & Changelog](CHANGELOG.md)
 - [Privacy Policy](PRIVACY.md)
 - [License](LICENSE)
