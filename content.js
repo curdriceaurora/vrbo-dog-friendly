@@ -30,6 +30,7 @@
   let isScanning = false;
   let mutationFirstSeenAt = 0;
   let suppressObserver = false;
+  let pendingRescan = false;
   let observer = null;
 
   // ---------- text gathering: DOM (fallback layer) ----------
@@ -59,8 +60,122 @@
   // restore scroll position. Best-effort; safe to no-op if nothing found.
   // The MutationObserver is suppressed while this runs so our own DOM
   // pokes don't trigger a feedback loop of rescans.
+  // Text harvested from dialogs this pass opened, since closing them again
+  // takes the content back out of the DOM.
+  //
+  // Tagged with the URL it came from, and ignored the moment that stops
+  // matching. Harvested text is the one piece of listing content that
+  // outlives the DOM it came from, so on an SPA hop to another listing it
+  // would otherwise be presented as the new property's pet policy — and
+  // because it also satisfies the "do we have pet data yet" gate, the new
+  // listing's own dialog would never be opened. Someone could book on it.
+  // The URL tag holds even if the navigation detector misses the change.
+  let harvestedDialogText = [];
+  let harvestedForUrl = null;
+
+  function visibleDialogs() {
+    return Array.from(document.querySelectorAll('[role="dialog"]')).filter((d) => d.getClientRects().length > 0);
+  }
+
+  // Dialogs this extension caused to open, remembered across passes.
+  //
+  // Without this, a dialog we opened but failed to handle in time gets
+  // treated as pre-existing by the NEXT pass — grandfathered as the
+  // user's own — so it is never harvested and never closed, and a second
+  // click adds another one beside it. Our leftovers must stay ours.
+  const ownedDialogs = new WeakSet();
+
+  // Watched for the FULL budget, with no early exit. An earlier version
+  // stopped once two polls were quiet, which is the same "it will have
+  // mounted by now" guess as the original fixed 400ms wait — just with a
+  // bigger number, and it missed a dialog mounting at 1.7s exactly as the
+  // 400ms version missed one at 700ms. Any threshold is wrong for some
+  // page, and the early exit was optimising a cost that is not paid on
+  // normal listings anyway: this whole pass only runs when we have no pet
+  // data, or when the user explicitly asked for a rescan.
+  const DIALOG_WATCH_MS = 4000;
+  const DIALOG_POLL_MS = 250;
+
+  // Clicking a control and waiting a fixed 400ms assumed the dialog mounts
+  // within it. Vrbo's did; a slower one (measured at 700ms) was missed
+  // entirely. Watch for a while instead, handling each dialog as it
+  // appears, for the whole budget — see DIALOG_WATCH_MS above for why
+  // there is deliberately no early exit.
+  async function harvestAndCloseDialogs(preexisting) {
+    const deadline = Date.now() + DIALOG_WATCH_MS;
+    const handledThisPass = new Set();
+
+    while (Date.now() < deadline) {
+      for (const dialog of visibleDialogs()) {
+        const isOurs = ownedDialogs.has(dialog) || !preexisting.has(dialog);
+        if (!isOurs) continue;
+        if (!handledThisPass.has(dialog)) {
+          handledThisPass.add(dialog);
+          ownedDialogs.add(dialog);
+          // Harvest every pass it is still open: collectDomPetSentences
+          // skips [role="dialog"] subtrees, so this is the only way the
+          // text reaches the corpus.
+          const text = dialog.innerText || "";
+          if (text.trim()) harvestedDialogText.push(text);
+        }
+        // Retried on later polls if the close didn't take.
+        closeDialog(dialog);
+      }
+      await new Promise((r) => setTimeout(r, DIALOG_POLL_MS));
+    }
+    return handledThisPass.size;
+  }
+
+  function closeDialog(dialog) {
+    const closer = dialog.querySelector('[aria-label*="close" i], button[title*="close" i]');
+    if (closer) {
+      try {
+        closer.click();
+        if (!dialog.getClientRects().length) return true;
+      } catch (e) {
+        /* fall through to Escape */
+      }
+    }
+    // Escape as a fallback, for a dialog whose close control we don't
+    // recognise. It bubbles from the dialog up to document by design —
+    // that is how it reaches the site's handler — but that same handler
+    // is usually global and closes whatever dialog IT considers topmost,
+    // which can be one the user opened themselves. There is no way to
+    // reach the site's handler without that risk, so only take it when no
+    // foreign dialog is open. Leaving ours up is the lesser harm; closing
+    // the user's is us breaking their page.
+    // No Escape of any kind while someone else's dialog is open.
+    //
+    // A previous version tried a non-bubbling Escape first, on the theory
+    // that it could only reach a handler attached to our own dialog. That
+    // is wrong: a non-bubbling event still travels the CAPTURE phase from
+    // window down to the target, so a site listening with
+    // addEventListener("keydown", h, true) receives it either way and
+    // closes whatever dialog it considers topmost — the user's. There is
+    // no dispatch that reaches the site's handler for our dialog alone, so
+    // the only safe answer is not to dispatch at all. Ours stays on screen;
+    // the policy is still harvested and reported.
+    const foreignOpen = visibleDialogs().some((d) => d !== dialog && !ownedDialogs.has(d));
+    if (foreignOpen) return false;
+
+    for (const bubbles of [false, true]) {
+      for (const type of ["keydown", "keyup"]) {
+        dialog.dispatchEvent(new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles, cancelable: true }));
+      }
+      if (!dialog.getClientRects().length) return true;
+    }
+    return false;
+  }
+
   async function expandCollapsedSections() {
     suppressObserver = true;
+    harvestedDialogText = [];
+    harvestedForUrl = location.href;
+    // Some of what we click opens a dialog rather than expanding in place —
+    // Vrbo's "See all" is a plain button with no aria-haspopup to filter on,
+    // and it puts a full-screen amenities dialog over the listing. Note
+    // which dialogs were already open so we only touch our own.
+    const dialogsBefore = new Set(visibleDialogs());
     try {
       const TOGGLE_TEXT_RE = /^(show more|show all|see more|see all|view more|view all|read more|expand|more( details| rules| info)?)$/i;
       // Sections whose collapsed content is plausibly pet-relevant.
@@ -112,6 +227,12 @@
         await new Promise((r) => setTimeout(r, 400));
       }
 
+      // Take the text out of anything we opened, then put the page back the
+      // way we found it. The dialog is worth reading — Vrbo's amenities
+      // dialog carries ~1.4KB of exactly the content the fallback wants —
+      // but leaving it up covers the listing the user was reading.
+      await harvestAndCloseDialogs(dialogsBefore);
+
       // Nudge any empty lazyload placeholders (Vrbo mounts content on
       // intersection) into view momentarily, then restore scroll.
       const placeholders = Array.from(document.querySelectorAll(".lazyload-wrapper, [id]"))
@@ -155,6 +276,12 @@
       if (!text) continue;
       if (node.parentElement && node.parentElement.closest(DOM_EXCLUDE)) continue;
       parts.push(text);
+    }
+    // Dialogs we opened and closed again are no longer walkable, so their
+    // text comes from the harvest instead — but only while we are still on
+    // the listing it was taken from.
+    if (harvestedForUrl === location.href) {
+      for (const text of harvestedDialogText) parts.push(text);
     }
     return getSentences(parts.join("\n")).filter(isPetRelated);
   }
@@ -344,21 +471,52 @@
   // ---------- scan orchestration ----------
 
   async function scan(force) {
-    if (isScanning) return;
+    // Don't drop a scan request that lands while one is in flight. The
+    // expand pass can hold the lock for a couple of seconds, and the
+    // rescan onUrlMaybeChanged schedules at 1200ms falls inside exactly
+    // that window — so a dropped request meant a listing could keep the
+    // previous one's panel until some unrelated mutation happened to
+    // trigger another scan.
+    if (isScanning) {
+      pendingRescan = true;
+      return;
+    }
     if (!force && !looksLikeListingPage()) {
       removePanel();
       return;
     }
     isScanning = true;
+    // Everything below describes THIS listing. scan() awaits, and an SPA
+    // hop during an await leaves the rest of this function computing an
+    // answer for a page that is no longer on screen — so bail rather than
+    // render it. onUrlMaybeChanged has already cleared state and queued a
+    // fresh scan for the new listing.
+    const startUrl = location.href;
     try {
-      await expandCollapsedSections();
-      const entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      // Decide whether to poke the DOM by asking whether we actually have
+      // pet information yet — not merely whether the Apollo payload was
+      // non-empty. A payload can be well populated with unrelated text
+      // while the pet policy sits behind a "See all" control, and keying
+      // on item count alone reported "No dog policy details detected" on
+      // exactly those listings. A forced rescan always expands, since the
+      // user asking for one is asking us to look harder.
+      let entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      if (!entries.length || force) {
+        await expandCollapsedSections();
+        if (location.href !== startUrl) return;
+        entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      }
+      if (location.href !== startUrl) return;
       const policy = extractPolicy(entries);
       window.__vdpLastPolicy = policy;
-      chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: location.href });
+      chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: startUrl });
       renderPanel(policy);
     } finally {
       isScanning = false;
+      if (pendingRescan) {
+        pendingRescan = false;
+        scheduleRescan(300);
+      }
     }
   }
 
@@ -372,6 +530,8 @@
       lastScannedUrl = location.href;
       removePanel();
       latestApolloPayload = null;
+      harvestedDialogText = [];
+      harvestedForUrl = null;
       window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
       scheduleRescan(1200);
       setTimeout(() => scan(false), 3200);

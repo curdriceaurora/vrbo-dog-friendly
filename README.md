@@ -29,6 +29,17 @@ Conditional wording is handled: *"no pets over 30 lbs"* and *"no pets
 without prior approval"* mean pets **are** allowed with a condition, and
 are not reported as a ban. Neither is *"no pet fee"*.
 
+## In use
+
+It appears on its own, a second or two after the listing loads — no
+clicking, no scrolling down to House Rules.
+
+![The callout appearing automatically as a Vrbo listing loads](docs/demo.gif)
+
+It sits out of the way in the corner, over the listing you were reading:
+
+<img src="docs/listing-context.jpg" alt="The callout in the corner of a Vrbo listing page" width="820">
+
 ## Install
 
 Not on the Web Store — load it unpacked:
