@@ -67,11 +67,23 @@ function withActiveTab(cb) {
   });
 }
 
-const VRBO_HOST_RE = /^https:\/\/([a-z0-9-]+\.)?vrbo\.com\//i;
+function isListingUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
+    const path = u.pathname;
+    if (/^\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
+    if (/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
+    if (/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(path)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 function loadPolicy() {
   withActiveTab((tab) => {
-    if (!tab || !tab.url || !VRBO_HOST_RE.test(tab.url)) {
+    if (!tab || !tab.url || !isListingUrl(tab.url)) {
       renderNotVrbo();
       return;
     }

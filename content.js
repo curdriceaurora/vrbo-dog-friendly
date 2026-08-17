@@ -39,7 +39,22 @@
   // the same isolated world) so it can be unit-tested without a browser.
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
 
+  function isListingUrl(urlStr) {
+    try {
+      const u = new URL(urlStr || location.href);
+      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
+      const path = u.pathname;
+      if (/^\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
+      if (/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
+      if (/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(path)) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
   function looksLikeListingPage() {
+    if (!isListingUrl(location.href)) return false;
     // Apollo payload first. On a freshly-loaded listing NONE of the DOM
     // signals below exist yet — House Rules and the amenities block are
     // lazy-mounted, so document.body.innerText is still just nav chrome
@@ -481,7 +496,7 @@
       pendingRescan = true;
       return;
     }
-    if (!force && !looksLikeListingPage()) {
+    if (!isListingUrl(location.href) || (!force && !looksLikeListingPage())) {
       removePanel();
       return;
     }
