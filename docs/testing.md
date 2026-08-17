@@ -6,7 +6,7 @@ drives real listings in Chrome.
 ## Offline tests
 
 ```
-node --check content.js extract.js page-bridge.js popup.js && node --test
+node --check content.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node --test
 ```
 
 No dependencies, no build step, no Chrome and no network — JavaScript syntax
