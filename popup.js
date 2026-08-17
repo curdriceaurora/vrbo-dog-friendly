@@ -67,7 +67,7 @@ function withActiveTab(cb) {
   });
 }
 
-const VRBO_HOST_RE = /^https:\/\/www\.(vrbo\.com|abritel\.fr|fewo-direkt\.de|bookabach\.co\.nz|stayz\.com\.au)\//;
+const VRBO_HOST_RE = /^https:\/\/([a-z0-9-]+\.)?vrbo\.com\//i;
 
 function loadPolicy() {
   withActiveTab((tab) => {

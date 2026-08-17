@@ -14,7 +14,7 @@
 
 ### 2. Permissions and Usage
 The Extension requests the following browser permissions strictly to perform its core functionality:
-- **`host_permissions` (`*://www.vrbo.com/*`, etc.):** Used exclusively to read the property listing's publicly loaded page content on supported Vrbo domains in order to extract and display pet policy rules.
+- **`host_permissions` (`*://*.vrbo.com/*`):** Used exclusively to read the property listing's publicly loaded page content on `vrbo.com` in order to extract and display pet policy rules.
 - **`storage`:** Used locally on your device to temporarily cache the last extracted pet policy for the active tab so it displays instantly when clicking the toolbar icon. No cached data is transmitted or shared.
 - **`activeTab`:** Used to communicate between the browser action popup and the current active Vrbo tab when the user clicks the extension icon or triggers a manual rescan.
 

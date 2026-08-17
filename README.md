@@ -56,7 +56,7 @@ It displays a single summary card with all extracted pet policy details.
 ## How to Use
 
 ### 1. Automatic On-Page Card
-Whenever you visit a listing page on `vrbo.com` (or regional sites like `stayz.com.au`, `fewo-direkt.de`, `abritel.fr`, `bookabach.co.nz`), the policy card automatically loads in the bottom-right corner:
+Whenever you visit a listing page on `vrbo.com`, the policy card automatically loads in the bottom-right corner:
 
 ![The callout appearing automatically as a Vrbo listing loads](docs/demo.gif)
 
@@ -72,10 +72,3 @@ Whenever you visit a listing page on `vrbo.com` (or regional sites like `stayz.c
 ### 2. Browser Toolbar Popup
 - Pin the extension icon to your Chrome toolbar.
 - Clicking the extension icon on any active Vrbo listing opens a quick popup summary with the same dog policy details.
-
----
-
-## Known Limitations
-
-- **Regex-based extraction**: Unusual phrasing lands in "Other pet notes" rather than structured fields to prevent incorrect assumptions.
-- **English primary**: Structured field extraction targets English phrasing. Non-English text on sister sites (`fewo-direkt.de`, `abritel.fr`) will typically appear under "Other pet notes".

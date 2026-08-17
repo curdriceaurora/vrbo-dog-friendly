@@ -19,20 +19,12 @@
   },
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
-    "*://www.vrbo.com/*",
-    "*://www.abritel.fr/*",
-    "*://www.fewo-direkt.de/*",
-    "*://www.bookabach.co.nz/*",
-    "*://www.stayz.com.au/*"
+    "*://*.vrbo.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "*://www.vrbo.com/*",
-        "*://www.abritel.fr/*",
-        "*://www.fewo-direkt.de/*",
-        "*://www.bookabach.co.nz/*",
-        "*://www.stayz.com.au/*"
+        "*://*.vrbo.com/*"
       ],
       "js": ["page-bridge.js"],
       "world": "MAIN",
@@ -40,11 +32,7 @@
     },
     {
       "matches": [
-        "*://www.vrbo.com/*",
-        "*://www.abritel.fr/*",
-        "*://www.fewo-direkt.de/*",
-        "*://www.bookabach.co.nz/*",
-        "*://www.stayz.com.au/*"
+        "*://*.vrbo.com/*"
       ],
       "js": ["extract.js", "content.js"],
       "css": ["content.css"],
