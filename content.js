@@ -99,7 +99,8 @@
   // Clicking a control and waiting a fixed 400ms assumed the dialog mounts
   // within it. Vrbo's did; a slower one (measured at 700ms) was missed
   // entirely. Watch for a while instead, handling each dialog as it
-  // appears, and stop early once things go quiet.
+  // appears, for the whole budget — see DIALOG_WATCH_MS above for why
+  // there is deliberately no early exit.
   async function harvestAndCloseDialogs(preexisting) {
     const deadline = Date.now() + DIALOG_WATCH_MS;
     const handledThisPass = new Set();
@@ -143,20 +144,27 @@
     // reach the site's handler without that risk, so only take it when no
     // foreign dialog is open. Leaving ours up is the lesser harm; closing
     // the user's is us breaking their page.
-    const escape = (bubbles) => {
+    // No Escape of any kind while someone else's dialog is open.
+    //
+    // A previous version tried a non-bubbling Escape first, on the theory
+    // that it could only reach a handler attached to our own dialog. That
+    // is wrong: a non-bubbling event still travels the CAPTURE phase from
+    // window down to the target, so a site listening with
+    // addEventListener("keydown", h, true) receives it either way and
+    // closes whatever dialog it considers topmost — the user's. There is
+    // no dispatch that reaches the site's handler for our dialog alone, so
+    // the only safe answer is not to dispatch at all. Ours stays on screen;
+    // the policy is still harvested and reported.
+    const foreignOpen = visibleDialogs().some((d) => d !== dialog && !ownedDialogs.has(d));
+    if (foreignOpen) return false;
+
+    for (const bubbles of [false, true]) {
       for (const type of ["keydown", "keyup"]) {
         dialog.dispatchEvent(new KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles, cancelable: true }));
       }
-      return !dialog.getClientRects().length;
-    };
-
-    // Non-bubbling first: reaches a handler attached to this dialog and
-    // nothing else, so it can never disturb another dialog on the page.
-    if (escape(false)) return true;
-
-    const foreignOpen = visibleDialogs().some((d) => d !== dialog && !ownedDialogs.has(d));
-    if (foreignOpen) return false;
-    return escape(true);
+      if (!dialog.getClientRects().length) return true;
+    }
+    return false;
   }
 
   async function expandCollapsedSections() {
