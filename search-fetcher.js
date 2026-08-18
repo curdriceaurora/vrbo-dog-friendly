@@ -141,6 +141,26 @@
   }
 
   /**
+   * Identifies whether a cached policy is merely a preliminary search-level
+   * boolean flag without specific secondary numbers/rules.
+   */
+  function isShallowPreliminaryPolicy(policy) {
+    if (!policy || typeof policy !== "object") return false;
+    // Definitive negative policy never needs upgrading
+    if (policy.petsAllowed === false) return false;
+    // Rich policy with secondary constraints does not need upgrading
+    if (policy.maxDogs !== null && policy.maxDogs !== undefined) return false;
+    if (policy.weightLimit && policy.weightLimit.value !== null) return false;
+    if (policy.fee && policy.fee.amount !== null) return false;
+    if (policy.deposit && policy.deposit.amount !== null) return false;
+    if (policy.approvalRequired !== null && policy.approvalRequired !== undefined) return false;
+    if (policy._raw?.otherNotes && policy._raw.otherNotes.length > 0) return false;
+
+    // Shallow boolean flag from search results state
+    return policy.source === "search-page-state" || policy._source === "search-page-state";
+  }
+
+  /**
    * Build a concrete canonical policy from a search-page Apollo record
    * (a bridge result of { propertyId, items }). Returns null when the
    * record is empty or yields nothing concrete — callers then fall
@@ -453,9 +473,11 @@
           // Check memory cache once more before firing network
           const cached = memoryCache.get(nextItem.propertyId);
           if (cached && Date.now() - cached.ts < ttlMs) {
-            enqueuedOrActive.delete(nextItem.propertyId);
-            notify(nextItem.propertyId, cached.data);
-            continue;
+            if (!isShallowPreliminaryPolicy(cached.data?.policy)) {
+              enqueuedOrActive.delete(nextItem.propertyId);
+              notify(nextItem.propertyId, cached.data);
+              continue;
+            }
           }
 
           // Execute fetch
@@ -488,11 +510,10 @@
       try {
         if (!fetchFn) throw new Error("No fetch implementation available");
 
-        const res = await fetchFn(url, {
+        const validated = validateListingUrl(url);
+        const targetUrl = validated ? validated.fetchUrl : url;
+        const res = await fetchFn(targetUrl, {
           signal: controller.signal,
-          headers: {
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          },
         });
 
         if (isDisposed) return;
@@ -571,7 +592,9 @@
       const mem = memoryCache.get(propertyId);
       if (mem && Date.now() - mem.ts < ttlMs) {
         notify(propertyId, mem.data);
-        return;
+        if (!isShallowPreliminaryPolicy(mem.data?.policy)) {
+          return;
+        }
       }
 
       // 2. Check terminal-state cooldown

@@ -627,11 +627,24 @@
     try {
       const fast = trySearchApolloFastPath(propId);
       if (fast && globalThis.VdpSearchFetcher?.hasConcretePolicy?.(fast.policy)) {
-        // Seed the cache so the enqueue below notifies subscribers from
-        // memory and never issues a listing-page request for this property.
-        searchQueue.setCached(propId, fast);
-        searchQueue.enqueue(propId, url, priority);
-        return;
+        const isRichOrDefinitive = fast.policy.petsAllowed === false ||
+          fast.policy.maxDogs !== null ||
+          fast.policy.weightLimit !== null ||
+          fast.policy.fee !== null ||
+          fast.policy.deposit !== null;
+
+        if (isRichOrDefinitive) {
+          searchQueue.setCached(propId, fast);
+          searchQueue.enqueue(propId, url, priority);
+          return;
+        } else {
+          // Preliminary instant render: paint preliminary badge immediately without blocking rich listing fetch
+          const card = document.querySelector(`[data-vdp-prop-id="${propId}"]`);
+          const badge = card?.querySelector(".vdp-search-badge");
+          if (badge && badge.dataset.vdpStatus === "loading") {
+            updateBadgeUi(badge, fast);
+          }
+        }
       }
     } catch (e) {
       // Fall through to the normal queue path on any unexpected failure.
