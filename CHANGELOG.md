@@ -4,23 +4,23 @@ This document records all changes to **Vrbow**.
 
 ## [v1.2.0] - 2026-08-18
 
-### Search Results Badging & Accessible Tooltips
-- **Inline Card Badging**: Injects compact dog policy badges into property cards on Vrbo search pages (`Hotel-Search`, `/search`) with dynamic phrasing (`Max 1 dog allowed`, `Max 2 dogs allowed`, `Dogs allowed`, `Pets not allowed`, `Pet restrictions`).
-- **Accessible Hover & Focus Tooltip**: Displays a floating policy summary dialog when you hover over or focus any search card badge. Fully accessible per WCAG 2.1 AA (`role="dialog"`, non-modal semantics, focus trap, and `Escape` dismiss).
-- **Search-Page Apollo Fast Path**: Instantly resolves property cards directly from the search page's existing Apollo GraphQL cache (`PropertyInfo:<id>`) synchronously before issuing background requests.
-- **Throttled Background Queue**: Enqueues visible search cards in viewport with controlled concurrency (maximum 2 requests, 400 ms safety delay) with 400 ms dwell debouncing.
-- **Bot Challenge Protection**: Automatically pauses the fetch queue for 30 seconds if a 429 status or challenge is detected.
-- **Persistent Local Cache & 24-Hour Maintenance**: Caches parsed policies in `chrome.storage.local` with strict schema serialization, plus automatic background maintenance sweeps on startup and every 24 hours.
+### Search Page Badges and Tooltips
+- **Search Card Badges**: Shows pet policy badges on Vrbo search result cards. Examples: `Max 1 dog allowed`, `Max 2 dogs allowed`, `Dogs allowed`, `Pets not allowed`, and `Pet restrictions`.
+- **Accessible Tooltip Dialog**: Opens a floating summary dialog when you hover over or focus a badge. Follows WCAG 2.1 AA rules with a focus trap and `Escape` key close.
+- **Fast Apollo Data Search**: Reads existing property data from the search page cache before starting network requests.
+- **Controlled Request Queue**: Limits background requests to 2 parallel tasks with a 400 ms delay. Starts requests only after a card stays visible for 400 ms.
+- **Rate-Limit Protection**: Pauses requests for 30 seconds if Vrbo returns a 429 status code or a bot challenge.
+- **Local Storage Cache**: Saves extracted policies in local browser storage for 24 hours. Cleans expired and corrupt data on startup and every 24 hours.
 
-### Policy Extraction & Attributions
-- **Tiered Pet Fee Support**: Intelligently parses tiered pricing models (e.g. *"First dog free, each subsequent dog is $25"*), correctly distinguishing allowance from fixed limits and rendering tiered fee structures accurately across search badges, tooltips, and listing panels.
-- **Multi-Clause Max Dogs Parsing**: Preserves legitimate maximum dog limits in sentences containing additional/extra pet rules (e.g. *"We allow up to 2 dogs; each additional dog is $25 per night"*).
-- **Granular Section Attribution**: Notes and callout sources now identify specific Vrbo listing sections (*House Rules / Policies*, *About this property*, *Property amenities*, *Guest reviews*).
-- **Mixed Source Attribution**: Distinguishes listing data, visible text, and guest review signals (e.g., *"Source: listing data + review"*).
+### Policy Extraction and Sources
+- **Tiered Pet Fee Support**: Reads tiered pricing rules (for example, "First dog free, each next dog is $25"). Shows correct fees on search badges, tooltips, and listing cards.
+- **Dog Limit Extraction**: Correctly finds dog limits in sentences that also describe extra fees.
+- **Section Sources**: Identifies the exact page section for each rule (*House Rules*, *About this property*, *Amenities*, or *Reviews*).
+- **Combined Source Label**: Shows combined labels (such as `Source: listing data + review`) when rules come from multiple areas.
 
-### Theme & Design System
-- **Unified Semantic Token Architecture**: Shared CSS variables across listing panel, search badge, search tooltip, and toolbar popup with 0 component-level color literals.
-- **Automatic Dark Mode & High Contrast**: Follows operating system `prefers-color-scheme` dynamically and supports `@media (forced-colors: active)`. All text meets or exceeds WCAG AA contrast standards.
+### Theme and Colors
+- **Semantic CSS Tokens**: Uses shared design tokens across the listing card, search badge, search tooltip, and popup.
+- **Dark Mode and High Contrast**: Follows operating system theme settings and supports Windows high contrast mode. All text meets WCAG AA contrast rules.
 
 ---
 
