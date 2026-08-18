@@ -69,7 +69,10 @@ It shows a single summary card with all extracted pet policy details.
 ## How to Use
 
 ### 1. Search Results Badging & Hover Tooltips
-When you browse search results on `vrbo.com`:
+When you browse search results on `vrbo.com`, badges automatically appear on each property card:
+
+![Search results showing lazy loaded pet policy badges and hover tooltip](docs/search-demo.gif)
+
 - **Inline Badges**: The extension shows a compact badge on each search card (such as `🐾 Max 2 dogs allowed · 50 lbs · $150/stay`, `🐾 Dogs allowed · 1st free · $25/add'l/stay`, or `🚫 Pets not allowed`).
 - **Hover Tooltip**: Hover over any badge or focus it with your keyboard to open a floating summary dialog with detailed pet rules.
 - **Controlled Retrieval**: The extension fetches listing details with a controlled queue (maximum 2 requests, 400 ms safety delay) to prevent rate limits.
