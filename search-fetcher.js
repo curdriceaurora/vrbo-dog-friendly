@@ -151,6 +151,21 @@
           if (targetKey) break;
         }
 
+        if (!targetKey && candidateIds.length > 0) {
+          for (const k of Object.keys(state)) {
+            if (!k.startsWith("PropertyInfo:") && !k.startsWith("Property:")) continue;
+            const node = state[k];
+            if (!node || typeof node !== "object") continue;
+            const nodeIds = [node.propertyId, node.vrboPropertyId, node.expediaPropertyId, node.id]
+              .filter(Boolean)
+              .map((id) => String(id).toLowerCase());
+            if (candidateIds.some((cid) => nodeIds.includes(cid))) {
+              targetKey = k;
+              break;
+            }
+          }
+        }
+
         if (!targetKey && candidateIds.length === 0) {
           targetKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:")) ||
                       Object.keys(state).find((k) => k.startsWith("Property:"));
