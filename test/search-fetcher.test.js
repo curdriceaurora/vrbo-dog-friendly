@@ -1331,6 +1331,458 @@ test("page-bridge and extract currency exports", async (t) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issue #20: one-sided jitter, adaptive error-cluster backoff, remove() API
+// ---------------------------------------------------------------------------
 
+const OK_HTML = "<section class=\"house-rules\"><h2>House Rules</h2><p>Dogs welcome, maximum 2 dogs.</p></section>";
+const UNKNOWN_HTML = "<html><body>Nothing about animals here at all.</body></html>";
 
+/** Fetch mock that records dispatch start times and returns a concrete pet policy. */
+function makeTracingFetch(startTimes, bodyByUrl) {
+  return async (url) => {
+    startTimes.push({ t: Date.now(), url });
+    const body = bodyByUrl ? bodyByUrl(url) : null;
+    if (body) return body;
+    return { ok: true, status: 200, text: async () => OK_HTML };
+  };
+}
 
+function gaps(startTimes) {
+  const out = [];
+  for (let i = 1; i < startTimes.length; i++) out.push(startTimes[i].t - startTimes[i - 1].t);
+  return out;
+}
+
+/** Drive the shared ladder up by `n` steps using 429 responses (hard pause disabled). */
+async function raiseLadder(queue, n, prefix) {
+  for (let i = 0; i < n; i++) {
+    queue.enqueue(`${prefix}_429_${i}`, `https://www.vrbo.com/${prefix}429${i}`, "high");
+    await new Promise((r) => setTimeout(r, 60));
+  }
+}
+
+test("queue pacing: ladder base and effective delays (I10)", async (t) => {
+  await t.test("DEFAULT_MIN_DELAY_MS is 800 and is the ladder base; the global floor is 250", () => {
+    const queue = createSearchFetchQueue({ fetchFn: async () => ({ ok: true, status: 200, text: async () => OK_HTML }) });
+    assert.equal(queue.getLadderStep(), 0);
+    assert.equal(queue.getEffectiveMinDelayMs(), 800, "base delay must be 800ms at step 0");
+    assert.equal(queue.getHighPriorityDelayMs(), 250, "high-priority floor must be 250ms at step 0");
+    queue.dispose();
+  });
+
+  await t.test("ladder saturates at step 2: 800 -> 1600 -> 3200, never 6400", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: false, status: 429 }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+    });
+
+    const seen = [];
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue(`sat_${i}`, `https://www.vrbo.com/sat${i}`, "high");
+      await new Promise((r) => setTimeout(r, 50));
+      seen.push(queue.getLadderStep());
+    }
+
+    assert.deepEqual(seen, [1, 2, 2, 2, 2], `Ladder must saturate at 2, got ${JSON.stringify(seen)}`);
+    queue.dispose();
+
+    // Same saturation expressed at production constants: the cap is on the floor.
+    const prod = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: false, status: 429 }),
+      maxConcurrent: 1,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+    });
+    for (let i = 0; i < 4; i++) {
+      prod.enqueue(`psat_${i}`, `https://www.vrbo.com/psat${i}`, "high");
+      await new Promise((r) => setTimeout(r, 320));
+    }
+    assert.equal(prod.getLadderStep(), 2);
+    assert.equal(prod.getEffectiveMinDelayMs(), 3200, "effective floor must never exceed 3200ms");
+    assert.equal(prod.getHighPriorityDelayMs(), 1000, "global floor must never exceed 1000ms");
+    prod.dispose();
+  });
+});
+
+test("queue pacing: one-sided jitter (I4a)", async (t) => {
+  await t.test("observed spacing stays within [floor, floor * 1.3] across N samples and never below the floor", async () => {
+    const starts = [];
+    const floor = 90;
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts),
+      maxConcurrent: 1,
+      minDelayMs: floor,
+      highPriorityFloorMs: floor, // collapse the global term onto the class term
+    });
+
+    for (let i = 1; i <= 8; i++) queue.enqueue(`j_${i}`, `https://www.vrbo.com/j${i}`);
+    await new Promise((r) => setTimeout(r, 8 * floor * 1.3 + 500));
+
+    assert.ok(starts.length >= 6, `Expected >= 6 samples, got ${starts.length}`);
+    for (const g of gaps(starts)) {
+      assert.ok(g >= floor - 10, `Jitter must never fire below the floor: got ${g}ms < ${floor}ms`);
+      assert.ok(g <= floor * 1.3 + 45, `Jitter must not exceed floor * 1.3: got ${g}ms`);
+    }
+    queue.dispose();
+  });
+
+  await t.test("jitter is one-sided: randomFn 0 lands on the floor, randomFn 1 lands on floor * 1.3", async () => {
+    const floor = 120;
+
+    const lowStarts = [];
+    const low = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(lowStarts),
+      maxConcurrent: 1,
+      minDelayMs: floor,
+      highPriorityFloorMs: floor,
+      randomFn: () => 0,
+    });
+    low.enqueue("jl_1", "https://www.vrbo.com/jl1");
+    low.enqueue("jl_2", "https://www.vrbo.com/jl2");
+    await new Promise((r) => setTimeout(r, 450));
+    assert.equal(lowStarts.length, 2);
+    const lowGap = lowStarts[1].t - lowStarts[0].t;
+    assert.ok(lowGap >= floor - 10, `randomFn()=0 must not fire below the floor, got ${lowGap}ms`);
+    assert.ok(lowGap < floor * 1.2, `randomFn()=0 must land at the floor, got ${lowGap}ms`);
+    low.dispose();
+
+    const highStarts = [];
+    const high = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(highStarts),
+      maxConcurrent: 1,
+      minDelayMs: floor,
+      highPriorityFloorMs: floor,
+      randomFn: () => 1,
+    });
+    high.enqueue("jh_1", "https://www.vrbo.com/jh1");
+    high.enqueue("jh_2", "https://www.vrbo.com/jh2");
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(highStarts.length, 2);
+    const highGap = highStarts[1].t - highStarts[0].t;
+    assert.ok(
+      highGap >= floor * 1.3 - 15 && highGap <= floor * 1.3 + 45,
+      `randomFn()=1 must land at floor * 1.3 (${floor * 1.3}ms), got ${highGap}ms`
+    );
+    high.dispose();
+  });
+
+  await t.test("jitter composes with the ladder: at ladderStep 1 it is measured against 2x the base", async () => {
+    const starts = [];
+    const base = 100;
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts, (url) => (url.includes("429") ? { ok: false, status: 429 } : null)),
+      maxConcurrent: 1,
+      minDelayMs: base,
+      highPriorityFloorMs: base,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+      randomFn: () => 1, // maximum jitter
+    });
+
+    await raiseLadder(queue, 1, "lad");
+    assert.equal(queue.getLadderStep(), 1);
+    assert.equal(queue.getEffectiveMinDelayMs(), base * 2);
+
+    starts.length = 0;
+    queue.enqueue("lc_1", "https://www.vrbo.com/lc1");
+    queue.enqueue("lc_2", "https://www.vrbo.com/lc2");
+    await new Promise((r) => setTimeout(r, 900));
+
+    assert.equal(starts.length, 2, "both items must dispatch");
+    const gap = starts[1].t - starts[0].t;
+    assert.ok(gap >= base * 2 - 10, `Spacing must be gated by the laddered floor (>= ${base * 2}ms), got ${gap}ms`);
+    assert.ok(gap <= base * 2 * 1.3 + 50, `Spacing must stay within laddered floor * 1.3, got ${gap}ms`);
+    assert.ok(gap > base * 1.3 + 20, `Spacing must NOT be measured against the un-laddered base, got ${gap}ms`);
+    queue.dispose();
+  });
+});
+
+test("queue pacing: ladder advancement and recovery (I1 + I5)", async (t) => {
+  await t.test("a 429 sets pausedUntil AND advances ladderStep, exactly once for the single event", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: false, status: 429 }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 1000,
+      cooldownMs: 0,
+    });
+
+    assert.equal(queue.getLadderStep(), 0);
+    assert.equal(queue.isPaused(), false);
+
+    queue.enqueue("hb_1", "https://www.vrbo.com/hb1", "high");
+    await new Promise((r) => setTimeout(r, 70));
+
+    assert.equal(queue.isPaused(), true, "429 must set the hard pause");
+    assert.equal(queue.getLadderStep(), 1, "429 must advance the ladder exactly once, not twice");
+    assert.equal(queue.getEffectiveMinDelayMs(), 10);
+    queue.dispose();
+  });
+
+  await t.test("a bot-challenge body is one event too: one pause, one ladder step", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => "<html><head><title>Bot or Not?</title></head><body>challenge-running</body></html>",
+      }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 1000,
+      cooldownMs: 0,
+    });
+
+    queue.enqueue("ch_1", "https://www.vrbo.com/ch1", "high");
+    await new Promise((r) => setTimeout(r, 70));
+
+    assert.equal(queue.isPaused(), true);
+    assert.equal(queue.getLadderStep(), 1, "one challenge must advance the ladder exactly once");
+    queue.dispose();
+  });
+
+  await t.test("cluster gate: one timeout does not advance the ladder, three within the window do", async () => {
+    let attempts = 0;
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => {
+        attempts++;
+        const err = new Error("Aborted");
+        err.name = "AbortError";
+        throw err;
+      },
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+      errorClusterThreshold: 3,
+      errorClusterWindowMs: 60000,
+    });
+
+    queue.enqueue("to_1", "https://www.vrbo.com/to1", "high");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(queue.getLadderStep(), 0, "a single timeout must not escalate");
+
+    queue.enqueue("to_2", "https://www.vrbo.com/to2", "high");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(queue.getLadderStep(), 0, "two timeouts must not escalate");
+
+    queue.enqueue("to_3", "https://www.vrbo.com/to3", "high");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(queue.getLadderStep(), 1, "three timeouts within the window must escalate once");
+    assert.equal(attempts, 3);
+    queue.dispose();
+  });
+
+  await t.test("cluster gate: 5xx feeds the same cluster, and failures spread beyond the window do not", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: false, status: 503 }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+      errorClusterThreshold: 3,
+      errorClusterWindowMs: 80,
+    });
+
+    queue.enqueue("e5_1", "https://www.vrbo.com/e51", "high");
+    await new Promise((r) => setTimeout(r, 140)); // ages out of the window
+    queue.enqueue("e5_2", "https://www.vrbo.com/e52", "high");
+    await new Promise((r) => setTimeout(r, 25));
+    queue.enqueue("e5_3", "https://www.vrbo.com/e53", "high");
+    await new Promise((r) => setTimeout(r, 25));
+
+    assert.equal(queue.getLadderStep(), 0, "failures spread beyond the window must not form a cluster");
+
+    queue.enqueue("e5_4", "https://www.vrbo.com/e54", "high");
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(queue.getLadderStep(), 1, "three 5xx inside the window must escalate");
+    queue.dispose();
+  });
+
+  await t.test("`unknown` is inert: it neither advances the ladder nor resets the clean window", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async (url) => {
+        if (url.includes("429")) return { ok: false, status: 429 };
+        if (url.includes("okpolicy")) return { ok: true, status: 200, text: async () => OK_HTML };
+        return { ok: true, status: 200, text: async () => UNKNOWN_HTML };
+      },
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+      cleanWindowMs: 200,
+    });
+
+    await raiseLadder(queue, 1, "unk");
+    assert.equal(queue.getLadderStep(), 1);
+
+    // A run of `unknown` results spanning more than one clean window.
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue(`u_${i}`, `https://www.vrbo.com/u${i}`, "high");
+      await new Promise((r) => setTimeout(r, 60));
+      assert.equal(queue.getLadderStep(), 1, "an unknown result must not advance the ladder");
+    }
+
+    // The clean window survived the unknowns, so the next real success steps down.
+    queue.enqueue("u_ok", "https://www.vrbo.com/okpolicy", "high");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(queue.getLadderStep(), 0, "unknown results must not have reset the clean window");
+    queue.dispose();
+  });
+
+  await t.test("recovery is asymmetric: one success does not step down, a sustained clean window does", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async (url) => (url.includes("429")
+        ? { ok: false, status: 429 }
+        : { ok: true, status: 200, text: async () => OK_HTML }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+      cleanWindowMs: 300,
+    });
+
+    await raiseLadder(queue, 1, "rec");
+    assert.equal(queue.getLadderStep(), 1);
+
+    queue.enqueue("r_ok1", "https://www.vrbo.com/rok1", "high");
+    await new Promise((r) => setTimeout(r, 70));
+    assert.equal(queue.getLadderStep(), 1, "a single success must not step the ladder down");
+
+    await new Promise((r) => setTimeout(r, 320));
+    queue.enqueue("r_ok2", "https://www.vrbo.com/rok2", "high");
+    await new Promise((r) => setTimeout(r, 70));
+    assert.equal(queue.getLadderStep(), 0, "a sustained clean window must step the ladder down");
+    queue.dispose();
+  });
+
+  await t.test("both floors return to base only after the shared clean window, one step per window", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async (url) => (url.includes("429")
+        ? { ok: false, status: 429 }
+        : { ok: true, status: 200, text: async () => OK_HTML }),
+      maxConcurrent: 1,
+      minDelayMs: 100,
+      highPriorityFloorMs: 25,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+      cleanWindowMs: 250,
+    });
+
+    await raiseLadder(queue, 2, "two");
+    assert.equal(queue.getLadderStep(), 2);
+    assert.equal(queue.getEffectiveMinDelayMs(), 400, "background floor scales 4x at step 2");
+    assert.equal(queue.getHighPriorityDelayMs(), 100, "global floor scales 4x at step 2");
+
+    await new Promise((r) => setTimeout(r, 280));
+    queue.enqueue("t_ok1", "https://www.vrbo.com/tok1", "high");
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(queue.getLadderStep(), 1, "first clean window steps 2 -> 1");
+
+    await new Promise((r) => setTimeout(r, 280));
+    queue.enqueue("t_ok2", "https://www.vrbo.com/tok2", "high");
+    await new Promise((r) => setTimeout(r, 120));
+    assert.equal(queue.getLadderStep(), 0, "second clean window steps 1 -> 0");
+    assert.equal(queue.getEffectiveMinDelayMs(), 100);
+    assert.equal(queue.getHighPriorityDelayMs(), 25);
+    queue.dispose();
+  });
+});
+
+test("queue pacing: remove() API (I8a)", async (t) => {
+  await t.test("regression: enqueue -> remove -> re-enqueue is not locked out by enqueuedOrActive", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+    });
+
+    queue.enqueue("lock_1", "https://www.vrbo.com/lock1");
+    assert.equal(queue.remove("lock_1"), true, "remove() must report the cancellation");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(starts.length, 0, "a removed item must never dispatch");
+
+    // enqueue() early-returns on enqueuedOrActive.has(id), so a remove() that only
+    // spliced the queue array would block this property for the rest of the session.
+    queue.enqueue("lock_1", "https://www.vrbo.com/lock1");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(starts.length, 1, "re-enqueue after remove() must succeed");
+    assert.ok(starts[0].url.includes("lock1"));
+    queue.dispose();
+  });
+
+  await t.test("removes only the target; untargeted items still dispatch", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts),
+      maxConcurrent: 1,
+      minDelayMs: 120,
+      highPriorityFloorMs: 120,
+    });
+
+    queue.enqueue("rm_a", "https://www.vrbo.com/rma");
+    queue.enqueue("rm_b", "https://www.vrbo.com/rmb");
+    queue.enqueue("rm_c", "https://www.vrbo.com/rmc");
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(queue.remove("rm_b"), true);
+    await new Promise((r) => setTimeout(r, 800));
+
+    const urls = starts.map((s) => s.url);
+    assert.ok(urls.some((u) => u.includes("rma")), "untargeted item rm_a must still dispatch");
+    assert.ok(urls.some((u) => u.includes("rmc")), "untargeted item rm_c must still dispatch");
+    assert.ok(!urls.some((u) => u.includes("rmb")), "removed item rm_b must never dispatch");
+    queue.dispose();
+  });
+
+  await t.test("returns false for unknown ids and for in-flight ids", async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => {
+        await gate;
+        return { ok: true, status: 200, text: async () => OK_HTML };
+      },
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    assert.equal(queue.remove("never_seen"), false, "unknown id must return false");
+    assert.equal(queue.remove(null), false, "missing id must return false");
+
+    queue.enqueue("inflight_1", "https://www.vrbo.com/if1");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(queue.getActiveCount(), 1, "item must be in flight");
+    assert.equal(queue.remove("inflight_1"), false, "an in-flight id must return false");
+
+    release();
+    await new Promise((r) => setTimeout(r, 60));
+    queue.dispose();
+  });
+
+  await t.test("remove() preserves the session budget and leaves clearQueue() semantics intact", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: true, status: 200, text: async () => OK_HTML }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+    });
+
+    queue.enqueue("sb_1", "https://www.vrbo.com/sb1");
+    await new Promise((r) => setTimeout(r, 80));
+    const spent = queue.getSessionCount();
+    assert.ok(spent >= 1, "one request must have been spent");
+
+    queue.enqueue("sb_2", "https://www.vrbo.com/sb2");
+    assert.equal(queue.remove("sb_2"), true);
+    assert.equal(queue.getSessionCount(), spent, "remove() must not reset sessionRequestsCount");
+
+    queue.clearQueue();
+    assert.equal(queue.getSessionCount(), 0, "clearQueue() must still reset the session budget");
+    assert.equal(queue.getQueueLength(), 0);
+    queue.dispose();
+  });
+});
