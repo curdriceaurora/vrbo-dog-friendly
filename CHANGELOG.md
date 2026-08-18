@@ -10,6 +10,7 @@ This document records all changes to **Vrbow**.
 - **Throttled Background Queue**: Enqueues visible search cards with controlled concurrency (maximum 2 requests, 400 ms delay) to prevent bot challenges.
 - **Bot Challenge Protection**: Automatically pauses the fetch queue for 30 seconds if a 429 status or challenge is detected.
 - **Persistent Local Cache**: Caches parsed policies in `chrome.storage.local` with a 24-hour TTL for instant subsequent rendering with zero network requests.
+- **Search-Page Apollo Fast Path**: Resolves property cards directly from the search page's own `__APOLLO_STATE__` (`PropertyInfo:<id>` records) before issuing any listing-page request, skipping the fetch entirely when a concrete policy is already on the page. Falls through to the queue when no usable record exists.
 
 ---
 

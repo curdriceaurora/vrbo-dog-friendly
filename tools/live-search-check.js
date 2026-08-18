@@ -311,6 +311,7 @@ async function run() {
             text: b.textContent.trim(),
             className: b.className,
             status: b.dataset.vdpStatus,
+            source: b.dataset.vdpSource || null,
             propId: card ? card.getAttribute('data-vdp-prop-id') : null,
             linkHref: link ? link.href : null
           };
@@ -406,6 +407,20 @@ async function run() {
 
     const hasResolvedBadge = sampleBadges.some(b => b.status === "allowed" || b.status === "banned" || b.status === "restrictions");
     const hasParsedFields = inter?.parsedFields && inter.parsedFields.length > 0;
+
+    // Report where each resolved result came from: the search page's own
+    // Apollo state (no listing fetch) or a listing-page fetch.
+    const sourceBreakdown = {};
+    for (const b of sampleBadges) {
+      if (b.status === "allowed" || b.status === "banned" || b.status === "restrictions") {
+        const src = b.source || "listing-fetch";
+        sourceBreakdown[src] = (sourceBreakdown[src] || 0) + 1;
+      }
+    }
+    const sourceLine = Object.keys(sourceBreakdown).length
+      ? Object.entries(sourceBreakdown).map(([src, n]) => `${src}: ${n}`).join(", ")
+      : "none resolved";
+    console.log("\nResult source breakdown: " + sourceLine);
 
     console.log("\n══════════════════════════════════════════════════════");
     if (totalBadges === 0) {

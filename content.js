@@ -574,6 +574,63 @@
   let activeTooltipPropId = null;
   let tooltipLeaveTimer = null;
 
+  // 8.1.1 Search-page Apollo fast path: before any listing-page request,
+  // ask the page-world bridge for the exact PropertyInfo:<id> records the
+  // search page already fetched. The response is delivered synchronously
+  // during the request dispatch, so no card rendering is ever delayed on
+  // it — when there is no usable record the path falls through to the
+  // queue immediately.
+  const discoveredSearchPropIds = new Set();
+  let latestSearchApolloData = null;
+  let searchApolloRequestId = 0;
+
+  function requestSearchApolloData() {
+    if (!discoveredSearchPropIds.size) return null;
+    const requestId = ++searchApolloRequestId;
+    const propertyIds = Array.from(discoveredSearchPropIds).slice(0, 40);
+    try {
+      window.dispatchEvent(new CustomEvent("vdp-search-apollo-request", { detail: { propertyIds, requestId } }));
+    } catch (e) {
+      return null;
+    }
+    // The bridge's response event fires synchronously inside the dispatch
+    // above; only trust a payload answering THIS request.
+    const payload = latestSearchApolloData;
+    return payload && payload.requestId === requestId ? payload : null;
+  }
+
+  function trySearchApolloFastPath(propId) {
+    if (!propId) return null;
+    const fetcher = globalThis.VdpSearchFetcher;
+    if (!fetcher) return null;
+    discoveredSearchPropIds.add(propId);
+    const payload = requestSearchApolloData();
+    const record = payload && payload.results ? payload.results[propId] : null;
+    if (!record || !Array.isArray(record.items) || !record.items.length) return null;
+    const policy = typeof fetcher.resolveSearchApolloRecord === "function"
+      ? fetcher.resolveSearchApolloRecord(record, propId, "search-page-state")
+      : null;
+    if (!policy) return null;
+    return { status: "ok", propertyId: propId, policy, ts: Date.now(), _source: "search-page-state" };
+  }
+
+  function enqueueSearch(propId, url, priority = "normal") {
+    if (!searchQueue) return;
+    try {
+      const fast = trySearchApolloFastPath(propId);
+      if (fast && globalThis.VdpSearchFetcher?.hasConcretePolicy?.(fast.policy)) {
+        // Seed the cache so the enqueue below notifies subscribers from
+        // memory and never issues a listing-page request for this property.
+        searchQueue.setCached(propId, fast);
+        searchQueue.enqueue(propId, url, priority);
+        return;
+      }
+    } catch (e) {
+      // Fall through to the normal queue path on any unexpected failure.
+    }
+    searchQueue.enqueue(propId, url, priority);
+  }
+
   function clearTooltipLeaveTimer() {
     if (tooltipLeaveTimer) {
       clearTimeout(tooltipLeaveTimer);
@@ -646,7 +703,7 @@
             const propId = card.getAttribute("data-vdp-prop-id");
             const url = card.getAttribute("data-vdp-url");
             if (propId && url && searchQueue) {
-              searchQueue.enqueue(propId, url, "normal");
+              enqueueSearch(propId, url, "normal");
             }
           }
         }
@@ -658,6 +715,8 @@
 
   function cleanupSearchManager() {
     hideTooltip();
+    discoveredSearchPropIds.clear();
+    latestSearchApolloData = null;
     if (searchQueue) {
       searchQueue.dispose();
       searchQueue = null;
@@ -720,6 +779,7 @@
 
     card.setAttribute("data-vdp-prop-id", propId);
     card.setAttribute("data-vdp-url", link.href);
+    discoveredSearchPropIds.add(propId);
 
     // Watch visibility for prefetching
     searchCardObserver?.observe(card);
@@ -830,6 +890,11 @@
     if (badge.dataset.vdpStatus === badgeInfo.statusKey && badge.dataset.vdpText === badgeInfo.text) return;
     badge.dataset.vdpStatus = badgeInfo.statusKey;
     badge.dataset.vdpText = badgeInfo.text;
+    // Report where this result came from: the search page's own Apollo
+    // state (no listing fetch) or a listing-page fetch.
+    badge.dataset.vdpSource = data.status === "ok"
+      ? (data._source || "listing-fetch")
+      : (data.status || "unknown");
     badge.className = badgeInfo.className;
     badge.setAttribute("aria-label", badgeInfo.text);
 
@@ -847,7 +912,7 @@
   function onBadgeHover(badge, propId, url, isHighPriority) {
     clearTooltipLeaveTimer();
     if (isHighPriority && searchQueue) {
-      searchQueue.enqueue(propId, url, "high");
+      enqueueSearch(propId, url, "high");
     }
     showTooltipForBadge(badge, propId, url, false);
   }
@@ -1067,6 +1132,12 @@
   window.addEventListener("vdp-apollo-data", (e) => {
     latestApolloPayload = e.detail;
     scheduleRescan(150);
+  });
+  // Search-page Apollo fast path: the bridge answers this request
+  // synchronously while the request event is still dispatching, so
+  // requestSearchApolloData() can read the fresh payload in the same tick.
+  window.addEventListener("vdp-search-apollo-data", (e) => {
+    latestSearchApolloData = e.detail;
   });
   // Ask the bridge for whatever it already has, in case it fired before
   // we attached this listener.

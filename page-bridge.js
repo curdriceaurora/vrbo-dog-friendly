@@ -27,6 +27,8 @@
 (() => {
   const REQUEST_EVENT = "vdp-request-apollo-data";
   const DATA_EVENT = "vdp-apollo-data";
+  const SEARCH_REQUEST_EVENT = "vdp-search-apollo-request";
+  const SEARCH_DATA_EVENT = "vdp-search-apollo-data";
   const NAV_EVENT = "vdp-locationchange";
 
   let lastPayloadKey = null;
@@ -122,6 +124,39 @@
     };
   }
 
+  // Search pages have no listing ID in the URL, so extractFromApollo() can't
+  // find the current property — yet Vrbo's search results page also carries
+  // window.__APOLLO_STATE__, usually with one PropertyInfo:<id> record per
+  // result card, using the same graph shape as the listing page. Read exactly
+  // the records the content script asked for (bounded set), walking ONLY those
+  // graphs, so a search page can badge its cards without issuing a single
+  // listing request. "No usable record" is a normal outcome, not an error:
+  // the caller falls through to the queue when a property has no entry here.
+  function extractFromSearchApollo(propertyIds) {
+    const state = window.__APOLLO_STATE__;
+    if (!state || typeof state !== "object") return { ok: true, results: {} };
+    const ids = Array.isArray(propertyIds) ? propertyIds.filter((id) => typeof id === "string" && id) : [];
+    const results = {};
+    for (const id of ids.slice(0, 40)) {
+      const infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${id.toLowerCase()}`);
+      if (!infoKey) continue;
+      const root = state[infoKey];
+      if (!root) continue;
+      const out = [];
+      walkCollect(state, root, null, null, out, new Set(), 0);
+      const seen = new Set();
+      const items = [];
+      for (const item of out) {
+        const key = item.header + "||" + item.text;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(item);
+      }
+      results[id] = { propertyId: id, ts: Date.now(), items };
+    }
+    return { ok: true, results };
+  }
+
   function payloadKey(payload) {
     if (!payload) return "none";
     return payload.propertyId + "|" + payload.items.length + "|" + (payload.items[payload.items.length - 1]?.text.length || 0);
@@ -187,6 +222,21 @@
   window.addEventListener(REQUEST_EVENT, () => {
     tryDispatch(true);
     startFastPoll();
+  });
+
+  // Search-page fast path: the content script asks for the exact property
+  // IDs it has discovered on the results page, and gets back only the
+  // matching PropertyInfo:<id> graphs. The response is dispatched
+  // synchronously inside this handler, so the content script can read the
+  // result in the same tick it makes the request and decide whether to
+  // skip its queued listing fetch entirely.
+  window.addEventListener(SEARCH_REQUEST_EVENT, (e) => {
+    const detail = e && e.detail ? e.detail : {};
+    const propertyIds = Array.isArray(detail.propertyIds) ? detail.propertyIds : [];
+    const payload = extractFromSearchApollo(propertyIds);
+    payload.requestId = detail.requestId || null;
+    window.__vdpSearchBridgeData = payload;
+    window.dispatchEvent(new CustomEvent(SEARCH_DATA_EVENT, { detail: payload }));
   });
 
   // SPA navigation signal for the content script. This patch has to live

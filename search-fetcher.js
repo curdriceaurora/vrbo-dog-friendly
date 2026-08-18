@@ -124,6 +124,40 @@
   }
 
   /**
+   * A "concrete" canonical policy is one a badge can actually show — not a
+   * null policy and not one whose every field is "not specified".
+   */
+  function hasConcretePolicy(policy) {
+    return Boolean(policy && (
+      policy.petsAllowed !== null ||
+      policy.maxDogs !== null ||
+      policy.weightLimit !== null ||
+      policy.fee !== null ||
+      policy.deposit !== null ||
+      policy.approvalRequired !== null ||
+      (policy._raw?.otherNotes && policy._raw.otherNotes.length > 0)
+    ));
+  }
+
+  /**
+   * Build a concrete canonical policy from a search-page Apollo record
+   * (a bridge result of { propertyId, items }). Returns null when the
+   * record is empty or yields nothing concrete — callers then fall
+   * through to a normal listing fetch.
+   */
+  function resolveSearchApolloRecord(record, propertyId, source = "search-page-state") {
+    if (!record || !Array.isArray(record.items) || record.items.length === 0) return null;
+    const corpus = extract.buildCorpus({ items: record.items }, []);
+    if (!corpus || corpus.length === 0) return null;
+    const rawPolicy = extract.extractPolicy(corpus);
+    if (!rawPolicy || !rawPolicy.found) return null;
+    const policy = typeof extract.normalizePolicy === "function"
+      ? extract.normalizePolicy(rawPolicy, propertyId, source)
+      : rawPolicy;
+    return hasConcretePolicy(policy) ? policy : null;
+  }
+
+  /**
    * Search Fetch Queue & Cache Manager
    */
   function createSearchFetchQueue(options = {}) {
@@ -371,17 +405,9 @@
           return;
         }
 
-        const hasConcretePolicy = parsed && parsed.policy && (
-          parsed.policy.petsAllowed !== null ||
-          parsed.policy.maxDogs !== null ||
-          parsed.policy.weightLimit !== null ||
-          parsed.policy.fee !== null ||
-          parsed.policy.deposit !== null ||
-          parsed.policy.approvalRequired !== null ||
-          (parsed.policy._raw?.otherNotes && parsed.policy._raw.otherNotes.length > 0)
-        );
+        const hasConcrete = hasConcretePolicy(parsed && parsed.policy);
 
-        if (hasConcretePolicy) {
+        if (hasConcrete) {
           const data = {
             status: "ok",
             propertyId,
@@ -509,6 +535,8 @@
   return {
     walkApolloNode,
     parseListingHtml,
+    hasConcretePolicy,
+    resolveSearchApolloRecord,
     createSearchFetchQueue,
   };
 });
