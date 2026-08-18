@@ -394,7 +394,15 @@
     const cooldownMs = options.cooldownMs !== undefined ? options.cooldownMs : DEFAULT_COOLDOWN_MS;
     // minDelayMs IS baseDelayMs: the ladder base, not a separate knob.
     const baseDelayMs = minDelayMs;
-    // The global floor can never be looser than the background floor it sits under.
+    // Global spacing floor: hpFloor = min(HIGH_PRIORITY_FLOOR_MS, baseDelayMs).
+    // The clamp is an invariant of the two-tracker design, not a test convenience:
+    // lastDispatchAt gates EVERY dispatch, so hpFloor is the aggregate rate limit
+    // sitting underneath the per-class background floor. Letting it exceed
+    // baseDelayMs would make the "global" floor stricter than the background floor
+    // it is supposed to sit under, and background items would then be paced by the
+    // high-priority term instead of their own. At production constants the clamp is
+    // inert (min(250, 800) = 250); it only binds when baseDelayMs is configured
+    // below 250 ms.
     const highPriorityFloorMs = Math.min(
       options.highPriorityFloorMs !== undefined ? options.highPriorityFloorMs : HIGH_PRIORITY_FLOOR_MS,
       baseDelayMs
@@ -630,7 +638,11 @@
       if (ladderStep < MAX_LADDER_STEP) ladderStep++;
     }
 
-    /** Any non-success restarts the clean window used for recovery. */
+    /**
+     * Restarts the clean window used for recovery. Called only by the two pressure
+     * outcomes below (hard block, soft failure). Everything else — `unknown`, 404 and
+     * other non-429/403 4xx — is inert on this path as well as on the ladder.
+     */
     function noteNonSuccess() {
       lastNonSuccessAt = Date.now();
     }
@@ -660,7 +672,16 @@
       }
     }
 
-    /** A concrete-policy success. Steps down only after a sustained clean window. */
+    /**
+     * A concrete-policy success. Steps down only after a sustained clean window.
+     *
+     * Recovery is success-driven BY DESIGN, not on a timer: a ladder sitting above
+     * step 0 with zero traffic does not self-heal, it waits for the next successful
+     * fetch. This is intentional. An idle queue issues no requests, so an elevated
+     * floor costs nothing while idle, and the first request after an idle stretch is
+     * the one that most needs to be careful. Queues do not outlive a page session,
+     * so there is no long-lived state to leak.
+     */
     function noteSuccess() {
       const now = Date.now();
       if (ladderStep > 0 && now - lastNonSuccessAt >= cleanWindowMs) {
@@ -811,9 +832,12 @@
         }
 
         if (!res.ok) {
-          // 5xx feeds the error cluster; other client errors are non-successes only.
+          // Only 5xx is server pressure and feeds the error cluster. A 404 (or any
+          // other 4xx that is not 429/403) proves the server is healthy and answering
+          // — the property is simply gone. It is fully inert, exactly like `unknown`:
+          // it neither advances the ladder nor resets the clean window, so a scatter
+          // of delisted listings cannot hold the ladder elevated and block recovery.
           if (res.status >= 500) noteSoftFailure();
-          else noteNonSuccess();
           const result = { status: "error", code: res.status, propertyId };
           recordTerminalState(propertyId, result, false);
           notify(propertyId, result);

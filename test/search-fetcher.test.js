@@ -1786,3 +1786,122 @@ test("queue pacing: remove() API (I8a)", async (t) => {
     queue.dispose();
   });
 });
+
+test("queue pacing: amendments to issue #20", async (t) => {
+  await t.test("404 is fully inert: a run of 404s neither advances the ladder nor blocks a later clean-window step-down", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async (url) => {
+        if (url.includes("429")) return { ok: false, status: 429 };
+        if (url.includes("okpolicy")) return { ok: true, status: 200, text: async () => OK_HTML };
+        return { ok: false, status: 404 };
+      },
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      pauseOnChallengeMs: 0,
+      cooldownMs: 0,
+      cleanWindowMs: 200,
+    });
+
+    await raiseLadder(queue, 1, "nf");
+    assert.equal(queue.getLadderStep(), 1);
+
+    // A scatter of delisted properties, spanning more than one clean window.
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue(`nf_${i}`, `https://www.vrbo.com/nf${i}`, "high");
+      await new Promise((r) => setTimeout(r, 60));
+      assert.equal(queue.getLadderStep(), 1, "a 404 must not advance the ladder");
+    }
+
+    // A 404 proves the server is healthy, so the clean window is intact and the
+    // next real success steps the ladder down.
+    queue.enqueue("nf_ok", "https://www.vrbo.com/okpolicy", "high");
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(queue.getLadderStep(), 0, "404s must not have reset the clean window");
+    queue.dispose();
+  });
+
+  await t.test("404s never form an error cluster no matter how many arrive", async () => {
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: false, status: 404 }),
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+      errorClusterThreshold: 3,
+      errorClusterWindowMs: 60000,
+    });
+
+    for (let i = 0; i < 6; i++) {
+      queue.enqueue(`cl_${i}`, `https://www.vrbo.com/cl${i}`, "high");
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    assert.equal(queue.getLadderStep(), 0, "six 404s must not cluster into a ladder step");
+    queue.dispose();
+  });
+
+  await t.test("remove() during the staged-enqueue window cancels the pending push and does not lock the id out", async () => {
+    const starts = [];
+    // Storage whose lookup resolves on a timer, so the enqueue stays staged
+    // (in enqueuedOrActive, not yet pushed to `queue`) for a controllable window.
+    const slowStorage = {
+      get(_keys, cb) { setTimeout(() => cb({}), 120); },
+      set(_items, cb) { if (cb) cb(); },
+      remove(_keys, cb) { if (cb) cb(); },
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts),
+      storage: slowStorage,
+      autoMaintenance: false,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+    });
+
+    queue.enqueue("staged_1", "https://www.vrbo.com/staged1");
+    await new Promise((r) => setTimeout(r, 30)); // lookup still in flight
+    assert.equal(queue.getQueueLength(), 0, "item must still be staged, not yet pushed to the queue");
+
+    // remove() lands BEFORE getCached() resolves.
+    assert.equal(queue.remove("staged_1"), true, "remove() must cancel a staged enqueue");
+
+    await new Promise((r) => setTimeout(r, 250)); // lookup resolves during this wait
+    assert.equal(queue.getQueueLength(), 0, "the resolved lookup must not push a removed item");
+    assert.equal(starts.length, 0, "a staged-then-removed item must never dispatch");
+
+    // (b) the id must not be locked out of enqueueing afterwards.
+    queue.enqueue("staged_1", "https://www.vrbo.com/staged1");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(starts.length, 1, "re-enqueue after a staged-window remove() must succeed");
+    assert.ok(starts[0].url.includes("staged1"));
+    queue.dispose();
+  });
+
+  await t.test("re-enqueue inside the staged window dispatches exactly once, not twice", async () => {
+    const starts = [];
+    const slowStorage = {
+      get(_keys, cb) { setTimeout(() => cb({}), 120); },
+      set(_items, cb) { if (cb) cb(); },
+      remove(_keys, cb) { if (cb) cb(); },
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: makeTracingFetch(starts),
+      storage: slowStorage,
+      autoMaintenance: false,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      cooldownMs: 0,
+    });
+
+    // enqueue -> remove -> enqueue, all before the first lookup resolves. The
+    // stale lookup must be discarded by its token rather than pushing a duplicate.
+    queue.enqueue("race_1", "https://www.vrbo.com/race1");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(queue.remove("race_1"), true);
+    queue.enqueue("race_1", "https://www.vrbo.com/race1");
+
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(starts.length, 1, `Expected exactly one dispatch, got ${starts.length}`);
+    queue.dispose();
+  });
+});
