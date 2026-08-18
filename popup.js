@@ -55,9 +55,16 @@ function renderPolicy(policy) {
 
   const maxDogsVal = policy.maxDogs !== null ? String(policy.maxDogs) : (raw.maxDogs !== null ? String(raw.maxDogs) : "Not specified");
   const weightVal = policy.weightLimit ? `${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified");
-  const preRegVal = (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned";
+  let feePerStr = "";
+  if (policy.fee) {
+    if (policy.fee.perPet && policy.fee.period && policy.fee.period !== "unknown" && policy.fee.period !== "pet") {
+      feePerStr = ` per pet per ${policy.fee.period}`;
+    } else if (policy.fee.period && policy.fee.period !== "unknown") {
+      feePerStr = ` per ${policy.fee.period}`;
+    }
+  }
   const feeVal = policy.fee && policy.fee.amount !== null
-    ? `${formatMoney(policy.fee.amount, policy.fee.currency)}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}`
+    ? `${formatMoney(policy.fee.amount, policy.fee.currency)}${feePerStr}`
     : (raw.fee || "Not specified");
 
   const rows = [

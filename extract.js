@@ -219,12 +219,15 @@
     const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const FEE_RE = [
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
-      new RegExp(`${CUR}\\s?${AMT}\\s*per\\s*(?:pet|dog)(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*per\\s*(?:pet|dog)(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
+      new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
     ];
     const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
     const DEPOSIT_RE = [
@@ -295,7 +298,18 @@
 
       const feeMatch = firstMatch(FEE_RE, s);
       if (feeMatch) {
-        const suffix = feeMatch.groups.per ? ` per ${feeMatch.groups.per}` : "";
+        const target = feeMatch.groups.target ? (feeMatch.groups.target.toLowerCase() === "dog" ? "pet" : feeMatch.groups.target.toLowerCase()) : null;
+        const time = feeMatch.groups.time ? feeMatch.groups.time.toLowerCase() : null;
+        let suffix = "";
+        if (target && time) {
+          suffix = ` per ${target} per ${time}`;
+        } else if (time) {
+          suffix = ` per ${time}`;
+        } else if (target) {
+          suffix = ` per ${target}`;
+        } else if (/per\s+stay/i.test(s)) {
+          suffix = ` per stay`;
+        }
         record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur, feeMatch.groups.amt)}${suffix}`, entry);
         usedForField = true;
       }
@@ -401,15 +415,27 @@
     }
 
     // 2. Fee normalization
+    // fee: { amount: number, currency: string, period: "night" | "day" | "stay" | "pet" | "unknown", perPet?: boolean }
     let fee = null;
     if (extracted.fee && extracted.fee !== "No fee mentioned") {
-      const fm = String(extracted.fee).match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(stay|night|pet|day))?/i);
+      const str = String(extracted.fee);
+      const isPerPet = /\b(?:per\s+(?:pet|dog)|each\s+(?:pet|dog)?)\b/i.test(str);
+      const fm = str.match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(?:pet|dog|each)\s+per\s+(stay|night|day)|per\s+(stay|night|day|pet))?/i);
       if (fm) {
         const curSym = fm[1] || "$";
         const currency = normalizeCurrencyCode(curSym);
         const amount = parseFloat(fm[2]);
-        const period = fm[3] ? (fm[3].toLowerCase() === "day" ? "night" : fm[3].toLowerCase()) : "unknown";
+        let period = "unknown";
+        const matchedPeriod = fm[3] || fm[4];
+        if (matchedPeriod) {
+          period = matchedPeriod.toLowerCase();
+        } else if (isPerPet) {
+          period = "pet";
+        }
         fee = { amount, currency, period };
+        if (isPerPet) {
+          fee.perPet = true;
+        }
       }
     } else if (extracted.noFeeMentioned) {
       fee = { amount: 0, currency: "USD", period: "unknown" };
@@ -473,6 +499,69 @@
     };
   }
 
+  function formatFeeShort(fee) {
+    if (!fee || fee.amount === null) return null;
+    if (fee.amount === 0) return "No pet fee";
+    const amountStr = formatCurrencyDisplay(fee.amount, fee.currency);
+    if (fee.perPet && fee.period && fee.period !== "unknown" && fee.period !== "pet") {
+      return `${amountStr}/pet/${fee.period}`;
+    }
+    if (fee.period && fee.period !== "unknown") {
+      return `${amountStr}/${fee.period}`;
+    }
+    return `${amountStr} pet fee`;
+  }
+
+  function formatDepositShort(deposit) {
+    if (!deposit || deposit.amount === null) return null;
+    return `${formatCurrencyDisplay(deposit.amount, deposit.currency)} deposit`;
+  }
+
+  function formatWeightShort(weightLimit) {
+    if (!weightLimit || weightLimit.value === null) return null;
+    const unitStr = weightLimit.unit === "lb" ? "lbs" : weightLimit.unit;
+    return `${weightLimit.value} ${unitStr}`;
+  }
+
+  function collectPolicyBadgeDetails(policy) {
+    const details = [];
+
+    if (policy.maxDogs) {
+      details.push(`Max ${policy.maxDogs}`);
+    }
+
+    const weightStr = formatWeightShort(policy.weightLimit);
+    if (weightStr) {
+      details.push(weightStr);
+    }
+
+    const feeStr = formatFeeShort(policy.fee);
+    if (feeStr) {
+      details.push(feeStr);
+    }
+
+    const depStr = formatDepositShort(policy.deposit);
+    if (depStr) {
+      details.push(depStr);
+    }
+
+    if (policy.approvalRequired) {
+      details.push("Approval required");
+    }
+
+    const hasContradictions = Boolean(
+      policy.contradictions && (policy.contradictions.maxDogs || policy.contradictions.weightLimit || policy.contradictions.fee)
+    );
+    if (hasContradictions) {
+      details.push("⚠ Conflicting info");
+    } else if (policy.confidence) {
+      const confFormatted = `${policy.confidence.charAt(0).toUpperCase() + policy.confidence.slice(1)} confidence`;
+      details.push(confFormatted);
+    }
+
+    return details;
+  }
+
   function deriveSearchBadge(canonical) {
     if (!canonical) {
       return {
@@ -504,28 +593,20 @@
     }
 
     if (policy.petsAllowed === false) {
+      const details = [];
+      if (policy.confidence) details.push(`${policy.confidence.charAt(0).toUpperCase() + policy.confidence.slice(1)} confidence`);
+      const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       return {
         statusKey: "banned",
         icon: "🚫",
-        text: "Pets not allowed",
+        text: `Pets not allowed${detailStr}`,
         className: "vdp-search-badge vdp-badge-banned",
       };
     }
 
     if (policy.petsAllowed === true) {
-      const details = [];
-      if (policy.maxDogs) details.push(`Max ${policy.maxDogs}`);
-      if (policy.weightLimit) {
-        const valStr = Number.isInteger(policy.weightLimit.value)
-          ? String(policy.weightLimit.value)
-          : String(policy.weightLimit.value);
-        const unitStr = policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit;
-        details.push(`${valStr} ${unitStr}`);
-      }
-      if (policy.fee && policy.fee.amount > 0) details.push(`${formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)} pet fee`);
-      if (policy.approvalRequired && details.length < 2) details.push("Approval required");
-
-      const detailStr = details.length ? ` · ${details.slice(0, 2).join(" · ")}` : "";
+      const details = collectPolicyBadgeDetails(policy);
+      const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       return {
         statusKey: "allowed",
         icon: "🐾",
@@ -534,20 +615,13 @@
       };
     }
 
-    if (policy.approvalRequired === true) {
+    if (policy.approvalRequired || policy.restrictionsFound || policy.weightLimit || policy.fee || policy.maxDogs || policy.restrictionNoteCount > 0) {
+      const details = collectPolicyBadgeDetails(policy);
+      const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       return {
         statusKey: "restrictions",
         icon: "🐾",
-        text: "Pet restrictions · Approval required",
-        className: "vdp-search-badge vdp-badge-restrictions",
-      };
-    }
-
-    if (policy.restrictionsFound || policy.weightLimit || policy.fee || policy.maxDogs || policy.restrictionNoteCount > 0) {
-      return {
-        statusKey: "restrictions",
-        icon: "🐾",
-        text: "Pet restrictions found",
+        text: `Pet restrictions${detailStr}`,
         className: "vdp-search-badge vdp-badge-restrictions",
       };
     }

@@ -22,6 +22,24 @@ const { spawn, execSync } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const DEFAULT_SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Perdido+Key+Beach%2C+Pensacola%2C+Florida%2C+United+States+of+America&startDate=2026-09-04&endDate=2026-09-07&adults=6&children=3_1&house_rules_group=pets_allowed";
 
+function redactUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== "string") return urlStr;
+  try {
+    const u = new URL(urlStr, "https://www.vrbo.com");
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return urlStr.split("?")[0].split("#")[0];
+  }
+}
+
+function getGitCommit() {
+  try {
+    return execSync("git rev-parse HEAD", { encoding: "utf8", cwd: ROOT }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
 function findChrome() {
   // 1. Search dynamically in ~/.cache/puppeteer for any Chrome for Testing builds
   const puppeteerDir = path.join(os.homedir(), ".cache/puppeteer/chrome");
@@ -137,14 +155,34 @@ class CdpConnection {
   }
 }
 
+async function evalCdp(cdp, expression, options = {}) {
+  const params = {
+    expression,
+    returnByValue: options.returnByValue !== undefined ? options.returnByValue : true,
+    awaitPromise: Boolean(options.awaitPromise),
+  };
+  if (options.contextId !== undefined) {
+    params.contextId = options.contextId;
+  }
+  const res = await cdp.send("Runtime.evaluate", params);
+  if (res.exceptionDetails) {
+    const desc = res.exceptionDetails.exception?.description || res.exceptionDetails.text || "Unknown CDP evaluation exception";
+    throw new Error(`CDP Evaluation Error: ${desc}\nExpression: ${expression.slice(0, 200)}...`);
+  }
+  if (params.returnByValue && res.result && res.result.value === undefined && res.result.type !== "undefined") {
+    throw new Error(`CDP Evaluation returned unexpected undefined value. Result type: ${res.result.type}`);
+  }
+  return res.result?.value;
+}
+
 async function run() {
   const port = 9333;
-  const searchUrl = process.argv.includes("--url")
+  const rawSearchUrl = process.argv.includes("--url")
     ? process.argv[process.argv.indexOf("--url") + 1]
     : DEFAULT_SEARCH_URL;
 
   console.log("Starting Chrome for search page verification...");
-  const { proc, userDataDir, mode } = await startChrome(port, ROOT, searchUrl);
+  const { proc, userDataDir, mode } = await startChrome(port, ROOT, rawSearchUrl);
   console.log(`Chrome started (mode: ${mode}).`);
 
   let targetCdp = null;
@@ -161,58 +199,47 @@ async function run() {
     await targetCdp.send("Runtime.enable");
     await targetCdp.send("DOM.enable");
 
-    console.log(`Navigating to search URL: ${searchUrl}`);
-    await targetCdp.send("Page.navigate", { url: searchUrl });
+    console.log(`Navigating to search destination: ${redactUrl(rawSearchUrl)}`);
+    await targetCdp.send("Page.navigate", { url: rawSearchUrl });
 
     console.log("Waiting for search page and property cards to load...");
     let cardsMounted = false;
     for (let i = 0; i < 30; i++) {
       await sleep(1000);
-      const readyRes = await targetCdp.send("Runtime.evaluate", {
-        expression: `(() => {
-          const cards = document.querySelectorAll('[data-stid="property-card"], [data-stid="lodging-card-responsive"], .uitk-card, a[href*="/"]');
-          const title = document.title;
-          const href = location.href;
-          return { ready: document.readyState, count: cards.length, title, href };
-        })()`,
-        returnByValue: true,
-      });
-      const val = readyRes.result?.value;
+      const val = await evalCdp(targetCdp, `(() => {
+        const cards = document.querySelectorAll('[data-stid="property-card"], [data-stid="lodging-card-responsive"], .uitk-card, a[href*="/"]');
+        const title = document.title;
+        return { ready: document.readyState, count: cards.length, title };
+      })()`);
+
       if (val && val.count > 5) {
-        console.log(`Property cards mounted (${i + 1}s): ${val.count} candidates found on "${val.title}" (${val.href})`);
+        console.log(`Property cards mounted (${i + 1}s): ${val.count} candidates found on "${val.title}"`);
         cardsMounted = true;
         break;
       }
     }
 
     if (!cardsMounted) {
-      const diagRes = await targetCdp.send("Runtime.evaluate", {
-        expression: `({ title: document.title, href: location.href, bodySnippet: document.body?.innerText?.slice(0, 400) })`,
-        returnByValue: true,
-      });
-      console.warn("⚠️ Property cards were slow or not found:", JSON.stringify(diagRes.result?.value, null, 2));
+      const diagVal = await evalCdp(targetCdp, `({ title: document.title, bodySnippet: document.body?.innerText?.slice(0, 400) })`);
+      console.warn("⚠️ Property cards were slow or not found:", JSON.stringify(diagVal, null, 2));
     }
 
     // Click the "Pets allowed" filter in the search results sidebar if available
     console.log("Ensuring 'Pets allowed' filter is applied in search results...");
-    const filterApplied = await targetCdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        // Look for pet-related filter checkboxes in sidebar
-        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
-        const petCheckbox = checkboxes.find(el => /pets?|dogs?/i.test(el.name || el.value || el.id || ''));
-        if (petCheckbox) {
-          if (!petCheckbox.checked) {
-            petCheckbox.click();
-            return { clicked: true, tag: "INPUT", text: petCheckbox.name };
-          }
-          return { clicked: false, alreadyChecked: true, text: petCheckbox.name };
+    const filterAppliedVal = await evalCdp(targetCdp, `(() => {
+      const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+      const petCheckbox = checkboxes.find(el => /pets?|dogs?/i.test(el.name || el.value || el.id || ''));
+      if (petCheckbox) {
+        if (!petCheckbox.checked) {
+          petCheckbox.click();
+          return { clicked: true, tag: "INPUT", name: petCheckbox.name };
         }
-        return { clicked: false, totalCheckboxes: checkboxes.length };
-      })()`,
-      returnByValue: true,
-    });
-    console.log("Filter interaction result:", JSON.stringify(filterApplied.result.value, null, 2));
-    if (filterApplied.result.value?.clicked) {
+        return { clicked: false, alreadyChecked: true, name: petCheckbox.name };
+      }
+      return { clicked: false, totalCheckboxes: checkboxes.length };
+    })()`);
+    console.log("Filter interaction result:", JSON.stringify(filterAppliedVal, null, 2));
+    if (filterAppliedVal?.clicked) {
       console.log("Waiting 6s for filtered search results to settle...");
       await sleep(6000);
     }
@@ -220,9 +247,7 @@ async function run() {
     let contextId = undefined;
     if (mode === "emulated") {
       console.log("Emulated mode: Injecting page-bridge into MAIN and content scripts into ISOLATED context...");
-      await targetCdp.send("Runtime.evaluate", {
-        expression: readScript("page-bridge.js"),
-      });
+      await evalCdp(targetCdp, readScript("page-bridge.js"));
 
       const { frameTree } = await targetCdp.send("Page.getFrameTree", {});
       const { executionContextId } = await targetCdp.send("Page.createIsolatedWorld", {
@@ -231,16 +256,10 @@ async function run() {
       });
       contextId = executionContextId;
 
-      await targetCdp.send("Runtime.evaluate", {
-        contextId: executionContextId,
-        expression: `globalThis.chrome = { storage: { local: { set(o, cb) { cb && cb(); }, get(k, cb) { cb && cb({}); }, remove(k, cb) { cb && cb(); } } }, runtime: { onMessage: { addListener() {} } } };`,
-      });
+      await evalCdp(targetCdp, `globalThis.chrome = { storage: { local: { set(o, cb) { cb && cb(); }, get(k, cb) { cb && cb({}); }, remove(k, cb) { cb && cb(); } } }, runtime: { onMessage: { addListener() {} } } };`, { contextId });
 
       for (const file of ["extract.js", "search-fetcher.js", "content.js"]) {
-        const evalRes = await targetCdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
-        if (evalRes.exceptionDetails) {
-          console.error(`❌ Exception evaluating ${file}:`, evalRes.exceptionDetails);
-        }
+        await evalCdp(targetCdp, readScript(file), { contextId });
       }
     }
 
@@ -253,176 +272,255 @@ async function run() {
     console.log("══════════════════════════════════════════════════════\n");
 
     // 1. Check Search Page Apollo State
-    const apolloRes = await targetCdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const state = window.__APOLLO_STATE__;
-        if (!state) return { hasApollo: false };
-        const keys = Object.keys(state);
-        return {
-          hasApollo: true,
-          totalKeys: keys.length,
-          keysSample: keys.slice(0, 10)
-        };
-      })()`,
-      returnByValue: true,
-    });
-    console.log("1. Search Page Apollo State:", JSON.stringify(apolloRes.result.value, null, 2));
+    const apolloVal = await evalCdp(targetCdp, `(() => {
+      const state = window.__APOLLO_STATE__;
+      if (!state) return { hasApollo: false };
+      const keys = Object.keys(state);
+      return {
+        hasApollo: true,
+        totalKeys: keys.length,
+        keysSample: keys.slice(0, 10)
+      };
+    })()`);
+    console.log("1. Search Page Apollo State:", JSON.stringify(apolloVal, null, 2));
 
-    // 2. Discover Search Card DOM elements
-    const domRes = await targetCdp.send("Runtime.evaluate", {
-      contextId,
-      expression: `(() => {
-        const allLinks = Array.from(document.querySelectorAll('a[href]')).map(a => ({
-          href: a.href,
+    // 2. Discover Search Card DOM elements (evaluated in main world, with query redaction)
+    const domVal = await evalCdp(targetCdp, `(() => {
+      const allLinks = Array.from(document.querySelectorAll('a[href]')).map(a => {
+        let cleanHref = a.href;
+        try {
+          const u = new URL(a.href);
+          cleanHref = u.origin + u.pathname;
+        } catch {}
+        return {
+          href: cleanHref,
           text: a.textContent.trim().slice(0, 50),
           className: a.className,
           dataStid: a.getAttribute('data-stid') || a.closest('[data-stid]')?.getAttribute('data-stid')
-        }));
+        };
+      });
 
-        const listingLinks = allLinks.filter(l => /vrbo\.com\/(?:\d+|pdp|vacation-rental|hotel)/i.test(l.href) || /\/\d{5,}/.test(l.href));
+      const listingLinks = allLinks.filter(l => /vrbo\.com\/(?:\d+|pdp|vacation-rental|hotel)/i.test(l.href) || /\/\d{5,}/.test(l.href));
 
-        const uitkCards = Array.from(document.querySelectorAll('.uitk-card, [class*="card"], [class*="listing"], [class*="property"]')).slice(0, 5).map(el => ({
-          tag: el.tagName,
-          className: el.className,
-          dataStid: el.getAttribute('data-stid'),
-          dataTestid: el.getAttribute('data-testid')
-        }));
+      const uitkCards = Array.from(document.querySelectorAll('.uitk-card, [class*="card"], [class*="listing"], [class*="property"]')).slice(0, 5).map(el => ({
+        tag: el.tagName,
+        className: el.className,
+        dataStid: el.getAttribute('data-stid'),
+        dataTestid: el.getAttribute('data-testid')
+      }));
+
+      return {
+        totalLinks: allLinks.length,
+        listingLinksFound: listingLinks.length,
+        sampleListingLinks: listingLinks.slice(0, 5).map(l => l.href),
+        sampleCardContainers: uitkCards
+      };
+    })()`);
+
+    if (!domVal || typeof domVal !== "object") {
+      throw new Error("Live DOM Deep Inspection failed: evaluation returned undefined or invalid structure.");
+    }
+    console.log("\n2. Live DOM Deep Inspection:", JSON.stringify(domVal, null, 2));
+
+    // 3. Inspect Injected Badges & Aggregate Status Across ALL Badges
+    const badgeAnalysis = await evalCdp(targetCdp, `(() => {
+      const badges = Array.from(document.querySelectorAll('.vdp-search-badge'));
+      const statusCounts = {};
+      const terminalCounts = { unknown: 0, timeout: 0, error: 0, rate_limited: 0, capped: 0 };
+      const sourceBreakdown = {};
+      let policyResolvedCount = 0;
+
+      const allBadges = badges.map(b => {
+        const card = b.closest('[data-vdp-prop-id]');
+        const link = card ? card.querySelector('a[href*="/"]') : null;
+        let cleanHref = null;
+        if (link && link.href) {
+          try {
+            const u = new URL(link.href);
+            cleanHref = u.origin + u.pathname;
+          } catch {
+            cleanHref = link.href.split('?')[0];
+          }
+        }
+        const status = b.dataset.vdpStatus || 'unknown';
+        const source = b.dataset.vdpSource || null;
+        const propId = card ? card.getAttribute('data-vdp-prop-id') : null;
+
+        statusCounts[status] = (statusCounts[status] || 0) + 1;
+        if (terminalCounts[status] !== undefined) {
+          terminalCounts[status]++;
+        }
+        if (status === 'allowed' || status === 'banned' || status === 'restrictions') {
+          policyResolvedCount++;
+          if (source) {
+            sourceBreakdown[source] = (sourceBreakdown[source] || 0) + 1;
+          }
+        }
 
         return {
-          totalLinks: allLinks.length,
-          listingLinksFound: listingLinks.length,
-          sampleListingLinks: listingLinks.slice(0, 5).map(l => l.href),
-          sampleCardContainers: uitkCards
+          text: b.textContent.trim(),
+          className: b.className,
+          status,
+          source,
+          propId,
+          linkHref: cleanHref
         };
-      })()`,
-      returnByValue: true,
-    });
-    console.log("\n2. Live DOM Deep Inspection:", JSON.stringify(domRes.result.value, null, 2));
+      });
 
-    // 3. Inspect Injected Badges & Verify Card IDs
-    const badgeRes = await targetCdp.send("Runtime.evaluate", {
-      contextId,
-      expression: `(() => {
-        const badges = document.querySelectorAll('.vdp-search-badge');
-        const badgeDetails = Array.from(badges).map(b => {
-          const card = b.closest('[data-vdp-prop-id]');
-          const link = card ? card.querySelector('a[href*="/"]') : null;
-          return {
-            text: b.textContent.trim(),
-            className: b.className,
-            status: b.dataset.vdpStatus,
-            source: b.dataset.vdpSource || null,
-            propId: card ? card.getAttribute('data-vdp-prop-id') : null,
-            linkHref: link ? link.href : null
-          };
-        });
-        return {
-          totalBadges: badges.length,
-          sampleBadges: badgeDetails.slice(0, 5)
-        };
-      })()`,
-      returnByValue: true,
-    });
-    console.log("\n3. Vrbow Search Badges:", JSON.stringify(badgeRes.result.value, null, 2));
+      return {
+        totalBadges: badges.length,
+        statusCounts,
+        terminalCounts,
+        sourceBreakdown,
+        policyResolvedCount,
+        sampleBadges: allBadges.slice(0, 5)
+      };
+    })()`);
+
+    if (!badgeAnalysis) {
+      throw new Error("Badge analysis failed: evaluation returned undefined.");
+    }
+    console.log("\n3. Vrbow Search Badges (Aggregate):", JSON.stringify({
+      totalBadges: badgeAnalysis.totalBadges,
+      policyResolvedCount: badgeAnalysis.policyResolvedCount,
+      statusCounts: badgeAnalysis.statusCounts,
+      terminalCounts: badgeAnalysis.terminalCounts,
+      sourceBreakdown: badgeAnalysis.sourceBreakdown,
+      sampleBadges: badgeAnalysis.sampleBadges
+    }, null, 2));
 
     // 4. Assertive Hover, Mouse Gap Transit, Close Button, and Keyboard Flow Verification
-    const interactionTestRes = await targetCdp.send("Runtime.evaluate", {
-      contextId,
-      expression: `(async () => {
-        const firstBadge = document.querySelector('.vdp-search-badge');
-        if (!firstBadge) return { error: 'No badge found to hover' };
+    // Select an appropriate resolved badge if available, otherwise first badge
+    const inter = await evalCdp(targetCdp, `(async () => {
+      const allBadges = Array.from(document.querySelectorAll('.vdp-search-badge'));
+      if (allBadges.length === 0) return { error: 'No badge found to hover' };
 
-        const parentCard = firstBadge.closest('[data-vdp-prop-id]');
-        const expectedPropId = parentCard ? parentCard.getAttribute('data-vdp-prop-id') : null;
+      // Select a resolved badge if available, otherwise first badge
+      const targetBadge = allBadges.find(b => ['allowed', 'banned', 'restrictions', 'capped'].includes(b.dataset.vdpStatus)) || allBadges[0];
+      const parentCard = targetBadge.closest('[data-vdp-prop-id]');
+      const expectedPropId = parentCard ? parentCard.getAttribute('data-vdp-prop-id') : null;
+      const badgeStatus = targetBadge.dataset.vdpStatus || 'unknown';
 
-        // Step A: Mouse enters badge
-        firstBadge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 400));
-        const tooltip = document.querySelector('.vdp-search-tooltip');
-        const initialVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
-        const hasHeader = tooltip && /dog policy/i.test(tooltip.textContent);
+      // Step A: Mouse enters badge
+      targetBadge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 400));
+      const tooltip = document.querySelector('.vdp-search-tooltip');
+      const initialVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
+      const hasHeader = tooltip && /dog policy/i.test(tooltip.textContent);
 
-        // Step B: Pointer moves across the gap to enter the tooltip (grace period test)
-        firstBadge.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, relatedTarget: tooltip }));
-        tooltip.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 300));
-        const preservedAcrossGap = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
+      // Step B: Pointer moves across the gap to enter the tooltip (grace period test)
+      targetBadge.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, relatedTarget: tooltip }));
+      if (tooltip) tooltip.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+      await new Promise(r => setTimeout(r, 300));
+      const preservedAcrossGap = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
 
-        // Step C: Verify listing link inside tooltip matches listing card
-        const tooltipLink = tooltip.querySelector('a[href*="/"]');
-        const linkMatchesProp = tooltipLink && expectedPropId && tooltipLink.href.includes(expectedPropId);
-
-        const rows = Array.from(tooltip.querySelectorAll('.vdp-tooltip-row'));
-        const parsedFields = rows.map(r => ({
-          label: r.querySelector('.vdp-tooltip-label')?.textContent?.trim() || '',
-          value: r.querySelector('.vdp-tooltip-val')?.textContent?.trim() || ''
-        })).filter(r => r.label && r.value);
-
-        // Step D: Dismiss via Close Button click
-        const closeBtn = tooltip.querySelector('.vdp-tooltip-close');
-        if (closeBtn) closeBtn.click();
-        await new Promise(r => setTimeout(r, 200));
-        const dismissedViaClose = tooltip.style.display === 'none';
-
-        // Step E: Keyboard activation (Enter key on badge)
-        firstBadge.focus();
-        firstBadge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-        await new Promise(r => setTimeout(r, 300));
-        const openedViaKeyboard = tooltip.style.display !== 'none';
-
-        // Step F: Dismiss via Escape key inside dialog
-        tooltip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        await new Promise(r => setTimeout(r, 200));
-        const dismissedViaEscape = tooltip.style.display === 'none';
-
-        return {
-          expectedPropId,
-          badgeFound: true,
-          initialVisible,
-          hasHeader,
-          parsedFields,
-          preservedAcrossGap,
-          linkMatchesProp,
-          dismissedViaClose,
-          openedViaKeyboard,
-          dismissedViaEscape
-        };
-      })()`,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    console.log("\n4. Assertive Tooltip & Interaction Verification:", JSON.stringify(interactionTestRes.result.value, null, 2));
-
-    // 5. Verification Assertions
-    const totalBadges = badgeRes.result.value?.totalBadges || 0;
-    const sampleBadges = badgeRes.result.value?.sampleBadges || [];
-    const inter = interactionTestRes.result.value;
-    const allInteractionsPassed = inter?.initialVisible &&
-      inter?.hasHeader &&
-      inter?.preservedAcrossGap &&
-      inter?.linkMatchesProp &&
-      inter?.dismissedViaClose &&
-      inter?.openedViaKeyboard &&
-      inter?.dismissedViaEscape;
-
-    const hasResolvedBadge = sampleBadges.some(b => b.status === "allowed" || b.status === "banned" || b.status === "restrictions");
-    const hasParsedFields = inter?.parsedFields && inter.parsedFields.length > 0;
-
-    // Report where each resolved result came from: the search page's own
-    // Apollo state (no listing fetch) or a listing-page fetch.
-    const sourceBreakdown = {};
-    for (const b of sampleBadges) {
-      if (b.status === "allowed" || b.status === "banned" || b.status === "restrictions") {
-        const src = b.source || "listing-fetch";
-        sourceBreakdown[src] = (sourceBreakdown[src] || 0) + 1;
+      // Step C: Verify listing link inside tooltip matches listing card
+      const tooltipLink = tooltip ? tooltip.querySelector('a[href*="/"]') : null;
+      let cleanTooltipLink = null;
+      if (tooltipLink && tooltipLink.href) {
+        try {
+          const u = new URL(tooltipLink.href);
+          cleanTooltipLink = u.origin + u.pathname;
+        } catch {
+          cleanTooltipLink = tooltipLink.href.split('?')[0];
+        }
       }
+      const linkMatchesProp = tooltipLink && expectedPropId && tooltipLink.href.includes(expectedPropId);
+
+      const rows = tooltip ? Array.from(tooltip.querySelectorAll('.vdp-tooltip-row')) : [];
+      const parsedFields = rows.map(r => ({
+        label: r.querySelector('.vdp-tooltip-label')?.textContent?.trim() || '',
+        value: r.querySelector('.vdp-tooltip-val')?.textContent?.trim() || ''
+      })).filter(r => r.label && r.value);
+
+      // Step D: Dismiss via Close Button click
+      const closeBtn = tooltip ? tooltip.querySelector('.vdp-tooltip-close') : null;
+      if (closeBtn) closeBtn.click();
+      await new Promise(r => setTimeout(r, 200));
+      const dismissedViaClose = tooltip ? tooltip.style.display === 'none' : false;
+
+      // Step E: Keyboard activation (Enter key on badge)
+      targetBadge.focus();
+      targetBadge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await new Promise(r => setTimeout(r, 300));
+      const openedViaKeyboard = tooltip ? tooltip.style.display !== 'none' : false;
+
+      // Step F: Dismiss via Escape key inside dialog
+      if (tooltip) tooltip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await new Promise(r => setTimeout(r, 200));
+      const dismissedViaEscape = tooltip ? tooltip.style.display === 'none' : false;
+
+      // Evaluate whether deep policy fields were recovered
+      const deepFieldKeys = ["max dogs", "weight", "fee", "deposit", "prior approval"];
+      const isDeepResolved = parsedFields.some(f => deepFieldKeys.some(k => f.label.toLowerCase().includes(k)));
+
+      return {
+        expectedPropId,
+        badgeStatus,
+        badgeFound: true,
+        initialVisible,
+        hasHeader,
+        parsedFields,
+        isDeepResolved,
+        preservedAcrossGap,
+        linkMatchesProp,
+        cleanTooltipLink,
+        dismissedViaClose,
+        openedViaKeyboard,
+        dismissedViaEscape
+      };
+    })()`, { awaitPromise: true });
+
+    if (!inter || typeof inter !== "object") {
+      throw new Error("Interactive verification failed: evaluation returned undefined.");
     }
-    const sourceLine = Object.keys(sourceBreakdown).length
-      ? Object.entries(sourceBreakdown).map(([src, n]) => `${src}: ${n}`).join(", ")
+    console.log("\n4. Assertive Tooltip & Interaction Verification:", JSON.stringify(inter, null, 2));
+
+    // 5. Verification Assertions & Result Classification
+    const totalBadges = badgeAnalysis.totalBadges || 0;
+    const policyResolvedCount = badgeAnalysis.policyResolvedCount || 0;
+    const detailsResolvedCount = inter.isDeepResolved ? 1 : 0;
+
+    const allInteractionsPassed = inter.initialVisible &&
+      inter.hasHeader &&
+      inter.preservedAcrossGap &&
+      inter.linkMatchesProp &&
+      inter.dismissedViaClose &&
+      inter.openedViaKeyboard &&
+      inter.dismissedViaEscape;
+
+    const hasResolvedBadge = policyResolvedCount > 0;
+    const hasParsedFields = inter.parsedFields && inter.parsedFields.length > 0;
+
+    const sourceLine = Object.keys(badgeAnalysis.sourceBreakdown).length
+      ? Object.entries(badgeAnalysis.sourceBreakdown).map(([src, n]) => `${src}: ${n}`).join(", ")
       : "none resolved";
     console.log("\nResult source breakdown: " + sourceLine);
 
+    // 6. Structured Machine-Readable Summary
+    const summary = {
+      mode,
+      commit: getGitCommit(),
+      timestamp: new Date().toISOString(),
+      totalBadges,
+      policyResolvedCount,
+      detailsResolvedCount,
+      statusCounts: badgeAnalysis.statusCounts,
+      terminalCounts: badgeAnalysis.terminalCounts,
+      sourceBreakdown: badgeAnalysis.sourceBreakdown,
+      inspectedBadge: {
+        propId: inter.expectedPropId,
+        status: inter.badgeStatus,
+        isDeepResolved: inter.isDeepResolved,
+        parsedFields: inter.parsedFields
+      }
+    };
+
     console.log("\n══════════════════════════════════════════════════════");
+    console.log("MACHINE-READABLE SUMMARY:");
+    console.log(JSON.stringify(summary, null, 2));
+    console.log("══════════════════════════════════════════════════════\n");
+
     if (totalBadges === 0) {
       console.error("❌ ASSERTION FAILED: Zero search badges were injected on live page.");
       process.exit(1);
@@ -432,15 +530,19 @@ async function run() {
       process.exit(1);
     }
     if (!hasResolvedBadge) {
-      console.error("❌ ASSERTION FAILED: No search badge reached a parsed terminal policy state (allowed/banned/restrictions):", sampleBadges);
+      console.error("❌ ASSERTION FAILED: No search badge reached a parsed terminal policy state (allowed/banned/restrictions). Aggregate statuses:", badgeAnalysis.statusCounts);
       process.exit(1);
     }
     if (!hasParsedFields) {
-      console.error("❌ ASSERTION FAILED: Live tooltip does not contain any parsed policy fields (dogs allowed/max/weight/fee):", inter?.parsedFields);
+      console.error("❌ ASSERTION FAILED: Live tooltip does not contain any parsed policy fields:", inter.parsedFields);
       process.exit(1);
     }
 
-    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, mode: ${mode}, parsed policy fields verified (${inter.parsedFields.map(f => f.label + ': ' + f.value).join(', ')}), interactive mouse gap transit, close button, link matching, and keyboard flows verified.`);
+    const tierDescription = inter.isDeepResolved
+      ? `Deep details recovered (${inter.parsedFields.map(f => `${f.label}: ${f.value}`).join(", ")})`
+      : `Policy resolved (${inter.parsedFields.map(f => `${f.label}: ${f.value}`).join(", ")}; deep details pending or unavailable)`;
+
+    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected across page (${policyResolvedCount} policy resolved), mode: ${mode}, ${tierDescription}, interactive mouse gap transit, close button, link matching, and keyboard flows verified.`);
     console.log("══════════════════════════════════════════════════════\n");
   } finally {
     if (targetCdp) targetCdp.close();

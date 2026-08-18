@@ -1,0 +1,198 @@
+const path = require("node:path");
+const { chromium, expect, test } = require("@playwright/test");
+
+const EXTENSION_ROOT = path.join(__dirname, "..");
+const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=LakeTahoe&house_rules_group=pets_allowed";
+const LISTING_C_URL = "https://www.vrbo.com/3000003";
+
+const SEARCH_HTML = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Virtualization Test Search</title></head>
+  <body>
+    <main id="search-main">
+      <div class="Results">
+        <div data-stid="property-card" id="card-1">
+          <div class="uitk-card-content">
+            <a href="https://www.vrbo.com/1000001?chkin=2026-09-01&adults=2">Cabin A</a>
+          </div>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>`;
+
+const LISTING_A_HTML = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Property A - No Pets</title></head>
+  <body>
+    <main>
+      <section aria-label="House Rules">
+        <h2>House Rules</h2>
+        <p>No pets allowed under any circumstances. Strict violation fee.</p>
+      </section>
+    </main>
+  </body>
+</html>`;
+
+const LISTING_B_HTML = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Property B - Dogs Allowed</title></head>
+  <body>
+    <main>
+      <section aria-label="House Rules">
+        <h2>House Rules</h2>
+        <p>Pets welcome! Maximum 2 dogs allowed up to 50 lbs. $50 pet fee applies.</p>
+      </section>
+    </main>
+  </body>
+</html>`;
+
+const LISTING_C_HTML = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Property C - Listing View</title></head>
+  <body>
+    <main>
+      <section aria-label="House Rules">
+        <h2>House Rules</h2>
+        <p>Dogs allowed. 1 dog welcome.</p>
+      </section>
+    </main>
+  </body>
+</html>`;
+
+test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA navigation with real extension", async () => {
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${EXTENSION_ROOT}`,
+      `--load-extension=${EXTENSION_ROOT}`
+    ]
+  });
+
+  try {
+    const pageErrors = [];
+    const page = await context.newPage();
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    // Deferred promise to hold Property A response in flight
+    let resolveA;
+    const promiseA = new Promise((r) => { resolveA = r; });
+
+    await page.route("https://www.vrbo.com/Hotel-Search*", (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: SEARCH_HTML
+    }));
+
+    await page.route("https://www.vrbo.com/1000001*", async (route) => {
+      await promiseA;
+      await route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: LISTING_A_HTML
+      });
+    });
+
+    await page.route("https://www.vrbo.com/2000002*", (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: LISTING_B_HTML
+    }));
+
+    await page.route("https://www.vrbo.com/3000003*", (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: LISTING_C_HTML
+    }));
+
+    // 1. Initial navigation to search page
+    await page.goto(SEARCH_URL);
+
+    const card = page.locator("#card-1");
+    await expect(card).toBeVisible();
+
+    // Verify initial binding to Property A
+    const badge = card.locator(".vdp-search-badge");
+    await expect(badge).toBeVisible({ timeout: 6_000 });
+    await expect(badge).toHaveClass(/vdp-badge-loading/);
+    await expect(badge).toContainText("Checking pet policy");
+    await expect(card).toHaveAttribute("data-vdp-prop-id", "1000001");
+
+    // 2. Recycle the existing card element to Property B while Property A is in-flight
+    await page.evaluate(() => {
+      const cardEl = document.getElementById("card-1");
+      const link = cardEl.querySelector("a");
+      link.href = "https://www.vrbo.com/2000002?chkin=2026-09-01&adults=2";
+      link.textContent = "Cabin B";
+
+      // Mutate the DOM inside card to trigger the production MutationObserver
+      const trigger = document.createElement("span");
+      trigger.className = "recycled-mutation-trigger";
+      cardEl.appendChild(trigger);
+    });
+
+    // Verify card re-binds to Property B
+    await expect(card).toHaveAttribute("data-vdp-prop-id", "2000002", { timeout: 6_000 });
+    await expect(card).toHaveAttribute("data-vdp-fetch-url", "https://www.vrbo.com/2000002");
+    await expect(card).toHaveAttribute("data-vdp-nav-url", "https://www.vrbo.com/2000002?chkin=2026-09-01&adults=2");
+
+    // 3. Property B response resolves first
+    await expect(badge).toHaveClass(/vdp-badge-allowed/, { timeout: 6_000 });
+    await expect(badge).toContainText("Dogs allowed");
+    await expect(card.locator(".vdp-search-badge")).toHaveCount(1);
+
+    // Verify tooltip shows Property B and targets Property B navigation URL
+    await badge.focus();
+    await page.keyboard.press("Enter");
+    const tooltip = page.locator(".vdp-search-tooltip");
+    await expect(tooltip).toBeVisible();
+    const tooltipLink = tooltip.locator(".vdp-tooltip-footer a");
+    await expect(tooltipLink).toHaveAttribute("href", "https://www.vrbo.com/2000002?chkin=2026-09-01&adults=2");
+
+    // Close tooltip
+    await page.keyboard.press("Escape");
+    await expect(tooltip).not.toBeVisible();
+
+    // 4. Now deliver delayed Property A response (which is "No pets allowed")
+    resolveA();
+    await page.waitForTimeout(200);
+
+    // 5. Assert that delayed Property A response CANNOT overwrite Property B
+    await expect(badge).toHaveClass(/vdp-badge-allowed/);
+    await expect(badge).toContainText("Dogs allowed");
+    await expect(badge).not.toHaveClass(/vdp-badge-banned/);
+    await expect(card).toHaveAttribute("data-vdp-prop-id", "2000002");
+    await expect(card.locator(".vdp-search-badge")).toHaveCount(1);
+
+    // Verify tooltip still targets Property B
+    await badge.focus();
+    await page.keyboard.press("Enter");
+    await expect(tooltip).toBeVisible();
+    await expect(tooltipLink).toHaveAttribute("href", "https://www.vrbo.com/2000002?chkin=2026-09-01&adults=2");
+    await page.keyboard.press("Escape");
+    await expect(tooltip).not.toBeVisible();
+
+    // 6. Test SPA Navigation: Search -> Listing -> Back
+    await page.goto(LISTING_C_URL);
+
+    // On listing page, search badges and tooltips should be cleaned up, and listing panel attached
+    const panel = page.locator("#vdp-panel");
+    await expect(panel).toBeVisible({ timeout: 6_000 });
+    await expect(panel).toContainText("Dog-friendly");
+    await expect(page.locator(".vdp-search-badge")).toHaveCount(0);
+
+    // Navigate back to search page
+    await page.goBack();
+    const restoredCard = page.locator("#card-1");
+    await expect(restoredCard).toBeVisible({ timeout: 6_000 });
+    const restoredBadge = restoredCard.locator(".vdp-search-badge");
+    await expect(restoredBadge).toBeVisible();
+    await expect(page.locator(".vdp-search-tooltip")).toHaveCount(1);
+
+    // 7. Verify zero uncaught errors
+    expect(pageErrors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});

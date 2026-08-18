@@ -210,3 +210,54 @@ test("updates search badges and tooltips dynamically on live prefers-color-schem
   await expect(badge).toHaveCSS("background-color", EXPECTED_COLORS.light.allowedSurface);
   await expect(tooltip).toHaveCSS("background-color", EXPECTED_COLORS.light.surface);
 });
+
+test("8.2.5: supports forced-colors active mode with visible boundaries and operable focus controls", async ({ browser }) => {
+  const context = await browser.newContext({ forcedColors: "active" });
+  const page = await context.newPage();
+
+  // 1. Listing Panel & Search Badges in Forced Colors
+  await page.goto(fixtureUrl("panel-theme.html"));
+
+  const panel = page.locator("#vdp-panel");
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveCSS("border-style", "solid");
+
+  const badge = page.locator("#badge-allowed");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveCSS("border-style", "solid");
+
+  // Focus visible outline on badge
+  await badge.focus();
+  await expect(badge).toBeFocused();
+  await expect(badge).toHaveCSS("outline-style", "solid");
+
+  // Focus visible on button in panel
+  const panelBtn = page.locator("#vdp-panel button").first();
+  await panelBtn.focus();
+  await expect(panelBtn).toHaveCSS("outline-style", "solid");
+
+  // Tooltip in Forced Colors
+  const tooltip = page.locator("#vdp-search-tooltip");
+  await expect(tooltip).toHaveCSS("border-style", "solid");
+
+  const closeBtn = page.locator(".vdp-tooltip-close");
+  await closeBtn.focus();
+  await expect(closeBtn).toHaveCSS("outline-style", "solid");
+
+  const tooltipLink = page.locator(".vdp-tooltip-footer a");
+  await tooltipLink.focus();
+  await expect(tooltipLink).toHaveCSS("outline-style", "solid");
+  await expect(tooltipLink).toHaveCSS("text-decoration-line", "underline");
+
+  // 2. Popup in Forced Colors
+  await page.goto(fixtureUrl("popup-theme.html"));
+  const rescan = page.getByRole("button", { name: "Rescan" });
+  await expect(rescan).toBeVisible();
+  await expect(rescan).toHaveCSS("border-style", "solid");
+
+  await rescan.focus();
+  await expect(rescan).toHaveCSS("outline-style", "solid");
+
+  await context.close();
+});
+

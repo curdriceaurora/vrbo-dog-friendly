@@ -31,12 +31,12 @@ function uncoveredSource(text, ranges) {
     .replace(/[\s{}]/g, "");
 }
 
-test("exercises 100% of production theme rules across both color schemes", async ({ browser }) => {
+test("exercises 100% of production theme rules across color schemes and forced colors", async ({ browser }) => {
   const aggregate = new Map();
 
-  for (const scheme of ["light", "dark"]) {
+  for (const contextConfig of [{ colorScheme: "light" }, { colorScheme: "dark" }, { forcedColors: "active" }]) {
     for (const fixture of ["panel-theme.html", "popup-theme.html"]) {
-      const context = await browser.newContext({ colorScheme: scheme });
+      const context = await browser.newContext(contextConfig);
       const page = await context.newPage();
       await page.coverage.startCSSCoverage({ resetOnNavigation: false });
       await page.goto(pathToFileURL(path.join(FIXTURES, fixture)).href);

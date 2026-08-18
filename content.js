@@ -427,8 +427,16 @@
         raw.preRegSnippet,
         raw.preRegSource
       );
+      let feePerStr = "";
+      if (policy.fee) {
+        if (policy.fee.perPet && policy.fee.period && policy.fee.period !== "unknown" && policy.fee.period !== "pet") {
+          feePerStr = ` per pet per ${policy.fee.period}`;
+        } else if (policy.fee.period && policy.fee.period !== "unknown") {
+          feePerStr = ` per ${policy.fee.period}`;
+        }
+      }
       const feeDisplay = policy.fee && policy.fee.amount !== null
-        ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}` : `$${policy.fee.amount}`)
+        ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${feePerStr}` : `$${policy.fee.amount}${feePerStr}`)
         : (raw.fee || "Not specified");
       rowsHtml += row(
         "Fee",
@@ -647,6 +655,44 @@
     }, delayMs);
   }
 
+  function getListingValidation(urlStr) {
+    if (globalThis.VdpSearchFetcher?.validateListingUrl) {
+      return globalThis.VdpSearchFetcher.validateListingUrl(urlStr, location.href);
+    }
+    try {
+      const u = new URL(urlStr, location.href);
+      if (u.protocol !== "https:") return null;
+      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
+      const propId = getListingIdFromUrl(u.href);
+      if (!propId) return null;
+      if (
+        !/^\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
+        !/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
+        !/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(u.pathname)
+      ) {
+        return null;
+      }
+      return {
+        propertyId: propId,
+        navigationUrl: u.href,
+        fetchUrl: `https://www.vrbo.com${u.pathname}`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function findCardListing(card) {
+    const anchors = card.querySelectorAll("a[href]");
+    for (const a of anchors) {
+      const href = a.href || a.getAttribute("href");
+      if (!href) continue;
+      const validated = getListingValidation(href);
+      if (validated) return validated;
+    }
+    return null;
+  }
+
   function initSearchManager() {
     if (!globalThis.VdpSearchFetcher) return;
     if (!searchQueue) {
@@ -654,6 +700,7 @@
     }
     if (!searchTooltipEl) {
       searchTooltipEl = document.createElement("div");
+      searchTooltipEl.id = "vdp-search-tooltip";
       searchTooltipEl.className = "vdp-search-tooltip";
       searchTooltipEl.setAttribute("role", "dialog");
       searchTooltipEl.setAttribute("aria-label", "Dog policy");
@@ -678,21 +725,23 @@
           toFocus?.focus();
           setTimeout(() => { isDismissingDialog = false; }, 150);
         } else if (e.key === "Tab") {
-          const focusables = searchTooltipEl.querySelectorAll('button, a[href], [tabindex="0"]');
+          const focusables = Array.from(searchTooltipEl.querySelectorAll('button, a[href], [tabindex="0"]')).filter(
+            (el) => !el.disabled
+          );
           if (focusables.length === 0) return;
           const first = focusables[0];
           const last = focusables[focusables.length - 1];
-          if (e.shiftKey && document.activeElement === first) {
+          if (e.shiftKey && (document.activeElement === first || !searchTooltipEl.contains(document.activeElement))) {
             e.preventDefault();
             last.focus();
-          } else if (!e.shiftKey && document.activeElement === last) {
+          } else if (!e.shiftKey && (document.activeElement === last || !searchTooltipEl.contains(document.activeElement))) {
             e.preventDefault();
             first.focus();
           }
         }
       });
 
-      document.body.appendChild(searchTooltipEl);
+      (document.body || document.documentElement).appendChild(searchTooltipEl);
     }
 
     if (!searchCardObserver) {
@@ -701,9 +750,9 @@
           if (entry.isIntersecting) {
             const card = entry.target;
             const propId = card.getAttribute("data-vdp-prop-id");
-            const url = card.getAttribute("data-vdp-url");
-            if (propId && url && searchQueue) {
-              enqueueSearch(propId, url, "normal");
+            const fetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+            if (propId && fetchUrl && searchQueue) {
+              enqueueSearch(propId, fetchUrl, "normal");
             }
           }
         }
@@ -735,6 +784,8 @@
       }
       c.removeAttribute("data-vdp-prop-id");
       c.removeAttribute("data-vdp-url");
+      c.removeAttribute("data-vdp-fetch-url");
+      c.removeAttribute("data-vdp-nav-url");
     }
     if (searchTooltipEl) {
       searchTooltipEl.remove();
@@ -759,15 +810,17 @@
   }
 
   function bindSearchCard(card) {
-    const link = card.querySelector('a[href*="/"]');
-    if (!link) return;
-    const propId = getListingIdFromUrl(link.href);
-    if (!propId) return;
+    const listing = findCardListing(card);
+    if (!listing) return;
+    const { propertyId: propId, fetchUrl, navigationUrl } = listing;
 
     const prevId = card.getAttribute("data-vdp-prop-id");
     let badge = card.querySelector(".vdp-search-badge");
 
     if (prevId === propId && badge) {
+      card.setAttribute("data-vdp-fetch-url", fetchUrl);
+      card.setAttribute("data-vdp-nav-url", navigationUrl);
+      card.setAttribute("data-vdp-url", fetchUrl);
       return;
     }
 
@@ -778,11 +831,16 @@
     }
 
     card.setAttribute("data-vdp-prop-id", propId);
-    card.setAttribute("data-vdp-url", link.href);
+    card.setAttribute("data-vdp-fetch-url", fetchUrl);
+    card.setAttribute("data-vdp-nav-url", navigationUrl);
+    card.setAttribute("data-vdp-url", fetchUrl);
     discoveredSearchPropIds.add(propId);
 
     // Watch visibility for prefetching
-    searchCardObserver?.observe(card);
+    if (searchCardObserver) {
+      try { searchCardObserver.unobserve(card); } catch {}
+      searchCardObserver.observe(card);
+    }
 
     if (!badge) {
       badge = document.createElement("div");
@@ -790,6 +848,7 @@
       badge.setAttribute("tabindex", "0");
       badge.setAttribute("role", "button");
       badge.setAttribute("aria-haspopup", "dialog");
+      badge.setAttribute("aria-controls", "vdp-search-tooltip");
       badge.setAttribute("aria-expanded", "false");
       badge.setAttribute("aria-label", "Checking pet policy");
       badge.dataset.vdpStatus = "loading";
@@ -802,15 +861,17 @@
       // Dynamic handlers read card data attributes at event time
       badge.addEventListener("mouseenter", () => {
         const currentId = card.getAttribute("data-vdp-prop-id");
-        const currentUrl = card.getAttribute("data-vdp-url");
-        if (currentId && currentUrl) onBadgeHover(badge, currentId, currentUrl, true);
+        const currentFetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+        const currentNavUrl = card.getAttribute("data-vdp-nav-url") || currentFetchUrl;
+        if (currentId && currentFetchUrl) onBadgeHover(badge, currentId, currentFetchUrl, currentNavUrl, true);
       });
       badge.addEventListener("mouseleave", onBadgeLeave);
       badge.addEventListener("focus", () => {
         if (isDismissingDialog) return;
         const currentId = card.getAttribute("data-vdp-prop-id");
-        const currentUrl = card.getAttribute("data-vdp-url");
-        if (currentId && currentUrl) onBadgeHover(badge, currentId, currentUrl, true);
+        const currentFetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+        const currentNavUrl = card.getAttribute("data-vdp-nav-url") || currentFetchUrl;
+        if (currentId && currentFetchUrl) onBadgeHover(badge, currentId, currentFetchUrl, currentNavUrl, true);
       });
       badge.addEventListener("blur", (e) => {
         if (e.relatedTarget && searchTooltipEl?.contains(e.relatedTarget)) return;
@@ -820,9 +881,10 @@
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           const currentId = card.getAttribute("data-vdp-prop-id");
-          const currentUrl = card.getAttribute("data-vdp-url");
-          if (currentId && currentUrl) {
-            showTooltipForBadge(badge, currentId, currentUrl, true);
+          const currentFetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+          const currentNavUrl = card.getAttribute("data-vdp-nav-url") || currentFetchUrl;
+          if (currentId && currentFetchUrl) {
+            showTooltipForBadge(badge, currentId, currentNavUrl, true);
           }
         } else if (e.key === "Escape") {
           hideTooltip();
@@ -838,6 +900,7 @@
       badge.className = "vdp-search-badge vdp-badge-loading";
       badge.textContent = "⏳ Checking pet policy...";
       badge.setAttribute("aria-label", "Checking pet policy");
+      enqueueSearch(propId, fetchUrl, "normal");
     }
 
     card._vdpUnsub = searchQueue?.subscribe(propId, (data) => {
@@ -850,7 +913,8 @@
           searchTooltipEl &&
           searchTooltipEl.style.display !== "none"
         ) {
-          renderTooltipContent(data, card.getAttribute("data-vdp-url"), propId, false);
+          const navUrl = card.getAttribute("data-vdp-nav-url") || card.getAttribute("data-vdp-url");
+          renderTooltipContent(data, navUrl, propId, false);
           positionTooltip(badge);
         }
       }
@@ -909,12 +973,12 @@
     badge.appendChild(textSpan);
   }
 
-  function onBadgeHover(badge, propId, url, isHighPriority) {
+  function onBadgeHover(badge, propId, fetchUrl, navUrl, isHighPriority) {
     clearTooltipLeaveTimer();
     if (isHighPriority && searchQueue) {
-      enqueueSearch(propId, url, "high");
+      enqueueSearch(propId, fetchUrl, "high");
     }
-    showTooltipForBadge(badge, propId, url, false);
+    showTooltipForBadge(badge, propId, navUrl || fetchUrl, false);
   }
 
   function onBadgeLeave(e) {
@@ -1010,7 +1074,12 @@
       }
       if (p.fee && p.fee.amount !== null) {
         const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
-        const perStr = p.fee.period && p.fee.period !== "unknown" ? ` per ${p.fee.period}` : "";
+        let perStr = "";
+        if (p.fee.perPet && p.fee.period && p.fee.period !== "unknown" && p.fee.period !== "pet") {
+          perStr = ` per pet per ${p.fee.period}`;
+        } else if (p.fee.period && p.fee.period !== "unknown") {
+          perStr = ` per ${p.fee.period}`;
+        }
         addRow("Pet fee", `${curSym}${p.fee.amount}${perStr}`);
       } else if (p.fee) {
         addRow("Pet fee", String(p.fee));
@@ -1037,8 +1106,24 @@
         warnBox.innerHTML = "⚠️ <strong>Some pet-policy details conflict.</strong><br>Open the listing to verify the complete rules.";
         searchTooltipEl.appendChild(warnBox);
       }
+    } else if (data.status === "rate_limited") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "Pet policy lookup paused due to request limits.";
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "capped") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "Background check paused to protect session limits.";
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
     } else {
-      // Unavailable / Fallback
+      // Unavailable / Fallback (unknown, timeout, error)
       const row = document.createElement("div");
       row.className = "vdp-tooltip-row";
       const val = document.createElement("span");

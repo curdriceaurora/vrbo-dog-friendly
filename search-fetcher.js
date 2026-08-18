@@ -18,6 +18,7 @@
   const DEFAULT_MIN_DELAY_MS = 400;
   const DEFAULT_SESSION_CAP = 40;
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
+  const DEFAULT_COOLDOWN_MS = 30000; // 30s cooldown for terminal states
 
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
@@ -163,13 +164,15 @@
   function createSearchFetchQueue(options = {}) {
     const fetchFn = options.fetchFn || (typeof fetch !== "undefined" ? fetch.bind(globalThis) : null);
     const storage = options.storage || (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local ? chrome.storage.local : null);
-    const maxConcurrent = options.maxConcurrent || DEFAULT_CONCURRENCY;
-    const minDelayMs = options.minDelayMs || DEFAULT_MIN_DELAY_MS;
-    const sessionCap = options.sessionCap || DEFAULT_SESSION_CAP;
-    const ttlMs = options.ttlMs || DEFAULT_TTL_MS;
-    const pauseOnChallengeMs = options.pauseOnChallengeMs || PAUSE_ON_CHALLENGE_MS;
+    const maxConcurrent = options.maxConcurrent !== undefined ? options.maxConcurrent : DEFAULT_CONCURRENCY;
+    const minDelayMs = options.minDelayMs !== undefined ? options.minDelayMs : DEFAULT_MIN_DELAY_MS;
+    const sessionCap = options.sessionCap !== undefined ? options.sessionCap : DEFAULT_SESSION_CAP;
+    const ttlMs = options.ttlMs !== undefined ? options.ttlMs : DEFAULT_TTL_MS;
+    const pauseOnChallengeMs = options.pauseOnChallengeMs !== undefined ? options.pauseOnChallengeMs : PAUSE_ON_CHALLENGE_MS;
+    const cooldownMs = options.cooldownMs !== undefined ? options.cooldownMs : DEFAULT_COOLDOWN_MS;
 
     const memoryCache = new Map();
+    const terminalCooldowns = new Map(); // propertyId -> { data, expiresAt, allowBypass }
     const queue = []; // [{ propertyId, url, priority }]
     const activeRequests = new Set();
     const enqueuedOrActive = new Set();
@@ -184,6 +187,10 @@
     let maxObservedConcurrency = 0;
     let pauseTimer = null;
     const scheduledTimers = new Set();
+
+    if (storage && options.autoMaintenance !== false) {
+      performStorageMaintenance(storage).catch(() => {});
+    }
 
     function scheduleTimer(fn, ms) {
       if (isDisposed) return null;
@@ -222,13 +229,31 @@
       }
     }
 
+    function recordTerminalState(propertyId, data, allowBypass = false) {
+      if (!propertyId || isDisposed) return;
+      terminalCooldowns.set(propertyId, {
+        data,
+        expiresAt: Date.now() + cooldownMs,
+        allowBypass,
+      });
+    }
+
     async function getCached(propertyId) {
       if (!propertyId || isDisposed) return null;
 
-      // Check in-memory first
+      // Check in-memory ok cache first
       const mem = memoryCache.get(propertyId);
       if (mem && Date.now() - mem.ts < ttlMs) {
         return mem.data;
+      }
+
+      // Check terminal-state cooldown cache in memory
+      const terminal = terminalCooldowns.get(propertyId);
+      if (terminal) {
+        if (Date.now() < terminal.expiresAt) {
+          return terminal.data;
+        }
+        terminalCooldowns.delete(propertyId);
       }
 
       // Check persistent storage
@@ -329,6 +354,7 @@
           if (!isHighPriority && sessionRequestsCount >= sessionCap) {
             enqueuedOrActive.delete(nextItem.propertyId);
             const result = { status: "capped", propertyId: nextItem.propertyId };
+            recordTerminalState(nextItem.propertyId, result, true);
             notify(nextItem.propertyId, result);
             continue;
           }
@@ -383,12 +409,14 @@
         if (res.status === 429 || res.status === 403) {
           pausedUntil = Date.now() + pauseOnChallengeMs;
           const result = { status: "rate_limited", propertyId };
+          recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
           return;
         }
 
         if (!res.ok) {
           const result = { status: "error", code: res.status, propertyId };
+          recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
           return;
         }
@@ -401,6 +429,7 @@
         if (parsed && parsed.isChallenge) {
           pausedUntil = Date.now() + pauseOnChallengeMs;
           const result = { status: "rate_limited", propertyId };
+          recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
           return;
         }
@@ -414,6 +443,7 @@
             policy: parsed.policy,
             ts: Date.now(),
           };
+          terminalCooldowns.delete(propertyId);
           await setCached(propertyId, data);
           notify(propertyId, data);
         } else {
@@ -422,6 +452,7 @@
             propertyId,
             policy: null,
           };
+          recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
         }
       } catch (err) {
@@ -429,10 +460,12 @@
         if (err.name === "AbortError") {
           // Stalled request timed out: emit terminal timeout result (never cached)
           const result = { status: "timeout", propertyId };
+          recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
           return;
         }
         const result = { status: "error", error: err.message, propertyId };
+        recordTerminalState(propertyId, result, false);
         notify(propertyId, result);
       } finally {
         clearTimeout(timer);
@@ -450,7 +483,24 @@
         return;
       }
 
-      // 2. Synchronous duplicate check to prevent race conditions
+      // 2. Check terminal-state cooldown
+      const terminal = terminalCooldowns.get(propertyId);
+      if (terminal) {
+        if (Date.now() < terminal.expiresAt) {
+          // If high priority and bypass is allowed (e.g. background-capped property receiving its 1 explicit attempt)
+          if (priority === "high" && terminal.allowBypass) {
+            terminalCooldowns.delete(propertyId);
+            // proceed to enqueue attempt
+          } else {
+            notify(propertyId, terminal.data);
+            return;
+          }
+        } else {
+          terminalCooldowns.delete(propertyId);
+        }
+      }
+
+      // 3. Synchronous duplicate check to prevent race conditions
       if (enqueuedOrActive.has(propertyId)) {
         if (priority === "high") {
           highPriorityIds.add(propertyId);
@@ -464,10 +514,10 @@
       }
       enqueuedOrActive.add(propertyId);
 
-      // 3. Check storage cache
+      // 4. Check storage cache
       getCached(propertyId).then((cached) => {
         if (isDisposed) return;
-        if (cached) {
+        if (cached && cached.status === "ok") {
           enqueuedOrActive.delete(propertyId);
           notify(propertyId, cached);
           return;
@@ -483,6 +533,7 @@
       enqueuedOrActive.clear();
       highPriorityIds.clear();
       sessionRequestsCount = 0;
+      terminalCooldowns.clear();
     }
 
     function onVisibilityChange() {
@@ -515,6 +566,7 @@
       }
       subscribers.clear();
       memoryCache.clear();
+      terminalCooldowns.clear();
     }
 
     return {
@@ -529,14 +581,131 @@
       getSessionCount: () => sessionRequestsCount,
       getMaxObservedConcurrency: () => maxObservedConcurrency,
       isPaused: () => Date.now() < pausedUntil,
+      isInCooldown: (propertyId) => {
+        const t = terminalCooldowns.get(propertyId);
+        return Boolean(t && Date.now() < t.expiresAt && !t.allowBypass);
+      },
     };
   }
 
+  /**
+   * 8.2.7 Bounded Storage Maintenance:
+   * Remove stale, expired, or incompatible Vrbow cache keys from storage.
+   * Sweeps only keys with the vrbow_cache_ prefix.
+   * Records no analytics.
+   */
+  async function performStorageMaintenance(storage, options = {}) {
+    if (!storage || typeof storage.get !== "function") {
+      return { inspected: 0, removed: 0, removedKeys: [] };
+    }
+    const now = typeof options.now === "number" ? options.now : Date.now();
+
+    return new Promise((resolve) => {
+      try {
+        storage.get(null, (allItems) => {
+          if (!allItems || typeof allItems !== "object") {
+            resolve({ inspected: 0, removed: 0, removedKeys: [] });
+            return;
+          }
+
+          const keysToRemove = [];
+          let inspected = 0;
+
+          for (const [key, entry] of Object.entries(allItems)) {
+            // Sweep only keys with the vrbow_cache_ prefix
+            if (!key.startsWith(CACHE_PREFIX)) {
+              continue;
+            }
+
+            inspected++;
+
+            // Check if record is corrupt, incompatible, or expired
+            const isCorrupt = !entry || typeof entry !== "object";
+            const isIncompatible = !isCorrupt && (
+              entry.cacheVersion !== CACHE_RECORD_VERSION ||
+              !entry.data ||
+              typeof entry.data !== "object" ||
+              !entry.data.policy ||
+              entry.data.policy.schemaVersion !== POLICY_SCHEMA_VERSION
+            );
+            const isExpired = !isCorrupt && (
+              !entry.expiresAt ||
+              now >= entry.expiresAt
+            );
+
+            if (isCorrupt || isIncompatible || isExpired) {
+              keysToRemove.push(key);
+            }
+          }
+
+          if (keysToRemove.length > 0 && typeof storage.remove === "function") {
+            try {
+              storage.remove(keysToRemove, () => {
+                resolve({ inspected, removed: keysToRemove.length, removedKeys: keysToRemove });
+              });
+            } catch {
+              resolve({ inspected, removed: 0, removedKeys: [] });
+            }
+          } else {
+            resolve({ inspected, removed: 0, removedKeys: [] });
+          }
+        });
+      } catch {
+        resolve({ inspected: 0, removed: 0, removedKeys: [] });
+      }
+    });
+  }
+
+  /**
+   * Validate and separate a Vrbo listing URL into a clean canonical fetch URL
+   * (HTTPS, www.vrbo.com or vrbo.com, pathname only, no query or fragment)
+   * and the original navigation URL.
+   */
+  function validateListingUrl(urlStr, baseUrl = "https://www.vrbo.com") {
+    if (!urlStr || typeof urlStr !== "string") return null;
+    try {
+      const u = new URL(urlStr, baseUrl);
+      if (u.protocol !== "https:") return null;
+      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
+
+      // Extract property ID from pathname
+      const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);
+      if (!m) return null;
+      let propId = m[1];
+      if (/^p\d+/i.test(propId)) propId = propId.slice(1);
+      if (!propId) return null;
+
+      // Make sure the path matches a listing format
+      if (
+        !/^\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
+        !/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
+        !/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(u.pathname)
+      ) {
+        return null;
+      }
+
+      const navigationUrl = u.href;
+      const fetchUrl = `https://www.vrbo.com${u.pathname}`;
+
+      return {
+        propertyId: propId,
+        navigationUrl,
+        fetchUrl,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   return {
+    CACHE_PREFIX,
     walkApolloNode,
     parseListingHtml,
     hasConcretePolicy,
     resolveSearchApolloRecord,
     createSearchFetchQueue,
+    validateListingUrl,
+    performStorageMaintenance,
   };
 });
+

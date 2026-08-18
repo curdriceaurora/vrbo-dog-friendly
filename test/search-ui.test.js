@@ -206,7 +206,7 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     // Test badge derivation
     const badge = extract.deriveSearchBadge(canonical);
     assert.equal(badge.statusKey, "allowed");
-    assert.equal(badge.text, "Dogs allowed · Max 2 · 50 lbs");
+    assert.equal(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay · $200 deposit · Approval required · ⚠ Conflicting info");
   });
 
   await t.test("future filtering readiness: conservative missing-value semantics", () => {

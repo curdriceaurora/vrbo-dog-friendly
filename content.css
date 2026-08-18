@@ -186,13 +186,15 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex-wrap: wrap;
+  max-width: 100%;
   padding: 4px 8px;
   margin: 6px 0;
   border-radius: 6px;
   font-family: var(--vdp-font-family);
   font-size: 11.5px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.3;
   cursor: pointer;
   border: 1px solid var(--vdp-color-border-subtle);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
@@ -368,3 +370,89 @@
   outline: 2px solid var(--vdp-color-focus-ring);
   outline-offset: 2px;
 }
+
+@media (forced-colors: active) {
+  #vdp-panel {
+    border: 2px solid CanvasText;
+  }
+
+  #vdp-panel .vdp-header {
+    border-bottom: 1px solid CanvasText;
+  }
+
+  #vdp-panel .vdp-header-btns button {
+    border: 1px solid ButtonText;
+  }
+
+  #vdp-panel .vdp-row-wrap {
+    border-bottom: 1px solid CanvasText;
+  }
+
+  #vdp-panel .vdp-alt,
+  #vdp-panel .vdp-other-item {
+    border: 1px solid CanvasText;
+  }
+
+  #vdp-panel .vdp-jump {
+    color: LinkText;
+    text-decoration: underline;
+  }
+
+  #vdp-panel :where(button, [tabindex]):focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .vdp-highlight {
+    outline: 3px solid Highlight !important;
+  }
+
+  .vdp-search-badge {
+    border: 1px solid ButtonText;
+  }
+
+  .vdp-search-badge:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .vdp-search-tooltip {
+    border: 2px solid CanvasText;
+  }
+
+  .vdp-tooltip-header {
+    border-bottom: 1px solid CanvasText;
+  }
+
+  .vdp-tooltip-close {
+    border: 1px solid ButtonText;
+  }
+
+  .vdp-tooltip-close:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  .vdp-tooltip-row {
+    border-bottom: 1px solid CanvasText;
+  }
+
+  .vdp-tooltip-notes {
+    border: 1px solid CanvasText;
+  }
+
+  .vdp-tooltip-footer {
+    border-top: 1px solid CanvasText;
+  }
+
+  .vdp-tooltip-footer a {
+    color: LinkText;
+    text-decoration: underline;
+  }
+
+  .vdp-tooltip-footer a:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
+

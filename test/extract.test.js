@@ -144,7 +144,50 @@ test("fees and deposits", async (t) => {
   await t.test("dollar amounts, prefix and suffix phrasing", () => {
     assert.strictEqual(policyFor("There is a $75 pet fee.").fee, "$75");
     assert.strictEqual(policyFor("Pet fee of $75.").fee, "$75");
-    assert.strictEqual(policyFor("$25 per dog per night.").fee, "$25 per night");
+    assert.strictEqual(policyFor("$25 per night.").fee, "$25 per night");
+    assert.strictEqual(policyFor("$25 per dog per night.").fee, "$25 per pet per night");
+    assert.strictEqual(policyFor("$25 per dog per day.").fee, "$25 per pet per day");
+    assert.strictEqual(policyFor("$25 per pet per day.").fee, "$25 per pet per day");
+    assert.strictEqual(policyFor("Pet fee of $30 per day.").fee, "$30 per day");
+    assert.strictEqual(policyFor("A $150 pet fee per stay.").fee, "$150 per stay");
+    assert.strictEqual(policyFor("A $150 pet fee per stay for maximum allowed pets.").fee, "$150 per stay");
+    assert.strictEqual(policyFor("$100 per stay for up to 2 dogs.").fee, "$100 per stay");
+    assert.strictEqual(policyFor("$50 per pet.").fee, "$50 per pet");
+  });
+
+  await t.test("8.1.8 fee-period canonical contract preserves 'day' without converting to 'night'", () => {
+    // 1. Per day
+    const dayPolicy = normalizePolicy(policyFor("Pet fee of $25 per day."));
+    assert.deepEqual(dayPolicy.fee, { amount: 25, currency: "USD", period: "day" });
+    assert.notEqual(dayPolicy.fee.period, "night", "'day' must never silently convert to 'night'");
+
+    // 2. Per pet per day
+    const perPetDayPolicy = normalizePolicy(policyFor("Pet fee of $25 per pet per day."));
+    assert.deepEqual(perPetDayPolicy.fee, { amount: 25, currency: "USD", period: "day", perPet: true });
+
+    // 3. Per dog per day
+    const perDogDayPolicy = normalizePolicy(policyFor("$30 per dog per day."));
+    assert.deepEqual(perDogDayPolicy.fee, { amount: 30, currency: "USD", period: "day", perPet: true });
+
+    // 4. Per stay for maximum allowed pets
+    const maxPetsStayPolicy = normalizePolicy(policyFor("A $150 pet fee per stay for maximum allowed pets."));
+    assert.deepEqual(maxPetsStayPolicy.fee, { amount: 150, currency: "USD", period: "stay" });
+
+    // 5. Per stay for up to 2 dogs
+    const upToDogsStayPolicy = normalizePolicy(policyFor("$100 per stay for up to 2 dogs."));
+    assert.deepEqual(upToDogsStayPolicy.fee, { amount: 100, currency: "USD", period: "stay" });
+
+    // 6. Per night
+    const nightPolicy = normalizePolicy(policyFor("Pet fee of $25 per night."));
+    assert.deepEqual(nightPolicy.fee, { amount: 25, currency: "USD", period: "night" });
+
+    // 7. Per pet
+    const petPolicy = normalizePolicy(policyFor("Pet fee of $50 per pet."));
+    assert.deepEqual(petPolicy.fee, { amount: 50, currency: "USD", period: "pet", perPet: true });
+
+    // 8. Bare fee (unknown period)
+    const barePolicy = normalizePolicy(policyFor("There is a $75 pet fee."));
+    assert.deepEqual(barePolicy.fee, { amount: 75, currency: "USD", period: "unknown" });
   });
 
   await t.test("non-USD currencies", () => {
@@ -171,7 +214,7 @@ test("fees and deposits", async (t) => {
     assert.equal(canonical.weightLimit.unit, "kg");
 
     const badge = deriveSearchBadge(canonical);
-    assert.equal(badge.text, "Dogs allowed · 22.5 kg", "Must not round 22.5 kg up to 23 kg");
+    assert.equal(badge.text, "Dogs allowed · 22.5 kg · High confidence", "Must not round 22.5 kg up to 23 kg");
   });
 
   await t.test("deriveSearchBadge returns restrictions warning status for approvalRequired and restrictionsFound", () => {
@@ -187,41 +230,67 @@ test("fees and deposits", async (t) => {
     const restrictionsBadge = deriveSearchBadge(restrictionsPolicy);
     assert.equal(restrictionsBadge.statusKey, "restrictions");
     assert.equal(restrictionsBadge.className, "vdp-search-badge vdp-badge-restrictions");
-    assert.equal(restrictionsBadge.text, "Pet restrictions found");
+    assert.equal(restrictionsBadge.text, "Pet restrictions");
 
     // 3. Weight limit only (no affirmative petsAllowed)
     const weightOnlyPolicy = { petsAllowed: null, weightLimit: { value: 50, unit: "lb", pounds: 50 } };
     const weightBadge = deriveSearchBadge(weightOnlyPolicy);
     assert.equal(weightBadge.statusKey, "restrictions");
     assert.equal(weightBadge.className, "vdp-search-badge vdp-badge-restrictions");
-    assert.equal(weightBadge.text, "Pet restrictions found");
+    assert.equal(weightBadge.text, "Pet restrictions · 50 lbs");
 
     // 4. Fee only (no affirmative petsAllowed)
     const feeOnlyPolicy = { petsAllowed: null, fee: { amount: 50, currency: "USD", period: "stay" } };
     const feeBadge = deriveSearchBadge(feeOnlyPolicy);
     assert.equal(feeBadge.statusKey, "restrictions");
     assert.equal(feeBadge.className, "vdp-search-badge vdp-badge-restrictions");
-    assert.equal(feeBadge.text, "Pet restrictions found");
+    assert.equal(feeBadge.text, "Pet restrictions · $50/stay");
 
     // 5. Max dogs only (no affirmative petsAllowed)
     const maxDogsOnlyPolicy = { petsAllowed: null, maxDogs: 2 };
     const maxDogsBadge = deriveSearchBadge(maxDogsOnlyPolicy);
     assert.equal(maxDogsBadge.statusKey, "restrictions");
     assert.equal(maxDogsBadge.className, "vdp-search-badge vdp-badge-restrictions");
-    assert.equal(maxDogsBadge.text, "Pet restrictions found");
+    assert.equal(maxDogsBadge.text, "Pet restrictions · Max 2");
 
     // 6. Restriction note count only (no affirmative petsAllowed)
     const noteCountPolicy = { petsAllowed: null, restrictionNoteCount: 1 };
     const noteCountBadge = deriveSearchBadge(noteCountPolicy);
     assert.equal(noteCountBadge.statusKey, "restrictions");
     assert.equal(noteCountBadge.className, "vdp-search-badge vdp-badge-restrictions");
-    assert.equal(noteCountBadge.text, "Pet restrictions found");
+    assert.equal(noteCountBadge.text, "Pet restrictions");
   });
 
   await t.test("deposit is separate from fee", () => {
     const p = policyFor("A $75 pet fee applies.", "Refundable pet deposit of $200.");
     assert.strictEqual(p.fee, "$75");
     assert.strictEqual(p.deposit, "$200");
+  });
+
+  await t.test("separate sentences for max allowed dogs and stay-level fee are extracted independently and unified", () => {
+    const raw = policyFor(
+      "Up to 2 dogs are welcome.",
+      "A $150 pet fee applies per stay.",
+      "Dogs must weigh under 50 lbs.",
+      "Refundable pet deposit of $200."
+    );
+
+    assert.strictEqual(raw.petsAllowed, true);
+    assert.strictEqual(raw.maxDogs, 2);
+    assert.strictEqual(raw.fee, "$150 per stay");
+    assert.strictEqual(raw.weightPerDog, "50 lbs");
+    assert.strictEqual(raw.deposit, "$200");
+
+    const canonical = normalizePolicy(raw);
+    assert.strictEqual(canonical.maxDogs, 2);
+    assert.deepStrictEqual(canonical.fee, { amount: 150, currency: "USD", period: "stay" });
+    assert.strictEqual(canonical.fee.perPet, undefined, "Stay-level fee without per-pet qualifier is stay-wide");
+    assert.deepStrictEqual(canonical.weightLimit, { value: 50, unit: "lb", pounds: 50 });
+    assert.deepStrictEqual(canonical.deposit, { amount: 200, currency: "USD" });
+
+    const badge = deriveSearchBadge(canonical);
+    assert.strictEqual(badge.statusKey, "allowed");
+    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay · $200 deposit · High confidence");
   });
 
   await t.test("conflicting fees are flagged", () => {

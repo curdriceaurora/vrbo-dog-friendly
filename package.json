@@ -3,9 +3,9 @@
   "private": true,
   "scripts": {
     "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
+    "test:coverage": "node tools/check-coverage.js",
     "test:theme": "playwright test",
-    "test:all": "node --check content.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node --test && playwright test"
+    "test:all": "node --check content.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node tools/check-coverage.js && playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1"

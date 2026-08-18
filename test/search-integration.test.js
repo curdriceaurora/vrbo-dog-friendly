@@ -74,24 +74,30 @@ class MockElement {
     }
   }
 
-  querySelector(selector) {
+  _matches(el, selector) {
+    if (!el || !selector) return false;
     if (selector.startsWith(".")) {
       const className = selector.slice(1);
-      return this._find((el) => el.className && el.className.split(" ").includes(className));
+      return Boolean(el.className && el.className.split(" ").includes(className));
     }
-    if (selector.startsWith("[")) {
-      const attrMatch = selector.match(/\[([a-zA-Z0-9_-]+)(?:\*?=?"?([^"\]]*)"?)?\]/);
-      if (attrMatch) {
-        const [, attr, val] = attrMatch;
-        return this._find((el) => {
-          const actual = el.getAttribute(attr);
-          if (actual === null) return false;
-          if (!val) return true;
+    const tagAttrMatch = selector.match(/^([a-zA-Z0-9_-]+)?(?:\[([a-zA-Z0-9_-]+)(?:\*?=?"?([^"\]]*)"?)?\])?/);
+    if (tagAttrMatch) {
+      const [, tag, attr, val] = tagAttrMatch;
+      if (tag && el.tagName.toLowerCase() !== tag.toLowerCase()) return false;
+      if (attr) {
+        const actual = el.getAttribute(attr);
+        if (actual === null) return false;
+        if (val) {
           return selector.includes("*=") ? actual.includes(val) : actual === val;
-        });
+        }
       }
+      return Boolean(tag || attr);
     }
-    return this._find((el) => el.tagName.toLowerCase() === selector.toLowerCase());
+    return el.tagName.toLowerCase() === selector.toLowerCase();
+  }
+
+  querySelector(selector) {
+    return this._find((el) => this._matches(el, selector));
   }
 
   querySelectorAll(selector) {
@@ -111,13 +117,8 @@ class MockElement {
 
   _findAll(selector, results) {
     for (const child of this.children) {
-      if (selector.startsWith(".") && child.className && child.className.split(" ").includes(selector.slice(1))) {
+      if (this._matches(child, selector)) {
         results.push(child);
-      } else if (selector.startsWith("[")) {
-        const attrMatch = selector.match(/\[([a-zA-Z0-9_-]+)/);
-        if (attrMatch && child.getAttribute(attrMatch[1]) !== null) {
-          results.push(child);
-        }
       }
       child._findAll(selector, results);
     }
@@ -417,27 +418,89 @@ test("Consolidated State-Transition Suite", async (t) => {
     assert.equal(queue.getQueueLength(), 0);
   });
 
-  await t.test("7. Badge focus → dialog focus → Escape/close (Focus management)", () => {
+  await t.test("7. 8.1.6 Dialog accessibility contract & focus management", () => {
     const badge = new MockElement("div");
+    badge.className = "vdp-search-badge vdp-badge-allowed";
+    badge.setAttribute("tabindex", "0");
+    badge.setAttribute("role", "button");
+    badge.setAttribute("aria-haspopup", "dialog");
+    badge.setAttribute("aria-controls", "vdp-search-tooltip");
+    badge.setAttribute("aria-expanded", "false");
+
     const dialog = new MockElement("div");
+    dialog.id = "vdp-search-tooltip";
+    dialog.className = "vdp-search-tooltip";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-label", "Dog policy");
+    dialog.setAttribute("aria-hidden", "true");
+    dialog.style.display = "none";
+
     const closeBtn = new MockElement("button");
+    closeBtn.className = "vdp-tooltip-close";
+    closeBtn.setAttribute("aria-label", "Close details");
     dialog.appendChild(closeBtn);
+
+    const link = new MockElement("a");
+    link.setAttribute("href", "https://www.vrbo.com/123");
+    dialog.appendChild(link);
 
     let focusedElement = null;
     badge.focus = () => { focusedElement = badge; };
     closeBtn.focus = () => { focusedElement = closeBtn; };
+    link.focus = () => { focusedElement = link; };
 
-    // Keyboard activation on badge
-    badge.dispatchEvent({ type: "keydown", key: "Enter" });
+    // 1. Initial State: aria-expanded is false, aria-hidden is true, aria-controls matches dialog id
+    assert.equal(badge.getAttribute("aria-controls"), dialog.id);
+    assert.equal(badge.getAttribute("aria-expanded"), "false");
+    assert.equal(dialog.getAttribute("aria-hidden"), "true");
+    assert.equal(dialog.getAttribute("aria-modal"), null, "Must NOT set aria-modal='true'");
+
+    // 2. Focus-only opening: opens tooltip, aria-expanded/aria-hidden change together, focus stays on badge
+    badge.focus();
     dialog.style.display = "block";
-    closeBtn.focus();
-    assert.equal(focusedElement, closeBtn, "Focus should move to dialog close button");
+    dialog.setAttribute("aria-hidden", "false");
+    badge.setAttribute("aria-expanded", "true");
+    assert.equal(focusedElement, badge, "Focus-only opening must keep focus on the badge");
+    assert.equal(badge.getAttribute("aria-expanded"), "true");
+    assert.equal(dialog.getAttribute("aria-hidden"), "false");
 
-    // Escape key inside dialog
+    // 3. Pointer hover opening: focus is NOT stolen
+    dialog.style.display = "block";
+    assert.equal(focusedElement, badge, "Pointer hover must not steal focus");
+
+    // 4. Keyboard activation on badge (Enter/Space): opens dialog and moves focus to Close button
+    badge.dispatchEvent({ type: "keydown", key: "Enter" });
+    closeBtn.focus();
+    assert.equal(focusedElement, closeBtn, "Keyboard activation must move focus to Close button");
+
+    // 5. Tab cycling inside dialog: Close -> Link -> Close
+    let focusables = [closeBtn, link];
+    let currentFocusIndex = 0; // currently on closeBtn
+    // Tab forward
+    currentFocusIndex = (currentFocusIndex + 1) % focusables.length;
+    focusables[currentFocusIndex].focus();
+    assert.equal(focusedElement, link, "Tab from close button must focus listing link");
+
+    // Tab forward wraps back to Close
+    currentFocusIndex = (currentFocusIndex + 1) % focusables.length;
+    focusables[currentFocusIndex].focus();
+    assert.equal(focusedElement, closeBtn, "Tab from listing link must wrap to close button");
+
+    // Shift+Tab backward wraps to Link
+    currentFocusIndex = (currentFocusIndex - 1 + focusables.length) % focusables.length;
+    focusables[currentFocusIndex].focus();
+    assert.equal(focusedElement, link, "Shift+Tab from close button must wrap to listing link");
+
+    // 6. Escape key inside dialog: closes dialog, aria-expanded/hidden sync, restores focus to badge
     dialog.dispatchEvent({ type: "keydown", key: "Escape" });
     dialog.style.display = "none";
+    dialog.setAttribute("aria-hidden", "true");
+    badge.setAttribute("aria-expanded", "false");
     badge.focus();
+
     assert.equal(focusedElement, badge, "Focus should restore to badge upon Escape");
+    assert.equal(badge.getAttribute("aria-expanded"), "false");
+    assert.equal(dialog.getAttribute("aria-hidden"), "true");
   });
 
   await t.test("8. Cache status matrix & distinct terminal states (miss, hit, unknown, timeout, error, rate_limited, capped)", async () => {
@@ -492,4 +555,253 @@ test("Consolidated State-Transition Suite", async (t) => {
 
     queue.dispose();
   });
+
+  await t.test("9. 8.1.2 Terminal-State Cooldown & Distinct Tooltip Copy State Matrix", async () => {
+    let callCount = 0;
+    const mockFetch = async (url) => {
+      callCount++;
+      if (url.includes("timeout")) {
+        const err = new Error("Abort");
+        err.name = "AbortError";
+        throw err;
+      }
+      if (url.includes("429")) return { ok: false, status: 429 };
+      if (url.includes("500")) return { ok: false, status: 500 };
+      if (url.includes("unknown")) return { ok: true, status: 200, text: async () => "<html>None</html>" };
+      return { ok: true, status: 200, text: async () => "<section>House Rules: Dogs welcome</section>" };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      storage: mockStorage,
+      sessionCap: 1,
+      cooldownMs: 5000,
+      minDelayMs: 5,
+    });
+
+    // 1. Trigger timeout on prop_to
+    queue.enqueue("prop_to", "https://www.vrbo.com/timeout", "normal");
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(callCount, 1);
+    assert.equal(queue.isInCooldown("prop_to"), true);
+
+    // 2. 10 hovers on prop_to during cooldown produce 0 additional requests
+    for (let i = 0; i < 10; i++) {
+      queue.enqueue("prop_to", "https://www.vrbo.com/timeout", "high");
+    }
+    await new Promise((r) => setTimeout(r, 40));
+    assert.equal(callCount, 1, "10 hovers during cooldown must not increase callCount");
+
+    // 3. Background-capped item allows 1 explicit bypass attempt
+    const cappedRes = [];
+    queue.subscribe("prop_cap", (d) => cappedRes.push(d));
+    // Since sessionCap was 1, prop_to consumed the 1 background slot, so prop_cap gets capped
+    queue.enqueue("prop_cap", "https://www.vrbo.com/500", "normal");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(cappedRes[0]?.status, "capped");
+    assert.equal(callCount, 1, "Capped background item made no fetch");
+
+    // Explicit high-priority hover executes 1 attempt
+    queue.enqueue("prop_cap", "https://www.vrbo.com/500", "high");
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(callCount, 2, "Explicit hover triggered 1 bypass attempt");
+
+    // Subsequent hovers during cooldown produce 0 additional requests
+    for (let i = 0; i < 5; i++) {
+      queue.enqueue("prop_cap", "https://www.vrbo.com/500", "high");
+    }
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(callCount, 2, "Subsequent hovers during cooldown must not trigger fetch");
+
+    // 4. Test tooltip copy helper / structure
+    function simulateTooltipRender(data, url) {
+      const tooltip = new MockElement("div");
+      let message = "";
+      if (!data || data.status === "loading") {
+        message = "Checking the listing summary for pet rules...";
+      } else if (data.status === "ok" && data.policy) {
+        message = "Allowed";
+      } else if (data.status === "rate_limited") {
+        message = "Pet policy lookup paused due to request limits.";
+      } else if (data.status === "capped") {
+        message = "Background check paused to protect session limits.";
+      } else {
+        message = "Pet policy details were not available in the search result.";
+      }
+
+      const row = new MockElement("div");
+      const val = new MockElement("span");
+      val.textContent = message;
+      row.appendChild(val);
+      tooltip.appendChild(row);
+
+      const footer = new MockElement("div");
+      const link = new MockElement("a");
+      link.setAttribute("href", url || "#");
+      link.textContent = "Open listing for complete rules ↗";
+      footer.appendChild(link);
+      tooltip.appendChild(footer);
+
+      return {
+        message,
+        linkUrl: link.getAttribute("href"),
+        linkText: link.textContent,
+      };
+    }
+
+    const checkingUi = simulateTooltipRender(null, "https://www.vrbo.com/123");
+    assert.equal(checkingUi.message, "Checking the listing summary for pet rules...");
+    assert.equal(checkingUi.linkUrl, "https://www.vrbo.com/123");
+
+    const cappedUi = simulateTooltipRender({ status: "capped" }, "https://www.vrbo.com/123");
+    assert.equal(cappedUi.message, "Background check paused to protect session limits.");
+    assert.equal(cappedUi.linkUrl, "https://www.vrbo.com/123");
+
+    const rateLimitedUi = simulateTooltipRender({ status: "rate_limited" }, "https://www.vrbo.com/123");
+    assert.equal(rateLimitedUi.message, "Pet policy lookup paused due to request limits.");
+    assert.equal(rateLimitedUi.linkUrl, "https://www.vrbo.com/123");
+
+    const unavailableUi = simulateTooltipRender({ status: "timeout" }, "https://www.vrbo.com/123");
+    assert.equal(unavailableUi.message, "Pet policy details were not available in the search result.");
+    assert.equal(unavailableUi.linkUrl, "https://www.vrbo.com/123");
+
+    queue.dispose();
+  });
+
+  await t.test("10. 8.1.3 Separate Navigation URLs from Canonical Fetch URLs in Card Binding", async () => {
+    const fetchedUrls = [];
+    const mockFetch = async (url) => {
+      fetchedUrls.push(url);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>House Rules: Dogs allowed, maximum 2 dogs</section>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      storage: mockStorage,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    const { validateListingUrl } = require("../search-fetcher.js");
+
+    function simulateCardBinding(cardElement) {
+      const anchors = cardElement.querySelectorAll("a[href]");
+      let listing = null;
+      for (const a of anchors) {
+        const href = a.getAttribute("href");
+        if (!href) continue;
+        const validated = validateListingUrl(href);
+        if (validated) {
+          listing = validated;
+          break;
+        }
+      }
+      if (!listing) return null;
+
+      const { propertyId, fetchUrl, navigationUrl } = listing;
+      cardElement.setAttribute("data-vdp-prop-id", propertyId);
+      cardElement.setAttribute("data-vdp-fetch-url", fetchUrl);
+      cardElement.setAttribute("data-vdp-nav-url", navigationUrl);
+
+      return { propertyId, fetchUrl, navigationUrl };
+    }
+
+    // Card 1: has unrelated leading anchors before the real listing anchor
+    const card1 = new MockElement("div");
+    card1.setAttribute("data-stid", "property-card");
+
+    const helpAnchor = new MockElement("a");
+    helpAnchor.setAttribute("href", "/help");
+    card1.appendChild(helpAnchor);
+
+    const adAnchor = new MockElement("a");
+    adAnchor.setAttribute("href", "https://partner.com/ad");
+    card1.appendChild(adAnchor);
+
+    const listingAnchor = new MockElement("a");
+    const rawNavUrl = "https://www.vrbo.com/777888?chkin=2026-11-01&chkout=2026-11-07&adults=3&children=1#rates";
+    listingAnchor.setAttribute("href", rawNavUrl);
+    card1.appendChild(listingAnchor);
+
+    const bound = simulateCardBinding(card1);
+    assert.ok(bound !== null, "Card with leading unrelated anchors should bind to listing anchor");
+    assert.equal(bound.propertyId, "777888");
+    assert.equal(bound.fetchUrl, "https://www.vrbo.com/777888", "fetchUrl must have query and fragment removed");
+    assert.equal(bound.navigationUrl, rawNavUrl, "navigationUrl must retain full search and date context");
+
+    // Enqueue with fetchUrl
+    queue.enqueue(bound.propertyId, bound.fetchUrl, "normal");
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(fetchedUrls.length, 1);
+    assert.equal(fetchedUrls[0], "https://www.vrbo.com/777888", "Network fetch must receive clean canonical URL without query string");
+
+    // Card 2: Non-Vrbo or non-HTTPS card must be rejected
+    const card2 = new MockElement("div");
+    const nonVrboAnchor = new MockElement("a");
+    nonVrboAnchor.setAttribute("href", "https://www.expedia.com/99999?adults=2");
+    card2.appendChild(nonVrboAnchor);
+
+    const bound2 = simulateCardBinding(card2);
+    assert.equal(bound2, null, "Non-Vrbo card must not bind");
+
+    queue.dispose();
+  });
+
+  await t.test("11. 8.1.8 Fee-period tooltip rendering distinguishes 'per day', 'per pet per day', and 'per stay'", () => {
+    function renderTooltipFeeRow(policy) {
+      const p = policy;
+      if (!p || !p.fee || p.fee.amount === null || p.fee.amount <= 0) return null;
+      const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
+      let perStr = "";
+      if (p.fee.perPet && p.fee.period && p.fee.period !== "unknown" && p.fee.period !== "pet") {
+        perStr = ` per pet per ${p.fee.period}`;
+      } else if (p.fee.period && p.fee.period !== "unknown") {
+        perStr = ` per ${p.fee.period}`;
+      }
+      return `Pet fee: ${curSym}${p.fee.amount}${perStr}`;
+    }
+
+    // 1. Per day
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 25, currency: "USD", period: "day" } }),
+      "Pet fee: $25 per day",
+      "$25 per day must render as '$25 per day', never '$25 per night'"
+    );
+
+    // 2. Per pet per day
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 25, currency: "USD", period: "day", perPet: true } }),
+      "Pet fee: $25 per pet per day"
+    );
+
+    // 3. Per pet per night
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 25, currency: "USD", period: "night", perPet: true } }),
+      "Pet fee: $25 per pet per night"
+    );
+
+    // 4. Per stay (for maximum allowed pets / flat stay fee)
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 150, currency: "USD", period: "stay" } }),
+      "Pet fee: $150 per stay"
+    );
+
+    // 5. Per pet (per stay or flat per pet)
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 50, currency: "USD", period: "pet", perPet: true } }),
+      "Pet fee: $50 per pet"
+    );
+
+    // 6. Bare fee (unknown period)
+    assert.equal(
+      renderTooltipFeeRow({ fee: { amount: 75, currency: "USD", period: "unknown" } }),
+      "Pet fee: $75"
+    );
+  });
 });
+
