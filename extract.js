@@ -219,10 +219,10 @@
     const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const FEE_RE = [
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
+      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
+      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
+      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*per\\s*(?:pet|dog)(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
       new RegExp(`${AMT}\\s?${CUR}\\s*per\\s*(?:pet|dog)(?:\\s*per\\s*(?<per>night|stay|day))?`, "i"),
     ];
@@ -342,5 +342,154 @@
     return result;
   }
 
-  return { getSentences, isPetRelated, priorityForItem, buildCorpus, extractPolicy, toNumber, formatMoney, formatWeight };
+  function normalizePolicy(extracted, propertyId = null, source = "search-response") {
+    if (!extracted) return null;
+
+    // 1. Weight limit normalization
+    let weightLimit = null;
+    if (extracted.weightPerDog) {
+      const wm = String(extracted.weightPerDog).match(/(\d+)\s*(lbs?|kg)/i);
+      if (wm) {
+        const val = parseInt(wm[1], 10);
+        const isKg = /kg/i.test(wm[2]);
+        const unit = isKg ? "kg" : "lb";
+        const pounds = isKg ? Math.round(val * 2.20462) : val;
+        weightLimit = { value: val, unit, pounds };
+      }
+    }
+
+    // 2. Fee normalization
+    let fee = null;
+    if (extracted.fee && extracted.fee !== "No fee mentioned") {
+      const fm = String(extracted.fee).match(/([$€£¥A-Z]{1,3})?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(stay|night|pet|day))?/i);
+      if (fm) {
+        const curSym = fm[1] || "$";
+        const curMap = { "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "CAD": "CAD", "AUD": "AUD" };
+        const currency = curMap[curSym] || curSym;
+        const amount = parseFloat(fm[2]);
+        const period = fm[3] ? (fm[3].toLowerCase() === "day" ? "night" : fm[3].toLowerCase()) : "unknown";
+        fee = { amount, currency, period };
+      }
+    } else if (extracted.noFeeMentioned) {
+      fee = { amount: 0, currency: "USD", period: "unknown" };
+    }
+
+    // 3. Deposit normalization
+    let deposit = null;
+    if (extracted.deposit) {
+      const dm = String(extracted.deposit).match(/([$€£¥A-Z]{1,3})?\s*(\d+(?:\.\d+)?)/i);
+      if (dm) {
+        const curSym = dm[1] || "$";
+        const curMap = { "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "CAD": "CAD", "AUD": "AUD" };
+        const currency = curMap[curSym] || curSym;
+        const amount = parseFloat(dm[2]);
+        deposit = { amount, currency };
+      }
+    }
+
+    // 4. Contradictions mapping
+    const contradictions = {
+      maxDogs: Boolean(extracted.maxDogsAlternates && extracted.maxDogsAlternates.length > 0),
+      weightLimit: Boolean(extracted.weightAlternates && extracted.weightAlternates.length > 0),
+      fee: Boolean(extracted.feeAlternates && extracted.feeAlternates.length > 0),
+    };
+
+    // 5. Confidence rating
+    let confidence = "low";
+    if (extracted.petsAllowed !== null) {
+      confidence = (weightLimit || fee || extracted.maxDogs) ? "high" : "medium";
+    } else if (extracted.preReg || (extracted.otherNotes && extracted.otherNotes.length > 0)) {
+      confidence = "medium";
+    }
+
+    return {
+      propertyId: propertyId ? String(propertyId) : null,
+      petsAllowed: extracted.petsAllowed !== undefined ? extracted.petsAllowed : null,
+      maxDogs: typeof extracted.maxDogs === "number" ? extracted.maxDogs : null,
+      weightLimit,
+      fee,
+      deposit,
+      approvalRequired: extracted.preReg ? true : (extracted.preReg === false ? false : null),
+      contradictions,
+      confidence,
+      source: source || "search-response",
+      parsedAt: Date.now(),
+      schemaVersion: 2,
+      _raw: extracted,
+    };
+  }
+
+  function deriveSearchBadge(policy) {
+    if (!policy) {
+      return {
+        statusKey: "unknown",
+        icon: "🐾",
+        text: "Check pet rules on listing",
+        className: "vdp-search-badge vdp-badge-unknown",
+      };
+    }
+
+    if (policy.petsAllowed === false) {
+      return {
+        statusKey: "banned",
+        icon: "🚫",
+        text: "Pets not allowed",
+        className: "vdp-search-badge vdp-badge-banned",
+      };
+    }
+
+    if (policy.petsAllowed === true) {
+      const details = [];
+      if (policy.maxDogs) details.push(`Max ${policy.maxDogs}`);
+      if (policy.weightLimit) details.push(`${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}`);
+      if (policy.fee && policy.fee.amount > 0) details.push(`$${policy.fee.amount} pet fee`);
+      if (policy.approvalRequired && details.length < 2) details.push("Approval required");
+
+      const detailStr = details.length ? ` · ${details.slice(0, 2).join(" · ")}` : "";
+      return {
+        statusKey: "allowed",
+        icon: "🐾",
+        text: `Dogs allowed${detailStr}`,
+        className: "vdp-search-badge vdp-badge-allowed",
+      };
+    }
+
+    if (policy.approvalRequired === true) {
+      return {
+        statusKey: "allowed",
+        icon: "🐾",
+        text: "Dogs allowed · Approval required",
+        className: "vdp-search-badge vdp-badge-allowed",
+      };
+    }
+
+    if (policy.weightLimit || policy.fee || policy.maxDogs) {
+      return {
+        statusKey: "allowed",
+        icon: "🐾",
+        text: "Pet restrictions found",
+        className: "vdp-search-badge vdp-badge-allowed",
+      };
+    }
+
+    return {
+      statusKey: "unknown",
+      icon: "🐾",
+      text: "Check pet rules on listing",
+      className: "vdp-search-badge vdp-badge-unknown",
+    };
+  }
+
+  return {
+    getSentences,
+    isPetRelated,
+    priorityForItem,
+    buildCorpus,
+    extractPolicy,
+    normalizePolicy,
+    deriveSearchBadge,
+    toNumber,
+    formatMoney,
+    formatWeight,
+  };
 });

@@ -291,7 +291,7 @@ async function run() {
         await new Promise(r => setTimeout(r, 400));
         const tooltip = document.querySelector('.vdp-search-tooltip');
         const initialVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
-        const hasHeader = tooltip && tooltip.textContent.includes('Dog Policy Details');
+        const hasHeader = tooltip && /dog policy/i.test(tooltip.textContent);
 
         // Step B: Pointer moves across the gap to enter the tooltip (grace period test)
         firstBadge.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, relatedTarget: tooltip }));

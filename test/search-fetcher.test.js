@@ -52,8 +52,8 @@ test("search-fetcher HTML parsing", async (t) => {
     assert.equal(res.ok, true);
     assert.equal(res.policy.petsAllowed, true);
     assert.equal(res.policy.maxDogs, 2);
-    assert.equal(res.policy.weightPerDog, "50 lbs");
-    assert.equal(res.policy.fee, "$150");
+    assert.deepEqual(res.policy.weightLimit, { value: 50, unit: "lb", pounds: 50 });
+    assert.deepEqual(res.policy.fee, { amount: 150, currency: "USD", period: "unknown" });
   });
 
   await t.test("parses raw HTML markup if Apollo state is not present", () => {
@@ -71,7 +71,7 @@ test("search-fetcher HTML parsing", async (t) => {
     assert.equal(res.ok, true);
     assert.equal(res.policy.petsAllowed, true);
     assert.equal(res.policy.maxDogs, 1);
-    assert.equal(res.policy.fee, "$75");
+    assert.deepEqual(res.policy.fee, { amount: 75, currency: "USD", period: "stay" });
   });
 
   await t.test("returns null for empty or irrelevant HTML", () => {

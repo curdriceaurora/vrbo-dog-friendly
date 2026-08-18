@@ -168,8 +168,76 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
 
     assert.equal(notifications.length, 1);
     assert.equal(notifications[0].status, "ok");
-    assert.equal(notifications[0].policy.preReg, true);
+    assert.equal(notifications[0].policy.approvalRequired, true);
     assert.equal(storageWrites.length, 1, "Pre-reg policy must be cached");
     queue.dispose();
+  });
+
+  await t.test("canonical policy model normalizes weights, fees, deposits, and schemaVersion 2", () => {
+    const extract = require("../extract.js");
+    const sampleRawPolicy = {
+      found: true,
+      petsAllowed: true,
+      maxDogs: 2,
+      maxDogsAlternates: [],
+      weightPerDog: "50 lbs",
+      weightAlternates: [{ value: "75 lbs", snippet: "Dogs up to 75 lbs", source: "About" }],
+      fee: "$150 per stay",
+      feeAlternates: [],
+      deposit: "$200",
+      preReg: true,
+      otherNotes: [],
+    };
+
+    const canonical = extract.normalizePolicy(sampleRawPolicy, "3173015", "search-response");
+
+    assert.equal(canonical.propertyId, "3173015");
+    assert.equal(canonical.petsAllowed, true);
+    assert.equal(canonical.maxDogs, 2);
+    assert.deepEqual(canonical.weightLimit, { value: 50, unit: "lb", pounds: 50 });
+    assert.deepEqual(canonical.fee, { amount: 150, currency: "USD", period: "stay" });
+    assert.deepEqual(canonical.deposit, { amount: 200, currency: "USD" });
+    assert.equal(canonical.approvalRequired, true);
+    assert.deepEqual(canonical.contradictions, { maxDogs: false, weightLimit: true, fee: false });
+    assert.equal(canonical.confidence, "high");
+    assert.equal(canonical.source, "search-response");
+    assert.equal(canonical.schemaVersion, 2);
+
+    // Test badge derivation
+    const badge = extract.deriveSearchBadge(canonical);
+    assert.equal(badge.statusKey, "allowed");
+    assert.equal(badge.text, "Dogs allowed · Max 2 · 50 lbs");
+  });
+
+  await t.test("future filtering readiness: conservative missing-value semantics", () => {
+    const extract = require("../extract.js");
+    const partialRaw = {
+      found: true,
+      petsAllowed: null,
+      maxDogs: null,
+      weightPerDog: null,
+      fee: null,
+      deposit: null,
+      preReg: null,
+      otherNotes: [],
+    };
+
+    const canonical = extract.normalizePolicy(partialRaw, "empty_prop", "search-response");
+
+    // Strictly null for missing fields
+    assert.equal(canonical.petsAllowed, null);
+    assert.equal(canonical.maxDogs, null);
+    assert.equal(canonical.weightLimit, null);
+    assert.equal(canonical.fee, null);
+    assert.equal(canonical.deposit, null);
+    assert.equal(canonical.approvalRequired, null);
+
+    // Conservative filtering assertion: null maxDogs does NOT match >= 2 dogs
+    const filterTwoDogs = (p) => typeof p.maxDogs === "number" && p.maxDogs >= 2;
+    assert.equal(filterTwoDogs(canonical), false);
+
+    // Conservative filtering assertion: null weightLimit does NOT match <= 50 lbs
+    const filterWeight50 = (p) => p.weightLimit && typeof p.weightLimit.pounds === "number" && p.weightLimit.pounds >= 50;
+    assert.equal(filterWeight50(canonical), null);
   });
 });

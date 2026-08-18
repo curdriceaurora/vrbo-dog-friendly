@@ -567,6 +567,8 @@
     }
   }
 
+  let isDismissingDialog = false;
+
   function scheduleTooltipHide(delayMs = 200) {
     clearTooltipLeaveTimer();
     tooltipLeaveTimer = setTimeout(() => {
@@ -583,7 +585,7 @@
       searchTooltipEl = document.createElement("div");
       searchTooltipEl.className = "vdp-search-tooltip";
       searchTooltipEl.setAttribute("role", "dialog");
-      searchTooltipEl.setAttribute("aria-label", "Dog policy details");
+      searchTooltipEl.setAttribute("aria-label", "Dog policy");
       searchTooltipEl.setAttribute("aria-hidden", "true");
       searchTooltipEl.style.display = "none";
 
@@ -600,8 +602,10 @@
         if (e.key === "Escape") {
           e.preventDefault();
           const toFocus = activeTooltipTarget;
+          isDismissingDialog = true;
           hideTooltip();
           toFocus?.focus();
+          setTimeout(() => { isDismissingDialog = false; }, 150);
         } else if (e.key === "Tab") {
           const focusables = searchTooltipEl.querySelectorAll('button, a[href], [tabindex="0"]');
           if (focusables.length === 0) return;
@@ -729,6 +733,7 @@
       });
       badge.addEventListener("mouseleave", onBadgeLeave);
       badge.addEventListener("focus", () => {
+        if (isDismissingDialog) return;
         const currentId = card.getAttribute("data-vdp-prop-id");
         const currentUrl = card.getAttribute("data-vdp-url");
         if (currentId && currentUrl) onBadgeHover(badge, currentId, currentUrl, true);
@@ -786,69 +791,41 @@
 
   function updateBadgeUi(badge, data) {
     if (!badge || !data) return;
-    let statusKey = data.status || "unknown";
-    let icon = "🐾";
-    let text = "Check listing for pet rules";
-    let className = "vdp-search-badge vdp-badge-unknown";
 
-    if (data.status === "ok" && data.policy) {
-      const p = data.policy;
-      if (p.petsAllowed === false) {
-        statusKey = "banned";
-        icon = "🚫";
-        text = "Pets not allowed";
-        className = "vdp-search-badge vdp-badge-banned";
-      } else if (p.petsAllowed === true) {
-        statusKey = "allowed";
-        icon = "🐾";
-        const details = [];
-        if (p.maxDogs) details.push(`${p.maxDogs} dog${p.maxDogs > 1 ? "s" : ""}`);
-        if (p.weightPerDog) details.push(`≤${p.weightPerDog}`);
-        if (p.fee) details.push(p.fee);
-        const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
-        text = `Dogs allowed${detailStr}`;
-        className = "vdp-search-badge vdp-badge-allowed";
-      }
+    const extractLib = globalThis.VDPExtract || globalThis.VdpExtract;
+    let badgeInfo = null;
+
+    if (data.status === "ok" && data.policy && extractLib?.deriveSearchBadge) {
+      badgeInfo = extractLib.deriveSearchBadge(data.policy);
     } else if (data.status === "capped") {
-      statusKey = "capped";
-      icon = "🐾";
-      text = "Hover or open listing";
-      className = "vdp-search-badge vdp-badge-capped";
-    } else if (data.status === "rate_limited") {
-      statusKey = "rate_limited";
-      icon = "🐾";
-      text = "Open listing to check rules";
-      className = "vdp-search-badge vdp-badge-unknown";
-    } else if (data.status === "timeout") {
-      statusKey = "timeout";
-      icon = "🐾";
-      text = "Open listing to check rules";
-      className = "vdp-search-badge vdp-badge-unknown";
-    } else if (data.status === "error") {
-      statusKey = "error";
-      icon = "🐾";
-      text = "Check rules on listing";
-      className = "vdp-search-badge vdp-badge-unknown";
-    } else if (data.status === "unknown") {
-      statusKey = "unknown";
-      icon = "🐾";
-      text = "Check listing for pet rules";
-      className = "vdp-search-badge vdp-badge-unknown";
+      badgeInfo = {
+        statusKey: "capped",
+        icon: "🐾",
+        text: "Hover or open listing",
+        className: "vdp-search-badge vdp-badge-capped",
+      };
+    } else {
+      badgeInfo = {
+        statusKey: data.status || "unknown",
+        icon: "🐾",
+        text: "Check pet rules on listing",
+        className: "vdp-search-badge vdp-badge-unknown",
+      };
     }
 
-    if (badge.dataset.vdpStatus === statusKey && badge.dataset.vdpText === text) return;
-    badge.dataset.vdpStatus = statusKey;
-    badge.dataset.vdpText = text;
-    badge.className = className;
-    badge.setAttribute("aria-label", text);
+    if (badge.dataset.vdpStatus === badgeInfo.statusKey && badge.dataset.vdpText === badgeInfo.text) return;
+    badge.dataset.vdpStatus = badgeInfo.statusKey;
+    badge.dataset.vdpText = badgeInfo.text;
+    badge.className = badgeInfo.className;
+    badge.setAttribute("aria-label", badgeInfo.text);
 
     badge.textContent = "";
     const iconSpan = document.createElement("span");
     iconSpan.className = "vdp-badge-icon";
-    iconSpan.textContent = icon;
+    iconSpan.textContent = badgeInfo.icon;
     const textSpan = document.createElement("span");
     textSpan.className = "vdp-badge-text";
-    textSpan.textContent = " " + text;
+    textSpan.textContent = " " + badgeInfo.text;
     badge.appendChild(iconSpan);
     badge.appendChild(textSpan);
   }
@@ -897,147 +874,105 @@
     const header = document.createElement("div");
     header.className = "vdp-tooltip-header";
     const titleSpan = document.createElement("span");
-    titleSpan.textContent = "🐾 Dog Policy Details";
+    titleSpan.textContent = "Dog policy";
     const closeBtn = document.createElement("button");
     closeBtn.className = "vdp-tooltip-close";
     closeBtn.setAttribute("aria-label", "Close details");
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
       const toFocus = activeTooltipTarget;
+      isDismissingDialog = true;
       hideTooltip();
       toFocus?.focus();
+      setTimeout(() => { isDismissingDialog = false; }, 150);
     });
     header.appendChild(titleSpan);
     header.appendChild(closeBtn);
     searchTooltipEl.appendChild(header);
 
+    const addRow = (label, valueText, toneClass) => {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = label;
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val" + (toneClass ? " " + toneClass : "");
+      val.textContent = valueText;
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    };
+
     if (!data || data.status === "loading") {
       const row = document.createElement("div");
       row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
       const val = document.createElement("span");
       val.className = "vdp-tooltip-val";
       val.textContent = "Checking the listing summary for pet rules...";
-      row.appendChild(lbl);
       row.appendChild(val);
       searchTooltipEl.appendChild(row);
-    } else if (data.status === "timeout") {
-      const row = document.createElement("div");
-      row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
-      const val = document.createElement("span");
-      val.className = "vdp-tooltip-val";
-      val.textContent = "The quick policy check timed out. Open the listing for a complete check.";
-      row.appendChild(lbl);
-      row.appendChild(val);
-      searchTooltipEl.appendChild(row);
-    } else if (data.status === "rate_limited") {
-      const row = document.createElement("div");
-      row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
-      const val = document.createElement("span");
-      val.className = "vdp-tooltip-val";
-      val.textContent = "Vrbo stopped the quick policy check. Open the listing for a complete check.";
-      row.appendChild(lbl);
-      row.appendChild(val);
-      searchTooltipEl.appendChild(row);
-    } else if (data.status === "error") {
-      const row = document.createElement("div");
-      row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
-      const val = document.createElement("span");
-      val.className = "vdp-tooltip-val";
-      val.textContent = "The quick policy check was unavailable.";
-      row.appendChild(lbl);
-      row.appendChild(val);
-      searchTooltipEl.appendChild(row);
-    } else if (data.status === "capped") {
-      const row = document.createElement("div");
-      row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
-      const val = document.createElement("span");
-      val.className = "vdp-tooltip-val";
-      val.textContent = "The automatic search-page check was skipped to limit background requests.";
-      row.appendChild(lbl);
-      row.appendChild(val);
-      searchTooltipEl.appendChild(row);
-    } else if (data.status === "unknown" || !data.policy) {
-      const row = document.createElement("div");
-      row.className = "vdp-tooltip-row";
-      const lbl = document.createElement("span");
-      lbl.className = "vdp-tooltip-label";
-      lbl.textContent = "Status";
-      const val = document.createElement("span");
-      val.className = "vdp-tooltip-val";
-      val.textContent = "Pet rules were not available in the search-page response.";
-      row.appendChild(lbl);
-      row.appendChild(val);
-      searchTooltipEl.appendChild(row);
-    } else {
+    } else if (data.status === "ok" && data.policy) {
       const p = data.policy;
-      const addRow = (label, valueText, toneClass) => {
-        const row = document.createElement("div");
-        row.className = "vdp-tooltip-row";
-        const lbl = document.createElement("span");
-        lbl.className = "vdp-tooltip-label";
-        lbl.textContent = label;
-        const val = document.createElement("span");
-        val.className = "vdp-tooltip-val" + (toneClass ? " " + toneClass : "");
-        val.textContent = valueText;
-        row.appendChild(lbl);
-        row.appendChild(val);
-        searchTooltipEl.appendChild(row);
-      };
 
-      const statusTone = p.petsAllowed === true ? "vdp-tone-good" : p.petsAllowed === false ? "vdp-tone-bad" : "vdp-tone-unknown";
-      const statusText = p.petsAllowed === true ? "🐾 Allowed" : p.petsAllowed === false ? "🚫 Not allowed" : "❓ Unclear";
-      addRow("Status", statusText, statusTone);
+      if (p.petsAllowed !== null) {
+        const statusText = p.petsAllowed === true ? "Yes" : "No";
+        const statusTone = p.petsAllowed === true ? "vdp-tone-good" : "vdp-tone-bad";
+        addRow("Dogs allowed", statusText, statusTone);
+      }
+      if (p.maxDogs !== null) {
+        addRow("Maximum dogs", String(p.maxDogs));
+      }
+      if (p.weightLimit) {
+        const unitStr = p.weightLimit.unit === "lb" ? "lbs" : p.weightLimit.unit;
+        addRow("Weight limit", `${p.weightLimit.value} ${unitStr}`);
+      } else if (p.weightPerDog) {
+        addRow("Weight limit", String(p.weightPerDog));
+      }
+      if (p.fee && p.fee.amount !== null) {
+        const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
+        const perStr = p.fee.period && p.fee.period !== "unknown" ? ` per ${p.fee.period}` : "";
+        addRow("Pet fee", `${curSym}${p.fee.amount}${perStr}`);
+      } else if (p.fee) {
+        addRow("Pet fee", String(p.fee));
+      }
+      if (p.deposit && p.deposit.amount !== null) {
+        const curSym = p.deposit.currency === "USD" ? "$" : `${p.deposit.currency} `;
+        addRow("Pet deposit", `${curSym}${p.deposit.amount}`);
+      }
+      if (p.approvalRequired === true || p.preReg === true) {
+        addRow("Prior approval", "Required");
+      }
 
-      if (p.maxDogs) addRow("Max dogs", String(p.maxDogs));
-      if (p.weightPerDog) addRow("Weight limit", String(p.weightPerDog));
-      if (p.fee) addRow("Pet fee", String(p.fee));
-      if (p.deposit) addRow("Pet deposit", String(p.deposit));
-      if (p.preReg) addRow("Approval / Register", "Required");
+      // Contradiction summary
+      const hasConflict = p.contradictions?.maxDogs ||
+        p.contradictions?.weightLimit ||
+        p.contradictions?.fee ||
+        p.maxDogsAlternates?.length ||
+        p.weightAlternates?.length ||
+        p.feeAlternates?.length;
 
-      // Contradiction warnings
-      if (p.maxDogsAlternates?.length || p.weightAlternates?.length || p.feeAlternates?.length) {
+      if (hasConflict) {
         const warnBox = document.createElement("div");
         warnBox.className = "vdp-tooltip-notes vdp-tone-warn";
         warnBox.style.background = "#fef7e0";
         warnBox.style.color = "#b06000";
-        warnBox.textContent = "⚠️ Warning: Listing text contains conflicting rules";
+        warnBox.innerHTML = "⚠️ <strong>Some pet-policy details conflict.</strong><br>Open the listing to verify the complete rules.";
         searchTooltipEl.appendChild(warnBox);
       }
-
-      if (p.otherNotes && p.otherNotes.length) {
-        const notesBox = document.createElement("div");
-        notesBox.className = "vdp-tooltip-notes";
-        const strong = document.createElement("strong");
-        strong.textContent = "Notes: ";
-        notesBox.appendChild(strong);
-        for (const note of p.otherNotes.slice(0, 2)) {
-          const pNote = document.createElement("div");
-          pNote.textContent = `"${note.text}"`;
-          notesBox.appendChild(pNote);
-        }
-        searchTooltipEl.appendChild(notesBox);
-      }
+    } else {
+      // Unavailable / Fallback
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "Pet policy details were not available in the search result.";
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
     }
 
     const footer = document.createElement("div");
     footer.className = "vdp-tooltip-footer";
-    const srcSpan = document.createElement("span");
-    srcSpan.textContent = "Sourced locally";
     const link = document.createElement("a");
     if (typeof url === "string" && (url.startsWith("https://www.vrbo.com/") || url.startsWith("/"))) {
       link.href = url;
@@ -1046,8 +981,7 @@
     }
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "Open listing ↗";
-    footer.appendChild(srcSpan);
+    link.textContent = "Open listing for complete rules ↗";
     footer.appendChild(link);
     searchTooltipEl.appendChild(footer);
 

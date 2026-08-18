@@ -114,8 +114,11 @@
     // Build corpus and extract policy
     const corpus = extract.buildCorpus({ items }, []);
     if (!corpus || corpus.length === 0) return null;
-    const policy = extract.extractPolicy(corpus);
-    if (!policy || !policy.found) return null;
+    const rawPolicy = extract.extractPolicy(corpus);
+    if (!rawPolicy || !rawPolicy.found) return null;
+    const policy = typeof extract.normalizePolicy === "function"
+      ? extract.normalizePolicy(rawPolicy, propertyId, "search-response")
+      : rawPolicy;
     return { ok: true, propertyId, policy, rawItemsCount: items.length };
   }
 
@@ -134,51 +137,78 @@
     const memoryCache = new Map();
     const queue = []; // [{ propertyId, url, priority }]
     const activeRequests = new Set();
-    const enqueuedOrActive = new Set(); // Synchronous tracking to prevent duplicate enqueue races
-    const listeners = new Map(); // propertyId -> Set of callbacks
+    const enqueuedOrActive = new Set();
+    const subscribers = new Map(); // propertyId -> Set of callbacks
+    const highPriorityIds = new Set();
 
-    let isProcessing = false;
-    let lastRequestStartTime = 0;
     let sessionRequestsCount = 0;
+    let isProcessing = false;
     let pausedUntil = 0;
+    let isDisposed = false;
+    let lastRequestStartTime = 0;
     let maxObservedConcurrency = 0;
     let pauseTimer = null;
-    let isDisposed = false;
 
-    function getCacheKey(propertyId) {
-      return `${CACHE_PREFIX}${propertyId}`;
+    function subscribe(propertyId, callback) {
+      if (!subscribers.has(propertyId)) {
+        subscribers.set(propertyId, new Set());
+      }
+      subscribers.get(propertyId).add(callback);
+      return () => {
+        const set = subscribers.get(propertyId);
+        if (set) {
+          set.delete(callback);
+          if (set.size === 0) subscribers.delete(propertyId);
+        }
+      };
+    }
+
+    function notify(propertyId, data) {
+      const cbs = subscribers.get(propertyId);
+      if (cbs) {
+        for (const cb of cbs) {
+          try {
+            cb(data);
+          } catch (e) {
+            console.error("Vrbow subscriber error:", e);
+          }
+        }
+      }
     }
 
     async function getCached(propertyId) {
       if (!propertyId || isDisposed) return null;
 
-      // 1. Check memory cache
+      // Check in-memory first
       const mem = memoryCache.get(propertyId);
-      if (mem) {
-        if (Date.now() - mem.ts < ttlMs) return mem.data;
-        memoryCache.delete(propertyId);
+      if (mem && Date.now() - mem.ts < ttlMs) {
+        return mem.data;
       }
 
-      // 2. Check storage
+      // Check persistent storage
       if (storage) {
         return new Promise((resolve) => {
-          const key = getCacheKey(propertyId);
-          storage.get([key], (res) => {
-            if (isDisposed) {
-              resolve(null);
-              return;
-            }
-            const entry = res ? res[key] : null;
-            if (entry && entry.version === CACHE_VERSION && (Date.now() - entry.ts < ttlMs)) {
-              memoryCache.set(propertyId, { data: entry.data, ts: entry.ts });
-              resolve(entry.data);
-            } else {
-              if (entry) {
-                storage.remove([key], () => {});
+          try {
+            storage.get([CACHE_PREFIX + propertyId], (items) => {
+              if (isDisposed) {
+                resolve(null);
+                return;
               }
-              resolve(null);
-            }
-          });
+              const entry = items ? items[CACHE_PREFIX + propertyId] : null;
+              if (entry && entry.ts && Date.now() - entry.ts < ttlMs) {
+                memoryCache.set(propertyId, { data: entry, ts: entry.ts });
+                resolve(entry);
+              } else {
+                if (entry) {
+                  // Expired: prune asynchronously
+                  storage.remove([CACHE_PREFIX + propertyId]);
+                }
+                resolve(null);
+              }
+            });
+          } catch {
+            resolve(null);
+          }
         });
       }
       return null;
@@ -186,106 +216,94 @@
 
     async function setCached(propertyId, data) {
       if (!propertyId || isDisposed) return;
-      const now = Date.now();
-      memoryCache.set(propertyId, { data, ts: now });
+      const ts = Date.now();
+      const entry = { ...data, ts };
+      memoryCache.set(propertyId, { data: entry, ts });
+
       if (storage) {
-        const key = getCacheKey(propertyId);
-        storage.set({
-          [key]: {
-            version: CACHE_VERSION,
-            propertyId,
-            data,
-            ts: now,
-          },
-        });
+        try {
+          storage.set({ [CACHE_PREFIX + propertyId]: entry });
+        } catch (e) {
+          console.warn("Vrbow failed to write cache:", e);
+        }
       }
     }
 
     function subscribe(propertyId, callback) {
-      if (!listeners.has(propertyId)) {
-        listeners.set(propertyId, new Set());
+      if (!subscribers.has(propertyId)) {
+        subscribers.set(propertyId, new Set());
       }
-      listeners.get(propertyId).add(callback);
+      subscribers.get(propertyId).add(callback);
       return () => {
-        const set = listeners.get(propertyId);
+        const set = subscribers.get(propertyId);
         if (set) {
           set.delete(callback);
-          if (set.size === 0) listeners.delete(propertyId);
+          if (set.size === 0) subscribers.delete(propertyId);
         }
       };
     }
 
-    function notify(propertyId, result) {
-      if (isDisposed) return;
-      const set = listeners.get(propertyId);
-      if (set) {
-        for (const cb of set) {
-          try {
-            cb(result);
-          } catch (err) {
-            console.error("[Vrbow] Error in listener:", err);
-          }
-        }
-      }
-    }
-
     async function processQueue() {
       if (isProcessing || isDisposed) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        return;
+      }
+      if (Date.now() < pausedUntil) {
+        const remainingPause = pausedUntil - Date.now();
+        setTimeout(processQueue, remainingPause + 50);
+        return;
+      }
+
       isProcessing = true;
-
       try {
-        while (queue.length > 0 && activeRequests.size < maxConcurrent && !isDisposed) {
+        while (
+          queue.length > 0 &&
+          activeRequests.size < maxConcurrent &&
+          !isDisposed &&
+          (typeof document === "undefined" || document.visibilityState !== "hidden") &&
+          Date.now() >= pausedUntil
+        ) {
+          // Check pacing delay
           const now = Date.now();
-          if (now < pausedUntil) {
-            if (pauseTimer) clearTimeout(pauseTimer);
-            pauseTimer = setTimeout(processQueue, Math.max(20, pausedUntil - now));
+          const elapsed = now - lastRequestStartTime;
+          if (elapsed < minDelayMs) {
+            const waitTime = minDelayMs - elapsed;
+            setTimeout(processQueue, waitTime);
             break;
           }
 
-          // Check if tab is hidden
-          if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-            break;
-          }
+          // Pick next item: prioritize items in highPriorityIds
+          let nextIndex = queue.findIndex((item) => highPriorityIds.has(item.propertyId));
+          if (nextIndex === -1) nextIndex = 0;
+          const [nextItem] = queue.splice(nextIndex, 1);
+          highPriorityIds.delete(nextItem.propertyId);
 
-          // Sort queue: high priority items first
-          queue.sort((a, b) => (b.priority === "high" ? 1 : 0) - (a.priority === "high" ? 1 : 0));
-
-          const item = queue.shift();
-          if (!item) break;
-
-          const { propertyId, url, priority } = item;
-
-          // Check session budget cap unless it's high priority (user hover)
-          if (priority !== "high" && sessionRequestsCount >= sessionCap) {
-            enqueuedOrActive.delete(propertyId);
-            notify(propertyId, { status: "capped", propertyId });
+          // Check session cap
+          if (sessionRequestsCount >= sessionCap) {
+            enqueuedOrActive.delete(nextItem.propertyId);
+            const result = { status: "capped", propertyId: nextItem.propertyId };
+            notify(nextItem.propertyId, result);
             continue;
           }
 
-          // Respect minimum delay between requests
-          const elapsed = Date.now() - lastRequestStartTime;
-          if (elapsed < minDelayMs) {
-            await new Promise((r) => setTimeout(r, minDelayMs - elapsed));
-            if (isDisposed) break;
-            // Re-check pause condition after waiting
-            if (Date.now() < pausedUntil) {
-              queue.unshift(item);
-              if (pauseTimer) clearTimeout(pauseTimer);
-              pauseTimer = setTimeout(processQueue, Math.max(20, pausedUntil - Date.now()));
-              break;
-            }
+          // Check memory cache once more before firing network
+          const cached = memoryCache.get(nextItem.propertyId);
+          if (cached && Date.now() - cached.ts < ttlMs) {
+            enqueuedOrActive.delete(nextItem.propertyId);
+            notify(nextItem.propertyId, cached.data);
+            continue;
           }
 
-          lastRequestStartTime = Date.now();
+          // Execute fetch
           sessionRequestsCount++;
-          activeRequests.add(propertyId);
+          lastRequestStartTime = Date.now();
+          activeRequests.add(nextItem.propertyId);
           maxObservedConcurrency = Math.max(maxObservedConcurrency, activeRequests.size);
 
-          executeFetch(propertyId, url)
-            .catch(() => {})
+          executeFetch(nextItem.propertyId, nextItem.url)
             .finally(() => {
-              activeRequests.delete(propertyId);
-              enqueuedOrActive.delete(propertyId);
+              activeRequests.delete(nextItem.propertyId);
+              enqueuedOrActive.delete(nextItem.propertyId);
               if (!isDisposed) processQueue();
             });
         }
@@ -343,11 +361,11 @@
         const hasConcretePolicy = parsed && parsed.policy && (
           parsed.policy.petsAllowed !== null ||
           parsed.policy.maxDogs !== null ||
-          parsed.policy.weightPerDog !== null ||
+          parsed.policy.weightLimit !== null ||
           parsed.policy.fee !== null ||
           parsed.policy.deposit !== null ||
-          parsed.policy.preReg !== null ||
-          (parsed.policy.otherNotes && parsed.policy.otherNotes.length > 0)
+          parsed.policy.approvalRequired !== null ||
+          (parsed.policy._raw?.otherNotes && parsed.policy._raw.otherNotes.length > 0)
         );
 
         if (hasConcretePolicy) {
@@ -447,7 +465,7 @@
       if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
-      listeners.clear();
+      subscribers.clear();
       memoryCache.clear();
     }
 
