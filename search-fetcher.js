@@ -292,12 +292,20 @@
       }
     }
 
+    const activeControllers = new Map();
+    const requestTimeoutMs = options.requestTimeoutMs || 6000;
+
     async function executeFetch(propertyId, url) {
       if (isDisposed) return;
+      const controller = new AbortController();
+      activeControllers.set(propertyId, controller);
+      const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+
       try {
         if (!fetchFn) throw new Error("No fetch implementation available");
 
         const res = await fetchFn(url, {
+          signal: controller.signal,
           headers: {
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           },
@@ -350,8 +358,12 @@
           notify(propertyId, data);
         }
       } catch (err) {
+        if (err.name === "AbortError" || isDisposed) return;
         const result = { status: "error", error: err.message, propertyId };
         notify(propertyId, result);
+      } finally {
+        clearTimeout(timer);
+        activeControllers.delete(propertyId);
       }
     }
 
@@ -408,6 +420,10 @@
     function dispose() {
       isDisposed = true;
       clearQueue();
+      for (const ctrl of activeControllers.values()) {
+        try { ctrl.abort(); } catch {}
+      }
+      activeControllers.clear();
       if (pauseTimer) {
         clearTimeout(pauseTimer);
         pauseTimer = null;

@@ -625,6 +625,17 @@
       searchCardObserver.disconnect();
       searchCardObserver = null;
     }
+    const badges = document.querySelectorAll(".vdp-search-badge");
+    for (const b of badges) b.remove();
+    const cards = document.querySelectorAll("[data-vdp-prop-id]");
+    for (const c of cards) {
+      if (c._vdpUnsub) {
+        c._vdpUnsub();
+        c._vdpUnsub = null;
+      }
+      c.removeAttribute("data-vdp-prop-id");
+      c.removeAttribute("data-vdp-url");
+    }
     if (searchTooltipEl) {
       searchTooltipEl.remove();
       searchTooltipEl = null;
@@ -725,8 +736,18 @@
     }
 
     card._vdpUnsub = searchQueue?.subscribe(propId, (data) => {
-      if (card.getAttribute("data-vdp-prop-id") === propId) {
+      if (card.getAttribute("data-vdp-prop-id") === propId && badge.isConnected) {
         updateBadgeUi(badge, data);
+        // Live dialog update: if dialog is currently open for this badge, rerender in place
+        if (
+          activeTooltipTarget === badge &&
+          activeTooltipPropId === propId &&
+          searchTooltipEl &&
+          searchTooltipEl.style.display !== "none"
+        ) {
+          renderTooltipContent(data, card.getAttribute("data-vdp-url"), propId, false);
+          positionTooltip(badge);
+        }
       }
     });
 
@@ -815,8 +836,14 @@
     badge.setAttribute("aria-expanded", "true");
 
     searchQueue?.getCached(propId).then((cached) => {
-      // Async scope guard: only render and position if user is still targeting this badge and property
-      if (activeTooltipTarget !== badge || activeTooltipPropId !== propId) {
+      // Async scope guard: verify active target, propId, element connectivity, and parent card propId
+      const parentCard = badge.closest ? badge.closest("[data-vdp-prop-id]") : null;
+      if (
+        activeTooltipTarget !== badge ||
+        activeTooltipPropId !== propId ||
+        !badge.isConnected ||
+        (parentCard && parentCard.getAttribute("data-vdp-prop-id") !== propId)
+      ) {
         return;
       }
       renderTooltipContent(cached, url, propId, isKeyboard);
