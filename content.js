@@ -688,6 +688,73 @@
   let activeTooltipPropId = null;
   let tooltipLeaveTimer = null;
 
+  // Every property id we have bound to a card, mapped to the card node that
+  // owns it. This is the ledger I7's prune walks: a tracked id whose node has
+  // left the DOM is stale work that must be dropped.
+  const trackedSearchCards = new Map(); // propertyId -> card element
+
+  // I9: mutation-driven scans run on a leading-edge throttle. The first scan of
+  // a burst runs synchronously (card binding must not lag a re-render), the rest
+  // of the burst collapses into one trailing scan.
+  const SEARCH_SCAN_THROTTLE_MS = 250;
+  let lastSearchScanAt = 0;
+  let searchScanThrottleTimer = null;
+
+  // Instrumentation for #23's gating condition. LOCAL ONLY: these are in-memory
+  // counters, readable from the devtools console of this isolated world via
+  // `__vdpSearchStats()`. PRIVACY.md commits to no remote transmission of
+  // browsing activity or analytics, so they are never written to
+  // chrome.storage, never attached to a request, and never reported anywhere.
+  const MAX_DEPTH_SAMPLES = 200;
+  let searchStats = createEmptySearchStats();
+
+  function createEmptySearchStats() {
+    return {
+      scans: 0,
+      dispatched: 0,
+      prunedOffscreen: 0,
+      prunedRecycled: 0,
+      prunedStale: 0,
+      lastQueueDepth: 0,
+      maxQueueDepth: 0,
+      depthSamples: [], // [{ t, depth, reason }], bounded ring
+    };
+  }
+
+  function resetSearchStats() {
+    searchStats = createEmptySearchStats();
+  }
+
+  function sampleQueueDepth(reason) {
+    if (!searchQueue || typeof searchQueue.getQueueLength !== "function") return;
+    const depth = searchQueue.getQueueLength();
+    searchStats.lastQueueDepth = depth;
+    if (depth > searchStats.maxQueueDepth) searchStats.maxQueueDepth = depth;
+    searchStats.depthSamples.push({ t: Date.now(), depth, reason });
+    if (searchStats.depthSamples.length > MAX_DEPTH_SAMPLES) searchStats.depthSamples.shift();
+  }
+
+  function getSearchStats() {
+    return { ...searchStats, depthSamples: searchStats.depthSamples.slice() };
+  }
+
+  // Read-only devtools hook. Returns a copy; nothing here is persisted or sent.
+  globalThis.__vdpSearchStats = getSearchStats;
+
+  function anotherCardHasPropId(propId, exceptCard) {
+    if (!propId) return false;
+    let nodes;
+    try {
+      nodes = document.querySelectorAll(`[data-vdp-prop-id="${propId}"]`);
+    } catch {
+      return false;
+    }
+    for (const node of nodes) {
+      if (node !== exceptCard) return true;
+    }
+    return false;
+  }
+
   // 8.1.1 Search-page Apollo fast path: before any listing-page request,
   // ask the page-world bridge for the exact PropertyInfo:<id> records the
   // search page already fetched. The response is delivered synchronously
@@ -745,6 +812,8 @@
           activeQueue.setCached(propId, fast).finally(() => {
             if (searchQueue && searchQueue === activeQueue && document.querySelector(`[data-vdp-prop-id="${propId}"]`)) {
               activeQueue.enqueue(propId, url, priority);
+              searchStats.dispatched++;
+              sampleQueueDepth("dispatch");
             }
           });
           return;
@@ -762,6 +831,8 @@
     }
     if (searchQueue && searchQueue === activeQueue) {
       activeQueue.enqueue(propId, url, priority);
+      searchStats.dispatched++;
+      sampleQueueDepth("dispatch");
     }
   }
 
@@ -871,17 +942,27 @@
     }
 
     const VIEWPORT_DWELL_MS = 400;
+    // I4b: one-sided jitter, same rationale as the pacing jitter in the queue —
+    // it only ever adds to the dwell, so the 400 ms floor is never undercut,
+    // while a screenful of cards that enter the viewport together stops firing
+    // its timers in unison.
+    const VIEWPORT_DWELL_JITTER_MS = 200;
 
     if (!searchCardObserver) {
       searchCardObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
           const card = entry.target;
           if (entry.isIntersecting) {
+            // I3: in-view state is read by the recycle path, which must not
+            // enqueue for a card the user cannot see.
+            card._vdpInView = true;
             if (card._vdpDwellTimer) {
               clearTimeout(card._vdpDwellTimer);
               card._vdpDwellTimer = null;
             }
-            // Dwell debounce: only enqueue after card remains in viewport for VIEWPORT_DWELL_MS
+            // Dwell debounce: only enqueue after card remains in viewport for
+            // VIEWPORT_DWELL_MS (plus this card's own jitter).
+            const dwellMs = VIEWPORT_DWELL_MS + Math.random() * VIEWPORT_DWELL_JITTER_MS;
             card._vdpDwellTimer = setTimeout(() => {
               card._vdpDwellTimer = null;
               const propId = card.getAttribute("data-vdp-prop-id");
@@ -889,12 +970,25 @@
               if (propId && fetchUrl && searchQueue && card.isConnected) {
                 enqueueSearch(propId, fetchUrl, "normal");
               }
-            }, VIEWPORT_DWELL_MS);
+            }, dwellMs);
           } else {
+            card._vdpInView = false;
             // Scrolled out of viewport before dwell threshold: cancel background request
             if (card._vdpDwellTimer) {
               clearTimeout(card._vdpDwellTimer);
               card._vdpDwellTimer = null;
+            }
+            // I8b: the timer is only half of it. Once the dwell has elapsed the
+            // work lives in the queue, so a card that leaves the viewport must
+            // also withdraw its queued item. remove() is a no-op for an id that
+            // is already in flight, which is the correct boundary: that request
+            // is on the wire and cancelling it buys nothing.
+            const propId = card.getAttribute("data-vdp-prop-id");
+            if (propId && searchQueue && typeof searchQueue.remove === "function") {
+              if (searchQueue.remove(propId)) {
+                searchStats.prunedOffscreen++;
+                sampleQueueDepth("prune-offscreen");
+              }
             }
           }
         }
@@ -907,6 +1001,14 @@
   function cleanupSearchManager() {
     hideTooltip();
     discoveredSearchPropIds.clear();
+    trackedSearchCards.clear();
+    if (searchScanThrottleTimer) {
+      clearTimeout(searchScanThrottleTimer);
+      searchScanThrottleTimer = null;
+    }
+    lastSearchScanAt = 0;
+    // Counters are queue-scoped: they reset with the queue they describe.
+    resetSearchStats();
     latestSearchApolloData = null;
     if (searchQueue) {
       searchQueue.dispose();
@@ -928,6 +1030,7 @@
         c._vdpUnsub();
         c._vdpUnsub = null;
       }
+      c._vdpInView = false;
       c.removeAttribute("data-vdp-prop-id");
       c.removeAttribute("data-vdp-url");
       c.removeAttribute("data-vdp-fetch-url");
@@ -939,8 +1042,80 @@
     }
   }
 
+  // I9: leading-edge throttle in front of scanSearchCards(). Vrbo's search
+  // results mutate in long bursts (image swaps, price re-renders); before this,
+  // every qualifying mutation ran a full re-scan.
+  function requestSearchScan() {
+    const now = Date.now();
+    const sinceLast = now - lastSearchScanAt;
+    if (sinceLast >= SEARCH_SCAN_THROTTLE_MS) {
+      lastSearchScanAt = now;
+      scanSearchCards();
+      return;
+    }
+    if (searchScanThrottleTimer) return; // burst already has a trailing scan booked
+    searchScanThrottleTimer = setTimeout(() => {
+      searchScanThrottleTimer = null;
+      lastSearchScanAt = Date.now();
+      scanSearchCards();
+    }, SEARCH_SCAN_THROTTLE_MS - sinceLast);
+  }
+
+  /**
+   * I7: drop per-card state for property ids whose card has left the DOM, which
+   * is what a search -> search re-render leaves behind.
+   *
+   * Deliberately NOT clearQueue(): that resets sessionRequestsCount to 0, and
+   * the session budget has to survive search -> search — otherwise a user who
+   * re-searches repeatedly gets an unbounded request allowance.
+   *
+   * Tearing down the subscription is not optional either. remove() only drops
+   * *queued* work; a request already in flight for a pruned id still resolves
+   * and calls notify(), which would repaint a card that has already moved on.
+   */
+  function pruneStaleSearchCards() {
+    if (!searchQueue) return 0;
+    let pruned = 0;
+    for (const [propId, card] of Array.from(trackedSearchCards.entries())) {
+      const boundId = card && typeof card.getAttribute === "function"
+        ? card.getAttribute("data-vdp-prop-id")
+        : null;
+      if (card && card.isConnected && boundId === propId) continue;
+
+      // Only tear down the card's subscription when the card is still bound to
+      // THIS id. If the node was recycled to a different property, _vdpUnsub
+      // belongs to the new binding and the old one was already released.
+      if (card && boundId === propId) {
+        if (card._vdpUnsub) {
+          try { card._vdpUnsub(); } catch {}
+          card._vdpUnsub = null;
+        }
+        if (card._vdpDwellTimer) {
+          clearTimeout(card._vdpDwellTimer);
+          card._vdpDwellTimer = null;
+        }
+        card._vdpInView = false;
+        if (searchCardObserver) {
+          try { searchCardObserver.unobserve(card); } catch {}
+        }
+      }
+      if (!anotherCardHasPropId(propId, card)) {
+        searchQueue.remove(propId);
+        discoveredSearchPropIds.delete(propId);
+      }
+      trackedSearchCards.delete(propId);
+      pruned++;
+    }
+    if (pruned) {
+      searchStats.prunedStale += pruned;
+      sampleQueueDepth("prune-stale");
+    }
+    return pruned;
+  }
+
   function scanSearchCards() {
     if (!isSearchUrl(location.href)) return;
+    searchStats.scans++;
     const cardSelectors = [
       '[data-stid="property-card"]',
       '[data-stid="lodging-card-responsive"]',
@@ -953,6 +1128,8 @@
     for (const card of cards) {
       bindSearchCard(card);
     }
+    // Cards the re-render dropped are stale the moment they leave the DOM.
+    pruneStaleSearchCards();
   }
 
   function bindSearchCard(card) {
@@ -963,10 +1140,15 @@
     const prevId = card.getAttribute("data-vdp-prop-id");
     let badge = card.querySelector(".vdp-search-badge");
 
-    if (prevId === propId && badge) {
+    // Same property, same badge, subscription intact: nothing to rewire.
+    // A missing _vdpUnsub means a prune tore this card down while it was out of
+    // the DOM, so fall through and re-subscribe — the propId is unchanged, so
+    // the fall-through re-binds without issuing a new request.
+    if (prevId === propId && badge && card._vdpUnsub) {
       card.setAttribute("data-vdp-fetch-url", fetchUrl);
       card.setAttribute("data-vdp-nav-url", navigationUrl);
       card.setAttribute("data-vdp-url", fetchUrl);
+      trackedSearchCards.set(propId, card);
       return;
     }
 
@@ -980,11 +1162,24 @@
       card._vdpUnsub = null;
     }
 
+    // The property this node used to show is stale work now: withdraw its
+    // queued item too, unless some other live card still displays it.
+    if (prevId && prevId !== propId) {
+      if (trackedSearchCards.get(prevId) === card) trackedSearchCards.delete(prevId);
+      if (searchQueue && typeof searchQueue.remove === "function" && !anotherCardHasPropId(prevId, card)) {
+        if (searchQueue.remove(prevId)) {
+          searchStats.prunedRecycled++;
+          sampleQueueDepth("prune-recycled");
+        }
+      }
+    }
+
     card.setAttribute("data-vdp-prop-id", propId);
     card.setAttribute("data-vdp-fetch-url", fetchUrl);
     card.setAttribute("data-vdp-nav-url", navigationUrl);
     card.setAttribute("data-vdp-url", fetchUrl);
     discoveredSearchPropIds.add(propId);
+    trackedSearchCards.set(propId, card);
 
     // Watch visibility for prefetching
     if (searchCardObserver) {
@@ -1065,7 +1260,13 @@
       badge.className = "vdp-search-badge vdp-badge-loading";
       badge.textContent = "⏳ Checking pet policy...";
       badge.setAttribute("aria-label", "Checking pet policy");
-      enqueueSearch(propId, fetchUrl, "normal");
+      // I3: a recycled node inherits the viewport state of the node, not of the
+      // property. Enqueue only when that node is actually on screen — an
+      // off-screen recycle re-binds silently and waits for the dwell gate to
+      // fire when the card is scrolled into view.
+      if (card._vdpInView === true) {
+        enqueueSearch(propId, fetchUrl, "normal");
+      }
     }
 
     card._vdpUnsub = searchQueue?.subscribe(propId, (data) => {
@@ -1393,6 +1594,10 @@
 
       if (isSearchUrl(location.href)) {
         removePanel();
+        // I7: search -> search keeps the queue object, and with it the session
+        // request budget; only the per-card state of the previous result set is
+        // dropped. The search -> listing branch below still disposes outright.
+        pruneStaleSearchCards();
         chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
           if (data && data.vrbow_enable_search_badging === true) initSearchManager();
         });
@@ -1459,7 +1664,7 @@
 
       if (isSearchUrl(location.href)) {
         if (typeof searchQueue !== "undefined" && searchQueue !== null) {
-          scanSearchCards();
+          requestSearchScan();
         }
       } else {
         if (elapsed > 4000) {
@@ -1509,4 +1714,26 @@
     }
     return true;
   });
+
+  // Unit-test surface (node --test). `module` does not exist in the extension's
+  // isolated world, so this block is inert in the browser; it exists so the card
+  // orchestration above can be driven without a real browser.
+  if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+      __test: {
+        initSearchManager,
+        cleanupSearchManager,
+        scanSearchCards,
+        bindSearchCard,
+        requestSearchScan,
+        pruneStaleSearchCards,
+        onUrlMaybeChanged,
+        getSearchStats,
+        getSearchQueue: () => searchQueue,
+        getTrackedSearchCards: () => trackedSearchCards,
+        getSearchCardObserver: () => searchCardObserver,
+        SEARCH_SCAN_THROTTLE_MS,
+      },
+    };
+  }
 })();
