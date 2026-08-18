@@ -20,7 +20,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
-const DEFAULT_SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Perdido+Key+Beach%2C+Pensacola%2C+Florida%2C+United+States+of+America&startDate=2026-09-04&endDate=2026-09-07&adults=6&children=3_1&pets=1";
+const DEFAULT_SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Perdido+Key+Beach%2C+Pensacola%2C+Florida%2C+United+States+of+America&startDate=2026-09-04&endDate=2026-09-07&adults=6&children=3_1&house_rules_group=pets_allowed";
 
 const CHROME_CANDIDATES = [
   path.join(os.homedir(), ".cache/puppeteer/chrome/mac_arm-137.0.7151.0/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
