@@ -9,4 +9,5 @@ test/vrbo_unique_listings.csv
 
 # Local agent memory and customizations (not committed)
 .agents/
+.claude/
 *.zip
