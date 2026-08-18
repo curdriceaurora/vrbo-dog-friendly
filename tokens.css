@@ -1,0 +1,88 @@
+/* Shared Vrbow design tokens.
+ *
+ * Keep declarations scoped to Vrbow roots. :where() deliberately contributes
+ * zero selector specificity so component rules remain easy to override inside
+ * extension-owned roots. The distinctive vdp names make accidental host-page
+ * matches unlikely. Never add a host-owned selector to this root list.
+ *
+ * The content-script stylesheet is injected into Vrbo pages, so defining these
+ * tokens on the host page's :root would expose them to every site descendant.
+ */
+:where(#vdp-panel, .vdp-theme-root) {
+  color-scheme: light;
+
+  --vdp-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --vdp-color-surface: #ffffff;
+  --vdp-color-surface-subtle: #f7f8f8;
+  --vdp-color-surface-hover: #ecefef;
+  --vdp-color-text: #202124;
+  --vdp-color-text-secondary: #4f5559;
+  --vdp-color-text-muted: #62686c;
+  --vdp-color-border: #c7cccf;
+  --vdp-color-border-subtle: #e2e5e7;
+  --vdp-color-control-border: #73787c;
+  --vdp-color-link: #0b57d0;
+  --vdp-color-focus-ring: #005fcc;
+  --vdp-color-highlight-ring: #8a4f00;
+
+  --vdp-policy-allowed-text: #137333;
+  --vdp-policy-allowed-surface: #e6f4ea;
+  --vdp-policy-warning-text: #754b00;
+  --vdp-policy-warning-surface: #fff4ce;
+  --vdp-policy-prohibited-text: #b3261e;
+  --vdp-policy-prohibited-surface: #fce8e6;
+  --vdp-policy-unknown-text: #5f6368;
+  --vdp-policy-unknown-surface: #f1f3f4;
+  --vdp-policy-loading-text: #4f5559;
+  --vdp-policy-loading-surface: #eef1f2;
+  --vdp-policy-capped-text: #674ea7;
+  --vdp-policy-capped-surface: #f0ebfa;
+
+  --vdp-shadow-panel: 0 4px 24px rgb(0 0 0 / 18%);
+}
+
+/* Source highlighting is applied to host-page elements. Give those elements
+ * only the single value they consume so Vrbow cannot change their native
+ * control theme or expose unrelated component tokens to their descendants. */
+.vdp-highlight {
+  --vdp-color-highlight-ring: #8a4f00;
+}
+
+@media (prefers-color-scheme: dark) {
+  :where(#vdp-panel, .vdp-theme-root) {
+    color-scheme: dark;
+
+    --vdp-color-surface: #202124;
+    --vdp-color-surface-subtle: #292a2d;
+    --vdp-color-surface-hover: #35363a;
+    --vdp-color-text: #f1f3f4;
+    --vdp-color-text-secondary: #d2d5d8;
+    --vdp-color-text-muted: #bdc1c6;
+    --vdp-color-border: #6f7378;
+    --vdp-color-border-subtle: #4a4d51;
+    --vdp-color-control-border: #8a8f94;
+    --vdp-color-link: #8ab4f8;
+    --vdp-color-focus-ring: #a8c7fa;
+    --vdp-color-highlight-ring: #fdd663;
+
+    --vdp-policy-allowed-text: #81c995;
+    --vdp-policy-allowed-surface: #173c25;
+    --vdp-policy-warning-text: #fdd663;
+    --vdp-policy-warning-surface: #4a3510;
+    --vdp-policy-prohibited-text: #f28b82;
+    --vdp-policy-prohibited-surface: #4b2020;
+    --vdp-policy-unknown-text: #bdc1c6;
+    --vdp-policy-unknown-surface: #35363a;
+    --vdp-policy-loading-text: #d2d5d8;
+    --vdp-policy-loading-surface: #303236;
+    --vdp-policy-capped-text: #d7b9ff;
+    --vdp-policy-capped-surface: #3b2e52;
+
+    --vdp-shadow-panel: 0 6px 28px rgb(0 0 0 / 48%);
+  }
+
+  .vdp-highlight {
+    --vdp-color-highlight-ring: #fdd663;
+  }
+}

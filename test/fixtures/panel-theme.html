@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../../tokens.css">
+    <link rel="stylesheet" href="../../content.css">
+    <title>Vrbow panel theme fixture</title>
+  </head>
+  <body>
+    <main id="host-content">Host page content</main>
+    <section id="vdp-panel" aria-label="Dog policy">
+      <header class="vdp-header vdp-tone-good" data-theme-role="allowed-surface">
+        <span class="vdp-title">🐾 Dog-friendly</span>
+        <span class="vdp-header-btns">
+          <button type="button" aria-label="Rescan">↻</button>
+          <button type="button" aria-label="Close">×</button>
+        </span>
+      </header>
+      <div class="vdp-body">
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Max dogs</span>
+            <span class="vdp-value vdp-tone-good" data-theme-role="allowed-text">2</span>
+            <button class="vdp-jump" type="button" data-theme-role="link">source</button>
+          </div>
+        </div>
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Loading</span>
+            <span class="vdp-value vdp-tone-loading" data-theme-role="loading-text">Checking…</span>
+          </div>
+        </div>
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Request status</span>
+            <span class="vdp-value vdp-tone-capped" data-theme-role="capped-text">Limit reached</span>
+          </div>
+        </div>
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Pet fee</span>
+            <span class="vdp-value vdp-tone-warn" data-theme-role="warning-text">$150</span>
+          </div>
+          <div class="vdp-alt" data-theme-role="warning-surface">⚠ Listing also states $200 elsewhere.</div>
+        </div>
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Policy</span>
+            <span class="vdp-value vdp-tone-bad" data-theme-role="prohibited-text">No pets allowed</span>
+          </div>
+        </div>
+        <div class="vdp-row-wrap">
+          <div class="vdp-row">
+            <span class="vdp-label">Weight limit</span>
+            <span class="vdp-value vdp-tone-unknown" data-theme-role="unknown-text">Not specified</span>
+          </div>
+        </div>
+        <div class="vdp-other-toggle">Other pet notes (1) ▾</div>
+        <div class="vdp-other-list vdp-visible">
+          <div class="vdp-other-item">No aggressive breeds. <span class="vdp-other-source">— House rules</span></div>
+        </div>
+        <div class="vdp-empty">Open the listing to verify complete rules.</div>
+        <div class="vdp-source-badge">Source: listing data</div>
+      </div>
+    </section>
+    <div class="vdp-highlight" data-theme-role="highlight">Highlighted source text</div>
+  </body>
+</html>

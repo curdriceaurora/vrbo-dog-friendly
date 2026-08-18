@@ -1,9 +1,10 @@
 body {
   margin: 0;
   width: 300px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--vdp-font-family);
   font-size: 13px;
-  color: #1a1a1a;
+  color: var(--vdp-color-text);
+  background: var(--vdp-color-surface);
 }
 
 .wrap {
@@ -23,8 +24,9 @@ body {
 }
 
 #rescan {
-  border: 1px solid #ddd;
-  background: #f7f7f7;
+  border: 1px solid var(--vdp-color-control-border);
+  background: var(--vdp-color-surface-subtle);
+  color: var(--vdp-color-text);
   border-radius: 6px;
   padding: 4px 8px;
   cursor: pointer;
@@ -32,18 +34,23 @@ body {
 }
 
 #rescan:hover {
-  background: #eee;
+  background: var(--vdp-color-surface-hover);
+}
+
+#rescan:focus-visible {
+  outline: 2px solid var(--vdp-color-focus-ring);
+  outline-offset: 2px;
 }
 
 .muted {
-  color: #777;
+  color: var(--vdp-color-text-muted);
 }
 
 .row {
   display: flex;
   justify-content: space-between;
   padding: 6px 0;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--vdp-color-border-subtle);
 }
 
 .row:last-child {
@@ -51,7 +58,7 @@ body {
 }
 
 .label {
-  color: #555;
+  color: var(--vdp-color-text-secondary);
   font-weight: 500;
 }
 
@@ -60,17 +67,27 @@ body {
   text-align: right;
 }
 
-.tone-good { color: #1c7c34; }
-.tone-bad { color: #c0362c; }
-.tone-warn { color: #a5680b; }
-.tone-unknown { color: #767676; }
+.tone-good { color: var(--vdp-policy-allowed-text); }
+.tone-bad { color: var(--vdp-policy-prohibited-text); }
+.tone-warn { color: var(--vdp-policy-warning-text); }
+.tone-unknown { color: var(--vdp-policy-unknown-text); }
+.tone-loading { color: var(--vdp-policy-loading-text); }
+.tone-capped { color: var(--vdp-policy-capped-text); }
+
+.status-tone {
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.status-tone.tone-loading { background: var(--vdp-policy-loading-surface); }
+.status-tone.tone-capped { background: var(--vdp-policy-capped-surface); }
 
 .snippet {
   margin-top: 8px;
   padding: 8px;
-  background: #f7f7f7;
+  background: var(--vdp-color-surface-subtle);
   border-radius: 6px;
-  color: #444;
+  color: var(--vdp-color-text-secondary);
   font-size: 12px;
   line-height: 1.4;
 }
