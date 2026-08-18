@@ -124,8 +124,7 @@ for (const scheme of ["light", "dark"]) {
       await expect(tooltip).toHaveCSS("color", EXPECTED[scheme].text);
 
       // Keyboard Flow: Focus wrapping inside dialog
-      await tooltipClose.focus();
-      await expect(tooltipClose).toBeFocused();
+      await expect(tooltipClose).toBeFocused({ timeout: 4000 });
       await page.keyboard.press("Tab");
       await expect(tooltipLink).toBeFocused();
       await page.keyboard.press("Tab");
