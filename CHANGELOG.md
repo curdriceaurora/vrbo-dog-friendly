@@ -2,6 +2,15 @@
 
 This document records all changes to **Vrbow**.
 
+## [v1.2.0] - In Development
+
+### Search Results Badging and Tooltip (Issues #13 & #14)
+- **Inline Card Badging**: Injects compact dog policy badges into property cards on Vrbo search pages (`Hotel-Search`, `/search`).
+- **Accessible Hover and Focus Tooltip**: Displays a floating policy summary card when you hover over or focus any search card badge. Supports keyboard navigation (`tabindex`, `Escape` to close).
+- **Throttled Background Queue**: Enqueues visible search cards with controlled concurrency (maximum 2 requests, 400 ms delay) to prevent bot challenges.
+- **Bot Challenge Protection**: Automatically pauses the fetch queue for 30 seconds if a 429 status or challenge is detected.
+- **Persistent Local Cache**: Caches parsed policies in `chrome.storage.local` with a 24-hour TTL for instant subsequent rendering with zero network requests.
+
 ---
 
 ## [Unreleased]

@@ -180,3 +180,167 @@
   border-radius: 4px;
   transition: outline-color 0.3s ease;
 }
+
+/* Search Results Inline Badge */
+.vdp-search-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  margin: 6px 0;
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  user-select: none;
+  z-index: 10;
+  position: relative;
+}
+
+.vdp-search-badge:hover,
+.vdp-search-badge:focus-visible {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  outline: 2px solid #0d6efd;
+  outline-offset: 1px;
+}
+
+.vdp-search-badge.vdp-badge-allowed {
+  background: #e6f4ea;
+  color: #137333;
+  border-color: #ceead6;
+}
+
+.vdp-search-badge.vdp-badge-banned {
+  background: #fdeceb;
+  color: #c5221f;
+  border-color: #fad2cf;
+}
+
+.vdp-search-badge.vdp-badge-loading {
+  background: #f8f9fa;
+  color: #5f6368;
+  border-color: #dadce0;
+  font-weight: 500;
+}
+
+.vdp-search-badge.vdp-badge-unknown {
+  background: #f1f3f4;
+  color: #5f6368;
+  border-color: #dadce0;
+}
+
+.vdp-search-badge.vdp-badge-capped {
+  background: #fef7e0;
+  color: #b06000;
+  border-color: #feefc3;
+}
+
+/* Floating Hover & Focus Policy Tooltip */
+.vdp-search-tooltip {
+  position: fixed;
+  width: 290px;
+  max-width: calc(100vw - 32px);
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  padding: 12px;
+  z-index: 2147483640;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  color: #1a1a1a;
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.vdp-search-tooltip.vdp-tooltip-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.vdp-tooltip-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.vdp-tooltip-close {
+  background: transparent;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: #666;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.vdp-tooltip-close:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.vdp-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.vdp-tooltip-row:last-child {
+  border-bottom: none;
+}
+
+.vdp-tooltip-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.vdp-tooltip-val {
+  font-weight: 600;
+  text-align: right;
+}
+
+.vdp-tooltip-notes {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  font-size: 11px;
+  color: #444;
+  line-height: 1.4;
+  max-height: 80px;
+  overflow-y: auto;
+}
+
+.vdp-tooltip-footer {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  font-size: 10.5px;
+  color: #777;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.vdp-tooltip-footer a {
+  color: #0d6efd;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.vdp-tooltip-footer a:hover {
+  text-decoration: underline;
+}

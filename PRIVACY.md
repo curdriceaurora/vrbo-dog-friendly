@@ -8,14 +8,14 @@
 
 ### 1. Data Collection and Transmission
 - **No Personal Data**: Vrbow does not collect, record, track, or save personal information. It does not collect browsing history, user credentials, booking details, or payment data.
-- **No External Network Requests**: The extension makes zero network requests. All text extraction and interface operations run locally in your web browser.
+- **Zero Third-Party Network Requests**: The extension makes zero requests to third-party or developer servers. Background fetches on search pages communicate only with public `vrbo.com` property pages locally from your browser.
 
 ---
 
 ### 2. Browser Permissions
 The extension requests three permissions to perform its core functions:
-- **`host_permissions` (`*://*.vrbo.com/*`)**: Reads public listing content on `vrbo.com` to extract and display pet policy rules.
-- **`storage`**: Stores the last viewed listing URL and its extracted policy locally on your device. This allows the toolbar popup to show data quickly without re-scanning the page. The extension never transmits or shares this data.
+- **`host_permissions` (`*://*.vrbo.com/*`)**: Reads public listing content on `vrbo.com` to extract pet policy rules on listing pages and search result cards.
+- **`storage`**: Stores recently viewed listing policies and search card summaries locally on your device for up to 24 hours. This enables instant badging and popup display without repeated network fetches. The extension never transmits or shares this cached data.
 - **`activeTab`**: Connects the toolbar popup to the active Vrbo tab when you click the extension icon or click rescan.
 
 ---

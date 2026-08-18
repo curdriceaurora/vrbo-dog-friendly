@@ -39,6 +39,19 @@
   // the same isolated world) so it can be unit-tested without a browser.
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
 
+  function getListingIdFromUrl(urlStr) {
+    try {
+      const u = new URL(urlStr || location.href);
+      const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);
+      if (!m) return null;
+      let id = m[1];
+      if (/^p\d+/i.test(id)) id = id.slice(1);
+      return id;
+    } catch {
+      return null;
+    }
+  }
+
   function isListingUrl(urlStr) {
     try {
       const u = new URL(urlStr || location.href);
@@ -48,6 +61,16 @@
       if (/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
       if (/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(path)) return true;
       return false;
+    } catch {
+      return false;
+    }
+  }
+
+  function isSearchUrl(urlStr) {
+    try {
+      const u = new URL(urlStr || location.href);
+      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
+      return /(?:hotel-search|search|vacation-rentals\/search)/i.test(u.pathname);
     } catch {
       return false;
     }
@@ -528,16 +551,303 @@
     rescanTimer = setTimeout(() => scan(false), delay);
   }
 
+  // ---------- Search Page Card Badging & Hover Tooltips ----------
+
+  let searchQueue = null;
+  let searchCardObserver = null;
+  let searchTooltipEl = null;
+  let activeTooltipTarget = null;
+
+  function initSearchManager() {
+    if (!globalThis.VdpSearchFetcher) return;
+    if (!searchQueue) {
+      searchQueue = globalThis.VdpSearchFetcher.createSearchFetchQueue();
+    }
+    if (!searchTooltipEl) {
+      searchTooltipEl = document.createElement("div");
+      searchTooltipEl.className = "vdp-search-tooltip";
+      searchTooltipEl.setAttribute("role", "tooltip");
+      searchTooltipEl.setAttribute("aria-hidden", "true");
+      document.body.appendChild(searchTooltipEl);
+    }
+
+    if (!searchCardObserver) {
+      searchCardObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const card = entry.target;
+            const propId = card.getAttribute("data-vdp-prop-id");
+            const url = card.getAttribute("data-vdp-url");
+            if (propId && url && searchQueue) {
+              searchQueue.enqueue(propId, url, "normal");
+            }
+          }
+        }
+      }, { rootMargin: "200px 0px" });
+    }
+
+    scanSearchCards();
+  }
+
+  function scanSearchCards() {
+    if (!isSearchUrl(location.href)) return;
+    const cardSelectors = [
+      '[data-stid="property-card"]',
+      '[data-stid="lodging-card-responsive"]',
+      '[data-testid="property-card"]',
+      'article[data-stid*="card"]',
+      'div[data-stid*="property-card"]',
+    ];
+
+    const cards = document.querySelectorAll(cardSelectors.join(", "));
+    for (const card of cards) {
+      bindSearchCard(card);
+    }
+  }
+
+  function bindSearchCard(card) {
+    const link = card.querySelector('a[href*="/"]');
+    if (!link) return;
+    const propId = getListingIdFromUrl(link.href);
+    if (!propId) return;
+
+    card.setAttribute("data-vdp-prop-id", propId);
+    card.setAttribute("data-vdp-url", link.href);
+
+    // Watch visibility for prefetching
+    searchCardObserver?.observe(card);
+
+    // Inject badge container if not present
+    let badge = card.querySelector(".vdp-search-badge");
+    if (!badge) {
+      badge = document.createElement("div");
+      badge.className = "vdp-search-badge vdp-badge-loading";
+      badge.setAttribute("tabindex", "0");
+      badge.setAttribute("aria-label", "Checking pet policy");
+      badge.innerHTML = `<span class="vdp-badge-icon">⏳</span> <span class="vdp-badge-text">Checking pet policy...</span>`;
+
+      // Try inserting into card meta/price area or append to card body
+      const targetContainer = card.querySelector('[data-stid*="price"], [data-stid*="content"], .uitk-card-content') || card;
+      targetContainer.appendChild(badge);
+
+      badge.addEventListener("mouseenter", () => onBadgeHover(badge, propId, link.href, true));
+      badge.addEventListener("mouseleave", onBadgeLeave);
+      badge.addEventListener("focus", () => onBadgeHover(badge, propId, link.href, true));
+      badge.addEventListener("blur", onBadgeLeave);
+      badge.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") hideTooltip();
+      });
+    }
+
+    // Subscribe to policy updates
+    searchQueue?.subscribe(propId, (data) => updateBadgeUi(badge, data));
+
+    // Check if already in cache
+    searchQueue?.getCached(propId).then((cached) => {
+      if (cached) updateBadgeUi(badge, cached);
+    });
+  }
+
+  function updateBadgeUi(badge, data) {
+    if (!badge || !data) return;
+    if (data.status === "ok" && data.policy) {
+      const p = data.policy;
+      if (p.petsAllowed === false) {
+        badge.className = "vdp-search-badge vdp-badge-banned";
+        badge.innerHTML = `<span class="vdp-badge-icon">🚫</span> <span class="vdp-badge-text">Pets not allowed</span>`;
+        badge.setAttribute("aria-label", "Pets not allowed");
+      } else if (p.petsAllowed === true) {
+        badge.className = "vdp-search-badge vdp-badge-allowed";
+        const details = [];
+        if (p.maxDogs) details.push(`${p.maxDogs} dog${p.maxDogs > 1 ? "s" : ""}`);
+        if (p.weightPerDog) details.push(`≤${p.weightPerDog}`);
+        if (p.fee) details.push(p.fee);
+        const detailStr = details.length ? ` (${details.join(" · ")})` : "";
+        badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">Dogs allowed${detailStr}</span>`;
+        badge.setAttribute("aria-label", `Dogs allowed${detailStr}`);
+      } else {
+        badge.className = "vdp-search-badge vdp-badge-unknown";
+        badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">See pet rules</span>`;
+      }
+    } else if (data.status === "capped") {
+      badge.className = "vdp-search-badge vdp-badge-capped";
+      badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">Hover for pet policy</span>`;
+    } else if (data.status === "rate_limited") {
+      badge.className = "vdp-search-badge vdp-badge-unknown";
+      badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">View listing for rules</span>`;
+    }
+  }
+
+  function onBadgeHover(badge, propId, url, isHighPriority) {
+    if (isHighPriority && searchQueue) {
+      searchQueue.enqueue(propId, url, "high");
+    }
+    showTooltipForBadge(badge, propId, url);
+  }
+
+  function onBadgeLeave(e) {
+    if (e.relatedTarget && searchTooltipEl?.contains(e.relatedTarget)) return;
+    hideTooltip();
+  }
+
+  function showTooltipForBadge(badge, propId, url) {
+    if (!searchTooltipEl) return;
+    activeTooltipTarget = badge;
+
+    searchQueue?.getCached(propId).then((cached) => {
+      renderTooltipContent(cached, url, propId);
+      positionTooltip(badge);
+    });
+  }
+
+  function renderTooltipContent(data, url, propId) {
+    if (!searchTooltipEl) return;
+    if (!data || data.status !== "ok" || !data.policy) {
+      searchTooltipEl.innerHTML = `
+        <div class="vdp-tooltip-header">
+          <span>🐾 Dog Policy Summary</span>
+          <button class="vdp-tooltip-close" aria-label="Close">×</button>
+        </div>
+        <div class="vdp-tooltip-row">
+          <span class="vdp-tooltip-label">Status</span>
+          <span class="vdp-tooltip-val">Checking policy...</span>
+        </div>
+        <div class="vdp-tooltip-footer">
+          <a href="${url}" target="_blank" rel="noopener">Open listing details ↗</a>
+        </div>
+      `;
+    } else {
+      const p = data.policy;
+      const toneClass = p.petsAllowed === true ? "vdp-tone-good" : p.petsAllowed === false ? "vdp-tone-bad" : "vdp-tone-unknown";
+      const statusText = p.petsAllowed === true ? "🐾 Allowed" : p.petsAllowed === false ? "🚫 Not allowed" : "❓ Unclear";
+
+      let rows = `
+        <div class="vdp-tooltip-row">
+          <span class="vdp-tooltip-label">Status</span>
+          <span class="vdp-tooltip-val ${toneClass}">${statusText}</span>
+        </div>
+      `;
+
+      if (p.maxDogs) {
+        rows += `
+          <div class="vdp-tooltip-row">
+            <span class="vdp-tooltip-label">Max dogs</span>
+            <span class="vdp-tooltip-val">${p.maxDogs}</span>
+          </div>
+        `;
+      }
+
+      if (p.weightPerDog) {
+        rows += `
+          <div class="vdp-tooltip-row">
+            <span class="vdp-tooltip-label">Weight limit</span>
+            <span class="vdp-tooltip-val">${p.weightPerDog}</span>
+          </div>
+        `;
+      }
+
+      if (p.fee) {
+        rows += `
+          <div class="vdp-tooltip-row">
+            <span class="vdp-tooltip-label">Pet fee</span>
+            <span class="vdp-tooltip-val">${p.fee}</span>
+          </div>
+        `;
+      }
+
+      if (p.deposit) {
+        rows += `
+          <div class="vdp-tooltip-row">
+            <span class="vdp-tooltip-label">Pet deposit</span>
+            <span class="vdp-tooltip-val">${p.deposit}</span>
+          </div>
+        `;
+      }
+
+      if (p.preReg) {
+        rows += `
+          <div class="vdp-tooltip-row">
+            <span class="vdp-tooltip-label">Approval / Register</span>
+            <span class="vdp-tooltip-val">Required</span>
+          </div>
+        `;
+      }
+
+      let notesHtml = "";
+      if (p.otherNotes && p.otherNotes.length) {
+        notesHtml = `
+          <div class="vdp-tooltip-notes">
+            <strong>Notes:</strong> ${p.otherNotes.slice(0, 2).map((n) => `"${n.text}"`).join("<br>")}
+          </div>
+        `;
+      }
+
+      searchTooltipEl.innerHTML = `
+        <div class="vdp-tooltip-header">
+          <span>🐾 Dog Policy Summary</span>
+          <button class="vdp-tooltip-close" aria-label="Close">×</button>
+        </div>
+        ${rows}
+        ${notesHtml}
+        <div class="vdp-tooltip-footer">
+          <span>Sourced locally</span>
+          <a href="${url}" target="_blank" rel="noopener">Open listing ↗</a>
+        </div>
+      `;
+    }
+
+    searchTooltipEl.querySelector(".vdp-tooltip-close")?.addEventListener("click", hideTooltip);
+  }
+
+  function positionTooltip(badge) {
+    if (!searchTooltipEl || !badge) return;
+    const rect = badge.getBoundingClientRect();
+    const tooltipHeight = searchTooltipEl.offsetHeight || 180;
+    const tooltipWidth = 290;
+
+    let top = rect.bottom + 8;
+    if (top + tooltipHeight > window.innerHeight - 10) {
+      top = Math.max(10, rect.top - tooltipHeight - 8);
+    }
+
+    let left = rect.left;
+    if (left + tooltipWidth > window.innerWidth - 16) {
+      left = Math.max(16, window.innerWidth - tooltipWidth - 16);
+    }
+
+    searchTooltipEl.style.top = `${top}px`;
+    searchTooltipEl.style.left = `${left}px`;
+    searchTooltipEl.classList.add("vdp-tooltip-visible");
+    searchTooltipEl.setAttribute("aria-hidden", "false");
+  }
+
+  function hideTooltip() {
+    if (searchTooltipEl) {
+      searchTooltipEl.classList.remove("vdp-tooltip-visible");
+      searchTooltipEl.setAttribute("aria-hidden", "true");
+      activeTooltipTarget = null;
+    }
+  }
+
   function onUrlMaybeChanged() {
     if (location.href !== lastScannedUrl) {
       lastScannedUrl = location.href;
-      removePanel();
-      latestApolloPayload = null;
-      harvestedDialogText = [];
-      harvestedForUrl = null;
-      window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
-      scheduleRescan(1200);
-      setTimeout(() => scan(false), 3200);
+      hideTooltip();
+
+      if (isSearchUrl(location.href)) {
+        removePanel();
+        initSearchManager();
+      } else if (isListingUrl(location.href)) {
+        removePanel();
+        latestApolloPayload = null;
+        harvestedDialogText = [];
+        harvestedForUrl = null;
+        window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
+        scheduleRescan(1200);
+        setTimeout(() => scan(false), 3200);
+      } else {
+        removePanel();
+      }
     }
   }
 
@@ -550,22 +860,7 @@
   // we attached this listener.
   window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
 
-  // SPA navigation detection, several independent layers since no single
-  // one is bulletproof on every SPA:
-  //  1. A history.pushState/replaceState patch — but it has to live in
-  //     page-bridge.js, NOT here. Content scripts run in an isolated
-  //     world, and property assignments there aren't visible to the
-  //     page's realm, so patching `history` from this script would only
-  //     ever intercept our own calls, never Vrbo's router. The bridge
-  //     patches it in the MAIN world and dispatches vdp-locationchange,
-  //     which we pick up below (window events cross the world boundary
-  //     even though object mutations don't).
-  //  2. popstate (back/forward navigation). Event listeners DO fire in
-  //     the isolated world, so this one works from here.
-  //  3. A cheap interval poll of location.href as a permission-free
-  //     backstop that catches anything the other two miss.
-  //  4. The MutationObserver below also indirectly catches navigation,
-  //     since the DOM changes regardless of how the URL changed.
+  // SPA navigation detection
   window.addEventListener("popstate", () => window.dispatchEvent(new Event("vdp-locationchange")));
   window.addEventListener("vdp-locationchange", onUrlMaybeChanged);
   setInterval(onUrlMaybeChanged, 1000);
@@ -580,12 +875,16 @@
       const now = Date.now();
       if (!mutationFirstSeenAt) mutationFirstSeenAt = now;
       const elapsed = now - mutationFirstSeenAt;
-      if (elapsed > 4000) {
-        // Hard cap: force a scan even if mutations are still flowing.
-        mutationFirstSeenAt = 0;
-        scheduleRescan(0);
+
+      if (isSearchUrl(location.href)) {
+        scanSearchCards();
       } else {
-        scheduleRescan(900);
+        if (elapsed > 4000) {
+          mutationFirstSeenAt = 0;
+          scheduleRescan(0);
+        } else {
+          scheduleRescan(900);
+        }
       }
     });
     observer.observe(target, { childList: true, subtree: true });
@@ -593,8 +892,12 @@
   startObserver();
 
   // initial run
-  scheduleRescan(1000);
-  setTimeout(() => scan(false), 3500);
+  if (isSearchUrl(location.href)) {
+    initSearchManager();
+  } else {
+    scheduleRescan(1000);
+    setTimeout(() => scan(false), 3500);
+  }
 
   // respond to popup requests
   chrome.runtime?.onMessage?.addListener?.((msg, _sender, sendResponse) => {
