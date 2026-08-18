@@ -476,10 +476,10 @@ async function checkListing(port, url, settleMs) {
       // runs unmodified.
       await cdp.send("Runtime.evaluate", {
         contextId: executionContextId,
-        expression: `globalThis.chrome = { storage: { local: { set() {} } }, runtime: { onMessage: { addListener() {} } } };`,
+        expression: `globalThis.chrome = { storage: { local: { set(o, cb) { cb && cb(); }, get(k, cb) { cb && cb({}); }, remove(k, cb) { cb && cb(); } } }, runtime: { onMessage: { addListener() {} } } };`,
       });
 
-      for (const file of ["extract.js", "content.js"]) {
+      for (const file of ["extract.js", "search-fetcher.js", "content.js"]) {
         const out = await cdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
         if (out.exceptionDetails) {
           return { url, ok: false, mode, failures: [`${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}`] };

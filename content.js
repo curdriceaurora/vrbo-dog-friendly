@@ -566,8 +566,10 @@
     if (!searchTooltipEl) {
       searchTooltipEl = document.createElement("div");
       searchTooltipEl.className = "vdp-search-tooltip";
-      searchTooltipEl.setAttribute("role", "tooltip");
+      searchTooltipEl.setAttribute("role", "dialog");
+      searchTooltipEl.setAttribute("aria-label", "Dog policy details");
       searchTooltipEl.setAttribute("aria-hidden", "true");
+      searchTooltipEl.style.display = "none";
       document.body.appendChild(searchTooltipEl);
     }
 
@@ -611,71 +613,140 @@
     const propId = getListingIdFromUrl(link.href);
     if (!propId) return;
 
+    const prevId = card.getAttribute("data-vdp-prop-id");
+    if (prevId === propId && card.querySelector(".vdp-search-badge")) {
+      return;
+    }
+
+    // Clean up previous subscription if card was recycled
+    if (card._vdpUnsub) {
+      card._vdpUnsub();
+      card._vdpUnsub = null;
+    }
+
     card.setAttribute("data-vdp-prop-id", propId);
     card.setAttribute("data-vdp-url", link.href);
 
     // Watch visibility for prefetching
     searchCardObserver?.observe(card);
 
-    // Inject badge container if not present
     let badge = card.querySelector(".vdp-search-badge");
     if (!badge) {
       badge = document.createElement("div");
       badge.className = "vdp-search-badge vdp-badge-loading";
       badge.setAttribute("tabindex", "0");
+      badge.setAttribute("role", "button");
+      badge.setAttribute("aria-haspopup", "dialog");
+      badge.setAttribute("aria-expanded", "false");
       badge.setAttribute("aria-label", "Checking pet policy");
-      badge.innerHTML = `<span class="vdp-badge-icon">⏳</span> <span class="vdp-badge-text">Checking pet policy...</span>`;
+      badge.dataset.vdpStatus = "loading";
+      badge.dataset.vdpText = "Checking pet policy...";
+      badge.textContent = "⏳ Checking pet policy...";
 
-      // Try inserting into card meta/price area or append to card body
       const targetContainer = card.querySelector('[data-stid*="price"], [data-stid*="content"], .uitk-card-content') || card;
       targetContainer.appendChild(badge);
 
-      badge.addEventListener("mouseenter", () => onBadgeHover(badge, propId, link.href, true));
+      // Dynamic handlers read card data attributes at event time
+      badge.addEventListener("mouseenter", () => {
+        const currentId = card.getAttribute("data-vdp-prop-id");
+        const currentUrl = card.getAttribute("data-vdp-url");
+        if (currentId && currentUrl) onBadgeHover(badge, currentId, currentUrl, true);
+      });
       badge.addEventListener("mouseleave", onBadgeLeave);
-      badge.addEventListener("focus", () => onBadgeHover(badge, propId, link.href, true));
-      badge.addEventListener("blur", onBadgeLeave);
+      badge.addEventListener("focus", () => {
+        const currentId = card.getAttribute("data-vdp-prop-id");
+        const currentUrl = card.getAttribute("data-vdp-url");
+        if (currentId && currentUrl) onBadgeHover(badge, currentId, currentUrl, true);
+      });
+      badge.addEventListener("blur", (e) => {
+        if (e.relatedTarget && searchTooltipEl?.contains(e.relatedTarget)) return;
+        hideTooltip();
+      });
       badge.addEventListener("keydown", (e) => {
-        if (e.key === "Escape") hideTooltip();
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const currentId = card.getAttribute("data-vdp-prop-id");
+          const currentUrl = card.getAttribute("data-vdp-url");
+          if (currentId && currentUrl) {
+            showTooltipForBadge(badge, currentId, currentUrl);
+            searchTooltipEl?.querySelector(".vdp-tooltip-close")?.focus();
+          }
+        } else if (e.key === "Escape") {
+          hideTooltip();
+        }
       });
     }
 
-    // Subscribe to policy updates
-    searchQueue?.subscribe(propId, (data) => updateBadgeUi(badge, data));
+    card._vdpUnsub = searchQueue?.subscribe(propId, (data) => {
+      if (card.getAttribute("data-vdp-prop-id") === propId) {
+        updateBadgeUi(badge, data);
+      }
+    });
 
-    // Check if already in cache
     searchQueue?.getCached(propId).then((cached) => {
-      if (cached) updateBadgeUi(badge, cached);
+      if (cached && card.getAttribute("data-vdp-prop-id") === propId) {
+        updateBadgeUi(badge, cached);
+      }
     });
   }
 
   function updateBadgeUi(badge, data) {
     if (!badge || !data) return;
+    let statusKey = data.status || "unknown";
+    let icon = "🐾";
+    let text = "Policy on listing";
+    let className = "vdp-search-badge vdp-badge-unknown";
+
     if (data.status === "ok" && data.policy) {
       const p = data.policy;
       if (p.petsAllowed === false) {
-        badge.className = "vdp-search-badge vdp-badge-banned";
-        badge.innerHTML = `<span class="vdp-badge-icon">🚫</span> <span class="vdp-badge-text">Pets not allowed</span>`;
-        badge.setAttribute("aria-label", "Pets not allowed");
+        statusKey = "banned";
+        icon = "🚫";
+        text = "Pets not allowed";
+        className = "vdp-search-badge vdp-badge-banned";
       } else if (p.petsAllowed === true) {
-        badge.className = "vdp-search-badge vdp-badge-allowed";
+        statusKey = "allowed";
+        icon = "🐾";
         const details = [];
         if (p.maxDogs) details.push(`${p.maxDogs} dog${p.maxDogs > 1 ? "s" : ""}`);
         if (p.weightPerDog) details.push(`≤${p.weightPerDog}`);
         if (p.fee) details.push(p.fee);
         const detailStr = details.length ? ` (${details.join(" · ")})` : "";
-        badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">Dogs allowed${detailStr}</span>`;
-        badge.setAttribute("aria-label", `Dogs allowed${detailStr}`);
-      } else {
-        badge.className = "vdp-search-badge vdp-badge-unknown";
-        badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">See pet rules</span>`;
+        text = `Dogs allowed${detailStr}`;
+        className = "vdp-search-badge vdp-badge-allowed";
       }
     } else if (data.status === "capped") {
-      badge.className = "vdp-search-badge vdp-badge-capped";
-      badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">Hover for pet policy</span>`;
+      statusKey = "capped";
+      icon = "🐾";
+      text = "Hover for pet policy";
+      className = "vdp-search-badge vdp-badge-capped";
     } else if (data.status === "rate_limited") {
-      badge.className = "vdp-search-badge vdp-badge-unknown";
-      badge.innerHTML = `<span class="vdp-badge-icon">🐾</span> <span class="vdp-badge-text">View listing for rules</span>`;
+      statusKey = "rate_limited";
+      icon = "🐾";
+      text = "View listing for rules";
+      className = "vdp-search-badge vdp-badge-unknown";
+    } else if (data.status === "unknown") {
+      statusKey = "unknown";
+      icon = "🐾";
+      text = "Pet rules on listing";
+      className = "vdp-search-badge vdp-badge-unknown";
     }
+
+    if (badge.dataset.vdpStatus === statusKey && badge.dataset.vdpText === text) return;
+    badge.dataset.vdpStatus = statusKey;
+    badge.dataset.vdpText = text;
+    badge.className = className;
+    badge.setAttribute("aria-label", text);
+
+    badge.textContent = "";
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "vdp-badge-icon";
+    iconSpan.textContent = icon;
+    const textSpan = document.createElement("span");
+    textSpan.className = "vdp-badge-text";
+    textSpan.textContent = " " + text;
+    badge.appendChild(iconSpan);
+    badge.appendChild(textSpan);
   }
 
   function onBadgeHover(badge, propId, url, isHighPriority) {
@@ -693,6 +764,7 @@
   function showTooltipForBadge(badge, propId, url) {
     if (!searchTooltipEl) return;
     activeTooltipTarget = badge;
+    badge.setAttribute("aria-expanded", "true");
 
     searchQueue?.getCached(propId).then((cached) => {
       renderTooltipContent(cached, url, propId);
@@ -702,105 +774,98 @@
 
   function renderTooltipContent(data, url, propId) {
     if (!searchTooltipEl) return;
+    searchTooltipEl.textContent = "";
+
+    const header = document.createElement("div");
+    header.className = "vdp-tooltip-header";
+    const titleSpan = document.createElement("span");
+    titleSpan.textContent = "🐾 Dog Policy Details";
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "vdp-tooltip-close";
+    closeBtn.setAttribute("aria-label", "Close details");
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => {
+      hideTooltip();
+      activeTooltipTarget?.focus();
+    });
+    header.appendChild(titleSpan);
+    header.appendChild(closeBtn);
+    searchTooltipEl.appendChild(header);
+
     if (!data || data.status !== "ok" || !data.policy) {
-      searchTooltipEl.innerHTML = `
-        <div class="vdp-tooltip-header">
-          <span>🐾 Dog Policy Summary</span>
-          <button class="vdp-tooltip-close" aria-label="Close">×</button>
-        </div>
-        <div class="vdp-tooltip-row">
-          <span class="vdp-tooltip-label">Status</span>
-          <span class="vdp-tooltip-val">Checking policy...</span>
-        </div>
-        <div class="vdp-tooltip-footer">
-          <a href="${url}" target="_blank" rel="noopener">Open listing details ↗</a>
-        </div>
-      `;
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = data?.status === "unknown" ? "Pet rules not specified in summary" : "Checking policy...";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
     } else {
       const p = data.policy;
-      const toneClass = p.petsAllowed === true ? "vdp-tone-good" : p.petsAllowed === false ? "vdp-tone-bad" : "vdp-tone-unknown";
+      const addRow = (label, valueText, toneClass) => {
+        const row = document.createElement("div");
+        row.className = "vdp-tooltip-row";
+        const lbl = document.createElement("span");
+        lbl.className = "vdp-tooltip-label";
+        lbl.textContent = label;
+        const val = document.createElement("span");
+        val.className = "vdp-tooltip-val" + (toneClass ? " " + toneClass : "");
+        val.textContent = valueText;
+        row.appendChild(lbl);
+        row.appendChild(val);
+        searchTooltipEl.appendChild(row);
+      };
+
+      const statusTone = p.petsAllowed === true ? "vdp-tone-good" : p.petsAllowed === false ? "vdp-tone-bad" : "vdp-tone-unknown";
       const statusText = p.petsAllowed === true ? "🐾 Allowed" : p.petsAllowed === false ? "🚫 Not allowed" : "❓ Unclear";
+      addRow("Status", statusText, statusTone);
 
-      let rows = `
-        <div class="vdp-tooltip-row">
-          <span class="vdp-tooltip-label">Status</span>
-          <span class="vdp-tooltip-val ${toneClass}">${statusText}</span>
-        </div>
-      `;
+      if (p.maxDogs) addRow("Max dogs", String(p.maxDogs));
+      if (p.weightPerDog) addRow("Weight limit", String(p.weightPerDog));
+      if (p.fee) addRow("Pet fee", String(p.fee));
+      if (p.deposit) addRow("Pet deposit", String(p.deposit));
+      if (p.preReg) addRow("Approval / Register", "Required");
 
-      if (p.maxDogs) {
-        rows += `
-          <div class="vdp-tooltip-row">
-            <span class="vdp-tooltip-label">Max dogs</span>
-            <span class="vdp-tooltip-val">${p.maxDogs}</span>
-          </div>
-        `;
-      }
-
-      if (p.weightPerDog) {
-        rows += `
-          <div class="vdp-tooltip-row">
-            <span class="vdp-tooltip-label">Weight limit</span>
-            <span class="vdp-tooltip-val">${p.weightPerDog}</span>
-          </div>
-        `;
-      }
-
-      if (p.fee) {
-        rows += `
-          <div class="vdp-tooltip-row">
-            <span class="vdp-tooltip-label">Pet fee</span>
-            <span class="vdp-tooltip-val">${p.fee}</span>
-          </div>
-        `;
-      }
-
-      if (p.deposit) {
-        rows += `
-          <div class="vdp-tooltip-row">
-            <span class="vdp-tooltip-label">Pet deposit</span>
-            <span class="vdp-tooltip-val">${p.deposit}</span>
-          </div>
-        `;
-      }
-
-      if (p.preReg) {
-        rows += `
-          <div class="vdp-tooltip-row">
-            <span class="vdp-tooltip-label">Approval / Register</span>
-            <span class="vdp-tooltip-val">Required</span>
-          </div>
-        `;
-      }
-
-      let notesHtml = "";
       if (p.otherNotes && p.otherNotes.length) {
-        notesHtml = `
-          <div class="vdp-tooltip-notes">
-            <strong>Notes:</strong> ${p.otherNotes.slice(0, 2).map((n) => `"${n.text}"`).join("<br>")}
-          </div>
-        `;
+        const notesBox = document.createElement("div");
+        notesBox.className = "vdp-tooltip-notes";
+        const strong = document.createElement("strong");
+        strong.textContent = "Notes: ";
+        notesBox.appendChild(strong);
+        for (const note of p.otherNotes.slice(0, 2)) {
+          const pNote = document.createElement("div");
+          pNote.textContent = `"${note.text}"`;
+          notesBox.appendChild(pNote);
+        }
+        searchTooltipEl.appendChild(notesBox);
       }
-
-      searchTooltipEl.innerHTML = `
-        <div class="vdp-tooltip-header">
-          <span>🐾 Dog Policy Summary</span>
-          <button class="vdp-tooltip-close" aria-label="Close">×</button>
-        </div>
-        ${rows}
-        ${notesHtml}
-        <div class="vdp-tooltip-footer">
-          <span>Sourced locally</span>
-          <a href="${url}" target="_blank" rel="noopener">Open listing ↗</a>
-        </div>
-      `;
     }
 
-    searchTooltipEl.querySelector(".vdp-tooltip-close")?.addEventListener("click", hideTooltip);
+    const footer = document.createElement("div");
+    footer.className = "vdp-tooltip-footer";
+    const srcSpan = document.createElement("span");
+    srcSpan.textContent = "Sourced locally";
+    const link = document.createElement("a");
+    if (typeof url === "string" && (url.startsWith("https://www.vrbo.com/") || url.startsWith("/"))) {
+      link.href = url;
+    } else {
+      link.href = "#";
+    }
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "Open listing ↗";
+    footer.appendChild(srcSpan);
+    footer.appendChild(link);
+    searchTooltipEl.appendChild(footer);
   }
 
   function positionTooltip(badge) {
     if (!searchTooltipEl || !badge) return;
+    searchTooltipEl.style.display = "block";
     const rect = badge.getBoundingClientRect();
     const tooltipHeight = searchTooltipEl.offsetHeight || 180;
     const tooltipWidth = 290;
@@ -825,7 +890,11 @@
     if (searchTooltipEl) {
       searchTooltipEl.classList.remove("vdp-tooltip-visible");
       searchTooltipEl.setAttribute("aria-hidden", "true");
-      activeTooltipTarget = null;
+      searchTooltipEl.style.display = "none";
+      if (activeTooltipTarget) {
+        activeTooltipTarget.setAttribute("aria-expanded", "false");
+        activeTooltipTarget = null;
+      }
     }
   }
 
@@ -870,8 +939,22 @@
   // so panel DOM mutations never trigger this observer. Debounced with a hard cap.
   function startObserver() {
     const target = document.body || document.documentElement;
-    observer = new MutationObserver(() => {
+    observer = new MutationObserver((mutations) => {
       if (suppressObserver) return;
+
+      // Ignore internal mutations on Vrbow's own badges or tooltips
+      if (mutations && mutations.length) {
+        let onlyInternal = true;
+        for (const m of mutations) {
+          const el = m.target;
+          if (!el || !el.closest || (!el.closest(".vdp-search-badge") && !el.closest(".vdp-search-tooltip") && !el.closest("#vdp-panel"))) {
+            onlyInternal = false;
+            break;
+          }
+        }
+        if (onlyInternal) return;
+      }
+
       const now = Date.now();
       if (!mutationFirstSeenAt) mutationFirstSeenAt = now;
       const elapsed = now - mutationFirstSeenAt;

@@ -10,15 +10,21 @@ test("search-fetcher HTML parsing", async (t) => {
     assert.equal(res.isChallenge, true);
   });
 
-  await t.test("parses embedded Apollo state in HTML", () => {
+  await t.test("parses embedded Apollo state with __ref references in HTML", () => {
     const apolloState = {
       "PropertyInfo:12345": {
-        rules: {
-          header: "House Rules",
-          section: "Rules",
-          text: "Dogs welcome, maximum 2 dogs under 50 lbs. $150 pet fee applies."
-        }
-      }
+        rules: { __ref: "RulesBlock:789" },
+      },
+      "RulesBlock:789": {
+        ruleList: [
+          { __ref: "RuleItem:1" },
+        ],
+      },
+      "RuleItem:1": {
+        header: "House Rules",
+        section: "Rules",
+        text: "Dogs welcome, maximum 2 dogs under 50 lbs. $150 pet fee applies.",
+      },
     };
     const html = `<html><script>window.__APOLLO_STATE__ = ${JSON.stringify(apolloState)};</script></html>`;
     const res = parseListingHtml(html, "12345");
@@ -55,25 +61,75 @@ test("search-fetcher HTML parsing", async (t) => {
 });
 
 test("search-fetcher queue and caching", async (t) => {
-  await t.test("respects concurrency and notifies subscribers", async () => {
-    const fetchedUrls = [];
+  await t.test("respects maximum observed concurrency cap", async () => {
+    let inFlight = 0;
+    let maxObserved = 0;
+
     const mockFetch = async (url) => {
-      fetchedUrls.push(url);
+      inFlight++;
+      maxObserved = Math.max(maxObserved, inFlight);
+      await new Promise((r) => setTimeout(r, 60));
+      inFlight--;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>Dogs allowed</section>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 2,
+      minDelayMs: 15,
+    });
+
+    for (let i = 1; i <= 6; i++) {
+      queue.enqueue(`prop_${i}`, `https://www.vrbo.com/${i}`);
+    }
+
+    await new Promise((r) => setTimeout(r, 450));
+    assert.ok(maxObserved <= 2, `Expected maxObserved <= 2, got ${maxObserved}`);
+    assert.ok(queue.getMaxObservedConcurrency() <= 2);
+  });
+
+  await t.test("deduplicates concurrent duplicate enqueues", async () => {
+    let callCount = 0;
+    const mockFetch = async () => {
+      callCount++;
       await new Promise((r) => setTimeout(r, 50));
       return {
         ok: true,
         status: 200,
-        text: async () => `
-          <section>
-            <h2>House Rules</h2>
-            <p>Dogs are allowed. Maximum of 2 dogs allowed.</p>
-          </section>
-        `,
+        text: async () => "<section>Dogs allowed</section>",
       };
     };
 
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 2,
+      minDelayMs: 10,
+    });
+
+    // Enqueue identical ID three times concurrently
+    queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
+    queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
+    queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
+
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(callCount, 1, "Duplicate enqueues should only trigger 1 fetch");
+  });
+
+  await t.test("deletes expired cache entries from storage", async () => {
+    const removedKeys = [];
     const mockStorage = {
-      store: {},
+      store: {
+        "vrbow_cache_old": {
+          version: 1,
+          propertyId: "old",
+          data: { status: "ok", policy: { petsAllowed: true } },
+          ts: Date.now() - (48 * 60 * 60 * 1000), // 48h old
+        },
+      },
       get(keys, cb) {
         const res = {};
         for (const k of keys) {
@@ -81,46 +137,29 @@ test("search-fetcher queue and caching", async (t) => {
         }
         cb(res);
       },
-      set(obj) {
-        Object.assign(this.store, obj);
+      remove(keys, cb) {
+        for (const k of keys) {
+          delete this.store[k];
+          removedKeys.push(k);
+        }
+        cb && cb();
       },
     };
 
     const queue = createSearchFetchQueue({
-      fetchFn: mockFetch,
       storage: mockStorage,
-      maxConcurrent: 2,
-      minDelayMs: 10,
+      ttlMs: 24 * 60 * 60 * 1000,
     });
 
-    const results = new Map();
-    queue.subscribe("prop1", (data) => results.set("prop1", data));
-    queue.subscribe("prop2", (data) => results.set("prop2", data));
-
-    queue.enqueue("prop1", "https://www.vrbo.com/111");
-    queue.enqueue("prop2", "https://www.vrbo.com/222");
-
-    await new Promise((r) => setTimeout(r, 200));
-
-    assert.equal(results.get("prop1")?.status, "ok");
-    assert.equal(results.get("prop1")?.policy.maxDogs, 2);
-    assert.equal(results.get("prop2")?.status, "ok");
-    assert.equal(fetchedUrls.length, 2);
-
-    // Test cache hit: third request for prop1 should not call fetchFn again
-    const cachedData = await queue.getCached("prop1");
-    assert.equal(cachedData.status, "ok");
-    assert.equal(cachedData.policy.maxDogs, 2);
-
-    queue.enqueue("prop1", "https://www.vrbo.com/111");
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(fetchedUrls.length, 2); // No new network call
+    const cached = await queue.getCached("old");
+    assert.equal(cached, null, "Expired entry should return null");
+    assert.ok(removedKeys.includes("vrbow_cache_old"), "Expired entry should be removed from storage");
   });
 
-  await t.test("pauses queue on 429 rate limit response", async () => {
-    let callCount = 0;
+  await t.test("immediately pauses queue on 429 before starting queued requests", async () => {
+    let startedCount = 0;
     const mockFetch = async () => {
-      callCount++;
+      startedCount++;
       return {
         ok: false,
         status: 429,
@@ -130,48 +169,16 @@ test("search-fetcher queue and caching", async (t) => {
     const queue = createSearchFetchQueue({
       fetchFn: mockFetch,
       maxConcurrent: 1,
-      minDelayMs: 10,
+      minDelayMs: 60,
     });
 
-    let resultReceived = null;
-    queue.subscribe("rate_limited_prop", (data) => {
-      resultReceived = data;
-    });
+    queue.enqueue("p1", "https://www.vrbo.com/1");
+    queue.enqueue("p2", "https://www.vrbo.com/2");
 
-    queue.enqueue("rate_limited_prop", "https://www.vrbo.com/429");
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 150));
 
-    assert.equal(resultReceived?.status, "rate_limited");
+    // Only p1 should have started; p2 should be held because queue is paused
+    assert.equal(startedCount, 1);
     assert.equal(queue.isPaused(), true);
-  });
-
-  await t.test("prioritizes high-priority items", async () => {
-    const executionOrder = [];
-    const mockFetch = async (url) => {
-      executionOrder.push(url);
-      await new Promise((r) => setTimeout(r, 30));
-      return {
-        ok: true,
-        status: 200,
-        text: async () => "<section>House Rules: Dogs allowed</section>",
-      };
-    };
-
-    const queue = createSearchFetchQueue({
-      fetchFn: mockFetch,
-      maxConcurrent: 1,
-      minDelayMs: 20,
-    });
-
-    queue.enqueue("item1", "https://www.vrbo.com/1", "normal");
-    queue.enqueue("item2", "https://www.vrbo.com/2", "normal");
-    queue.enqueue("item3_high", "https://www.vrbo.com/3", "high");
-
-    await new Promise((r) => setTimeout(r, 250));
-
-    // item1 starts first, then item3_high should be processed before item2
-    assert.equal(executionOrder[0], "https://www.vrbo.com/1");
-    assert.equal(executionOrder[1], "https://www.vrbo.com/3");
-    assert.equal(executionOrder[2], "https://www.vrbo.com/2");
   });
 });

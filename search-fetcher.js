@@ -19,8 +19,43 @@
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
 
   /**
+   * Walk Apollo graph with full __ref pointer resolution.
+   */
+  function walkApolloNode(state, node, out, seen = new Set(), depth = 0) {
+    if (!node || depth > 18) return;
+    if (typeof node === "object") {
+      if (seen.has(node)) return;
+      seen.add(node);
+    }
+
+    if (node && typeof node === "object" && typeof node.__ref === "string") {
+      const target = state[node.__ref];
+      if (target) walkApolloNode(state, target, out, seen, depth + 1);
+      return;
+    }
+
+    if (Array.isArray(node)) {
+      for (const el of node) walkApolloNode(state, el, out, seen, depth + 1);
+      return;
+    }
+
+    if (node && typeof node === "object") {
+      if (node.text && typeof node.text === "string") {
+        out.push({
+          header: node.header || "Listing Data",
+          section: node.section || "Rules",
+          text: node.text,
+        });
+      }
+      for (const k of Object.keys(node)) {
+        walkApolloNode(state, node[k], out, seen, depth + 1);
+      }
+    }
+  }
+
+  /**
    * Parse raw listing HTML into an extract.js-compatible corpus.
-   * Looks for Apollo state JSON, PropertyInfo snippets, or House Rules sections.
+   * Resolves Apollo state JSON with __ref references or extracts from HTML sections.
    */
   function parseListingHtml(html, propertyId) {
     if (!html || typeof html !== "string") return null;
@@ -40,20 +75,9 @@
       try {
         const state = JSON.parse(apolloMatch[1]);
         const targetKey = propertyId ? `PropertyInfo:${propertyId}` : Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
-        const root = state[targetKey];
+        const root = targetKey ? state[targetKey] : null;
         if (root) {
-          // Walk Apollo graph if available
-          const walk = (node, seen = new Set()) => {
-            if (!node || typeof node !== "object" || seen.has(node)) return;
-            seen.add(node);
-            if (node.text && typeof node.text === "string") {
-              items.push({ header: node.header || "Listing Data", section: node.section || "Rules", text: node.text });
-            }
-            for (const key of Object.keys(node)) {
-              walk(node[key], seen);
-            }
-          };
-          walk(root);
+          walkApolloNode(state, root, items);
         }
       } catch {
         // Fall back to text parsing if JSON parse fails
@@ -62,7 +86,6 @@
 
     // 2. Extract visible text sections from raw HTML (strip markup)
     if (items.length === 0) {
-      // Find sections discussing pets, house rules, or amenities
       const sectionRegex = /<(section|div|article)[^>]*>(.*?)<\/\1>/gis;
       let match;
       while ((match = sectionRegex.exec(html)) !== null) {
@@ -96,14 +119,16 @@
     const ttlMs = options.ttlMs || DEFAULT_TTL_MS;
 
     const memoryCache = new Map();
-    const queue = []; // [{ propertyId, url, priority, resolve, reject }]
+    const queue = []; // [{ propertyId, url, priority }]
     const activeRequests = new Set();
-    const listeners = new Map(); // propertyId -> [callbacks]
+    const enqueuedOrActive = new Set(); // Synchronous tracking to prevent duplicate enqueue races
+    const listeners = new Map(); // propertyId -> Set of callbacks
 
     let isProcessing = false;
     let lastRequestStartTime = 0;
     let sessionRequestsCount = 0;
     let pausedUntil = 0;
+    let maxObservedConcurrency = 0;
 
     function getCacheKey(propertyId) {
       return `${CACHE_PREFIX}${propertyId}`;
@@ -111,6 +136,7 @@
 
     async function getCached(propertyId) {
       if (!propertyId) return null;
+
       // 1. Check memory cache
       const mem = memoryCache.get(propertyId);
       if (mem) {
@@ -128,6 +154,10 @@
               memoryCache.set(propertyId, { data: entry.data, ts: entry.ts });
               resolve(entry.data);
             } else {
+              if (entry) {
+                // Delete expired or version-mismatched data
+                storage.remove([key], () => {});
+              }
               resolve(null);
             }
           });
@@ -189,7 +219,7 @@
           // Check if paused due to 429 or challenge
           const now = Date.now();
           if (now < pausedUntil) {
-            setTimeout(processQueue, pausedUntil - now);
+            setTimeout(processQueue, Math.max(50, pausedUntil - now));
             break;
           }
 
@@ -206,16 +236,10 @@
 
           const { propertyId, url, priority } = item;
 
-          // Check if already fetched while in queue
-          const cached = await getCached(propertyId);
-          if (cached) {
-            notify(propertyId, cached);
-            continue;
-          }
-
           // Check session budget cap unless it's a high priority hover
           if (priority !== "high" && sessionRequestsCount >= sessionCap) {
-            notify(propertyId, { status: "capped" });
+            enqueuedOrActive.delete(propertyId);
+            notify(propertyId, { status: "capped", propertyId });
             continue;
           }
 
@@ -223,16 +247,24 @@
           const elapsed = Date.now() - lastRequestStartTime;
           if (elapsed < minDelayMs) {
             await new Promise((r) => setTimeout(r, minDelayMs - elapsed));
+            // Re-check pause state after waiting
+            if (Date.now() < pausedUntil) {
+              queue.unshift(item); // Put item back
+              setTimeout(processQueue, Math.max(50, pausedUntil - Date.now()));
+              break;
+            }
           }
 
           lastRequestStartTime = Date.now();
           sessionRequestsCount++;
           activeRequests.add(propertyId);
+          maxObservedConcurrency = Math.max(maxObservedConcurrency, activeRequests.size);
 
           executeFetch(propertyId, url)
             .catch(() => {})
             .finally(() => {
               activeRequests.delete(propertyId);
+              enqueuedOrActive.delete(propertyId);
               processQueue();
             });
         }
@@ -252,7 +284,6 @@
         });
 
         if (res.status === 429 || res.status === 403) {
-          // Rate limited: pause queue
           pausedUntil = Date.now() + PAUSE_ON_CHALLENGE_MS;
           const result = { status: "rate_limited", propertyId };
           notify(propertyId, result);
@@ -303,27 +334,39 @@
     function enqueue(propertyId, url, priority = "normal") {
       if (!propertyId || !url) return;
 
-      // If already in memory or storage, notify immediately
+      // 1. Check memory cache synchronously
+      const mem = memoryCache.get(propertyId);
+      if (mem && Date.now() - mem.ts < ttlMs) {
+        notify(propertyId, mem.data);
+        return;
+      }
+
+      // 2. Synchronous duplicate check to prevent race conditions
+      if (enqueuedOrActive.has(propertyId)) {
+        if (priority === "high") {
+          const item = queue.find((q) => q.propertyId === propertyId);
+          if (item) item.priority = "high";
+        }
+        return;
+      }
+      enqueuedOrActive.add(propertyId);
+
+      // 3. Check storage cache
       getCached(propertyId).then((cached) => {
         if (cached) {
+          enqueuedOrActive.delete(propertyId);
           notify(propertyId, cached);
           return;
         }
 
-        // Avoid duplicate queue entries
-        const existing = queue.find((q) => q.propertyId === propertyId);
-        if (existing) {
-          if (priority === "high") existing.priority = "high";
-        } else if (!activeRequests.has(propertyId)) {
-          queue.push({ propertyId, url, priority });
-        }
-
+        queue.push({ propertyId, url, priority });
         processQueue();
       });
     }
 
     function clearQueue() {
       queue.length = 0;
+      enqueuedOrActive.clear();
     }
 
     return {
@@ -335,6 +378,7 @@
       getQueueLength: () => queue.length,
       getActiveCount: () => activeRequests.size,
       getSessionCount: () => sessionRequestsCount,
+      getMaxObservedConcurrency: () => maxObservedConcurrency,
       isPaused: () => Date.now() < pausedUntil,
     };
   }
