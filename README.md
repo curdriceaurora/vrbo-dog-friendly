@@ -1,16 +1,16 @@
-<p align="center">
-  <img src="icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
-</p>
+<div align="center">
+
+<img src="icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
 
 # Vrbow: Vrbo Dog Policy Callout
 
-<p align="center">
-  <strong>A Chrome extension that extracts pet rules from Vrbo listings and shows them in a summary card.</strong>
-</p>
+**A Chrome extension that extracts pet rules from Vrbo listings and shows them in a summary card.**
 
-<p align="center">
-  <img src="docs/listing-popup.gif" alt="Vrbow Listing Callout in Action" width="100%">
-</p>
+<br>
+
+<img src="docs/listing-popup.gif" alt="Vrbow Listing Callout in Action" width="100%">
+
+</div>
 
 ---
 
@@ -24,11 +24,11 @@ A property marked Pets allowed may still have limits on dog count, weight, fees,
 
 The extension reads the pet policy information available on a listing and consolidates it into a summary showing:
 
-* Whether dogs are allowed
-* Maximum number of dogs and weight limits
-* Pet fees or deposits
-* Registration or prior approval requirements
-* Other restrictions, such as breed or leash rules
+- Whether dogs are allowed
+- Maximum number of dogs and weight limits
+- Pet fees or deposits
+- Registration or prior approval requirements
+- Other restrictions, such as breed or leash rules
 
 Where possible, extracted rules link back to the source text on the listing, with the relevant text highlighted. If two sections contain conflicting rules, the extension flags the discrepancy rather than attempting to decide which one is authoritative.
 
@@ -78,9 +78,7 @@ When you visit a listing on `vrbo.com`, the policy card opens in the top-right c
 ### 3. Search Results Badging
 When you browse search results on `vrbo.com`:
 
-<p align="center">
-  <img src="docs/search-badge.gif" alt="Search results showing pet policy badges" width="100%">
-</p>
+![Search results showing pet policy badges](docs/search-badge.gif)
 
 - **Inline Badges**: The extension shows a compact badge on each search card (such as `🐾 Max 2 dogs allowed · 50 lbs · $150/stay`, `🐾 Dogs allowed · 1st free · $25/add'l/stay`, or `🚫 Pets not allowed`).
 - **Controlled Retrieval**: The extension fetches listing details with a controlled queue (maximum 2 requests, 400 ms safety delay) to prevent rate limits.
