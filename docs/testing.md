@@ -3,6 +3,13 @@
 This document describes how to test the extension.
 Testing has two parts: offline unit tests and a live browser test harness.
 
+Install the development dependencies once:
+
+```bash
+npm install
+npx playwright install chromium
+```
+
 ---
 
 ## 1. Offline Tests
@@ -19,9 +26,19 @@ node --check content.js && node --check extract.js && node --check page-bridge.j
 - Executes 34 unit tests against `extract.js` using Node's test runner.
 - Verifies rule extraction, weight limits, fees, deposits, and contradiction detection.
 
+## 2. Automated Theme Tests
+
+Run the complete light and dark browser matrix:
+
+```bash
+npm run test:theme
+```
+
+The theme suite covers the listing panel and toolbar popup. It verifies every policy tone, shared-token loading, host-page isolation, keyboard focus indicators, viewport containment, and WCAG AA text and non-text contrast in both color schemes. A Chromium CSS coverage gate fails if any production rule in `tokens.css`, `content.css`, or `popup.css` is not exercised; required theme-rule coverage is 100%.
+
 ---
 
-## 2. Live Browser Test Harness
+## 3. Live Browser Test Harness
 
 Run this command to test live Vrbo listings in Chrome:
 

@@ -35,7 +35,7 @@
         "*://*.vrbo.com/*"
       ],
       "js": ["extract.js", "content.js"],
-      "css": ["content.css"],
+      "css": ["tokens.css", "content.css"],
       "run_at": "document_idle"
     }
   ],

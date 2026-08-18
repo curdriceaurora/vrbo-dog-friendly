@@ -4,6 +4,14 @@ This document records all changes to **Vrbow**.
 
 ---
 
+## [Unreleased]
+
+### Theme System
+- Added shared semantic color tokens for the listing panel and toolbar popup.
+- Added automatic light and dark themes with accessible policy-state and focus colors.
+
+---
+
 ## [v1.0.1] - 2026-08-17
 
 ### Rebranding

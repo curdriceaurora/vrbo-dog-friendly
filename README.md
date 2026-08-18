@@ -45,6 +45,7 @@ It shows a single summary card with all extracted pet policy details.
 - **Source Verification**: Provides a clickable **source** link that jumps to and highlights the text on the page.
 - **Contradiction Alerts**: Flags conflicts when rules in one section disagree with rules in another section.
 - **Extra Notes**: Collects all other pet sentences (such as leash rules or breed limits) in an expandable drawer.
+- **Automatic Theme**: Uses a consistent light or dark theme that follows your operating-system preference.
 - **Local Operation**: Runs locally in your browser with zero network requests.
 
 <p align="center">

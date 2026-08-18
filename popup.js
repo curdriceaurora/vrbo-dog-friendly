@@ -106,7 +106,7 @@ function loadPolicy() {
 }
 
 document.getElementById("rescan").addEventListener("click", () => {
-  document.getElementById("content").innerHTML = '<p class="muted">Rescanning…</p>';
+  document.getElementById("content").innerHTML = '<p class="status-tone tone-loading">Rescanning…</p>';
   withActiveTab((tab) => {
     if (!tab) return;
     chrome.tabs.sendMessage(tab.id, { type: "vdp-rescan" }, (resp) => {

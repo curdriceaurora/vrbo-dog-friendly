@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" class="vdp-theme-root">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../../tokens.css">
+    <link rel="stylesheet" href="../../popup.css">
+    <title>Vrbow popup theme fixture</title>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="head">
+        <span class="title">🐾 Vrbow</span>
+        <button id="rescan" type="button">↻ Rescan</button>
+      </div>
+      <p class="muted" data-theme-role="muted">Policy summary</p>
+      <div class="row"><span class="label">Allowed</span><span class="value tone-good" data-theme-role="allowed-text">Yes</span></div>
+      <div class="row"><span class="label">Warning</span><span class="value tone-warn" data-theme-role="warning-text">Approval required</span></div>
+      <div class="row"><span class="label">Prohibited</span><span class="value tone-bad" data-theme-role="prohibited-text">No</span></div>
+      <div class="row"><span class="label">Unknown</span><span class="value tone-unknown" data-theme-role="unknown-text">Not specified</span></div>
+      <div class="status-tone tone-loading" data-theme-role="loading-state">Loading policy…</div>
+      <div class="status-tone tone-capped" data-theme-role="capped-state">Request limit reached</div>
+      <div class="snippet">Two dogs up to 50 lbs are welcome.</div>
+    </div>
+  </body>
+</html>
