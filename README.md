@@ -65,7 +65,7 @@ The extension can also add pet policy badges directly to Vrbo search results, ma
 
 ## Installation & Setup
 
-1. Download **`vrbow-v1.1.1.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
+1. Download **`vrbow-v1.1.2.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Turn on **Developer mode** in the top-right corner.

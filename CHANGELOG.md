@@ -2,6 +2,19 @@
 
 This document records all changes to **Vrbow**.
 
+## [v1.1.2] - 2026-08-18
+
+### Search Card Hit-Testing & Interaction
+- **Search Badge Hit-Testing**: Elevated search badge stacking context (`z-index: 100 !important`) and set `pointer-events: auto !important` to ensure physical mouse hovers win hit-testing over host-page full-card overlay links (`.uitk-card-link`).
+- **Badge Click Navigation Interception**: Added explicit click handling with `stopPropagation()` and `preventDefault()` on search badges to open the details tooltip dialog directly without triggering card navigation.
+
+### Documentation and Visual Assets
+- **Expanded Search Badge Previews**: Added high-resolution visual previews for all operational badge states (loading, allowed with flat/tiered fees, pet restrictions, pets prohibited, and fallback verification).
+- **Listing Summary Pop-Up**: Embedded high-resolution on-page summary card graphic into documentation.
+- **Streamlined Documentation**: Reorganized README structure to eliminate duplicate feature descriptions while maintaining all visual assets.
+
+---
+
 ## [v1.1.1] - 2026-08-18
 
 ### Policy Extraction and Edge Case Fixes
