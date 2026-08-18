@@ -255,13 +255,13 @@
     );
 
     const MAX_DOGS_RE = [
-      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}\\b`, "i"),
-      new RegExp(`\\b${NUM}\\s*${PET}\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
-      new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?:\\s*total)?\\b`, "i"),
+      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b`, "i"),
+      new RegExp(`\\b${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
+      new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))(?:\\s*total)?\\b`, "i"),
       // "Two Dogs up to 50lbs welcome", "2 dogs (under 50 lbs)", "2 dogs, 50 lbs max" —
       // the count leads and the qualifier or weight clause follows. Bounded
       // to the same sentence and 40 characters so it stays a local claim.
-      new RegExp(`\\b${NUM}\\s+${PET}\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?|under|less than|up to|max(?:imum)?|lbs?|pounds?|kg|weight|limit|fee)\\b)`, "i"),
+      new RegExp(`\\b${NUM}\\s+${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?|under|less than|up to|max(?:imum)?|lbs?|pounds?|pds?|kg|weight|limit)\\b)`, "i"),
       // "Pets allowed: dogs (limit 2 total)" — count without a repeated noun.
       new RegExp(`\\blimit(?:ed)?\\s*(?:to\\s*)?${NUM}\\s*total\\b`, "i"),
     ];
@@ -286,6 +286,7 @@
     );
 
     const FEE_RE = [
+      new RegExp(`\\b(?:a\\s+)?(?:${CUR}\\s?${AMT}|${AMT}\\s?${CUR}|${AMT})\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:for\\s+(?:the\\s+)?(?:whole\\s+trip|entire\\s+stay|stay)|(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?)?`, "i"),
       new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
@@ -575,6 +576,8 @@
           const matchedPeriod = fm[3] || fm[4];
           if (matchedPeriod) {
             period = matchedPeriod.toLowerCase();
+          } else if (/\b(?:whole\s+trip|entire\s+stay|per\s+stay|flat)\b/i.test(str)) {
+            period = "stay";
           } else if (isPerPet) {
             period = "pet";
           }

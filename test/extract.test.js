@@ -501,6 +501,10 @@ test("buildCorpus", async (t) => {
 
     const raw8 = policyFor("Pet fee 100.00");
     assert.strictEqual(raw8.fee, "$100.00");
+
+    const raw9 = policyFor("There is a 200 pet fee for the whole trip");
+    assert.strictEqual(raw9.fee, "$200");
+    assert.strictEqual(raw9.maxDogs, null);
   });
 });
 
