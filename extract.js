@@ -216,7 +216,7 @@
     // "pre-registered" is the most common phrasing of this rule, so the
     // inflections have to be part of the alternative itself — a bare
     // "pre-?register" can't match it, since the \b lands on the "ed".
-    const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
+    const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const FEE_RE = [
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
@@ -229,6 +229,7 @@
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
     ];
+    const UNPRICED_FEE_RE = /\b(pet\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged)|the\s+pet\s+fee\s+paid|subject\s+to\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?pet\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
     const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
     const DEPOSIT_RE = [
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),
@@ -319,6 +320,9 @@
           suffix = ` per stay`;
         }
         record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur, feeMatch.groups.amt)}${suffix}`, entry);
+        usedForField = true;
+      } else if (!result.fee && UNPRICED_FEE_RE.test(s)) {
+        record("fee", "feeSnippet", "feeSource", "feeAlternates", "Pet fee applies", entry);
         usedForField = true;
       }
 
@@ -423,13 +427,13 @@
     }
 
     // 2. Fee normalization
-    // fee: { amount: number, currency: string, period: "night" | "day" | "stay" | "pet" | "unknown", perPet?: boolean }
+    // fee: { amount: number | null, text?: string, currency: string, period: "night" | "day" | "stay" | "pet" | "unknown", perPet?: boolean }
     let fee = null;
     if (extracted.fee && extracted.fee !== "No fee mentioned") {
       const str = String(extracted.fee);
       const isPerPet = /\b(?:per\s+(?:pet|dog)|each\s+(?:pet|dog)?)\b/i.test(str);
       const fm = str.match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(?:pet|dog|each)\s+per\s+(stay|night|day)|per\s+(stay|night|day|pet))?/i);
-      if (fm) {
+      if (fm && fm[2]) {
         const curSym = fm[1] || "$";
         const currency = normalizeCurrencyCode(curSym);
         const amount = parseFloat(fm[2]);
@@ -444,6 +448,8 @@
         if (isPerPet) {
           fee.perPet = true;
         }
+      } else {
+        fee = { amount: null, text: extracted.fee, currency: "USD", period: "unknown" };
       }
     } else if (extracted.noFeeMentioned) {
       fee = { amount: 0, currency: "USD", period: "unknown" };
@@ -508,8 +514,10 @@
   }
 
   function formatFeeShort(fee) {
-    if (!fee || fee.amount === null) return null;
+    if (!fee) return null;
     if (fee.amount === 0) return "No pet fee";
+    if (fee.amount === null && fee.text) return fee.text;
+    if (typeof fee.amount !== "number") return null;
     const amountStr = formatCurrencyDisplay(fee.amount, fee.currency);
     if (fee.perPet && fee.period && fee.period !== "unknown" && fee.period !== "pet") {
       return `${amountStr}/pet/${fee.period}`;
