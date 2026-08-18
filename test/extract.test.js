@@ -311,8 +311,16 @@ test("fees and deposits", async (t) => {
 
     const badge = deriveSearchBadge(canonical);
     assert.strictEqual(badge.statusKey, "allowed");
-    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay");
+    assert.strictEqual(badge.text, "Max 2 dogs allowed · 50 lbs · $150/stay");
     assert.ok(badge.text.length < 60, `Badge text "${badge.text}" exceeds compact length budget`);
+
+    // Verify 1 dog grammar
+    const singleDogBadge = deriveSearchBadge({ petsAllowed: true, maxDogs: 1 });
+    assert.strictEqual(singleDogBadge.text, "Max 1 dog allowed");
+
+    // Verify 3 dogs grammar
+    const threeDogsBadge = deriveSearchBadge({ petsAllowed: true, maxDogs: 3 });
+    assert.strictEqual(threeDogsBadge.text, "Max 3 dogs allowed");
   });
 
   await t.test("conflicting fees are flagged", () => {

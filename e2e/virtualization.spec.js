@@ -139,7 +139,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
 
     // 3. Property B response resolves first
     await expect(badge).toHaveClass(/vdp-badge-allowed/, { timeout: 6_000 });
-    await expect(badge).toContainText("Dogs allowed");
+    await expect(badge).toContainText(/dogs allowed/i);
     await expect(card.locator(".vdp-search-badge")).toHaveCount(1);
 
     // Verify tooltip shows Property B and targets Property B navigation URL
@@ -160,7 +160,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
 
     // 5. Assert that delayed Property A response CANNOT overwrite Property B
     await expect(badge).toHaveClass(/vdp-badge-allowed/);
-    await expect(badge).toContainText("Dogs allowed");
+    await expect(badge).toContainText(/dogs allowed/i);
     await expect(badge).not.toHaveClass(/vdp-badge-banned/);
     await expect(card).toHaveAttribute("data-vdp-prop-id", "2000002");
     await expect(card.locator(".vdp-search-badge")).toHaveCount(1);

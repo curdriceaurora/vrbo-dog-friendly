@@ -593,11 +593,11 @@
     return `${weightLimit.value} ${unitStr}`;
   }
 
-  function collectPolicyBadgeDetails(policy) {
+  function collectPolicyBadgeDetails(policy, includeMaxDogs = true) {
     const details = [];
 
     // Primary constraints in priority order: maxDogs -> weight -> fee -> approval
-    if (policy.maxDogs) {
+    if (includeMaxDogs && policy.maxDogs) {
       details.push(`Max ${policy.maxDogs}`);
     }
 
@@ -659,12 +659,15 @@
     }
 
     if (policy.petsAllowed === true) {
-      const details = collectPolicyBadgeDetails(policy);
+      const details = collectPolicyBadgeDetails(policy, false);
       const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
+      const prefix = policy.maxDogs
+        ? `Max ${policy.maxDogs} ${policy.maxDogs === 1 ? "dog" : "dogs"} allowed`
+        : "Dogs allowed";
       return {
         statusKey: "allowed",
         icon: "🐾",
-        text: `Dogs allowed${detailStr}`,
+        text: `${prefix}${detailStr}`,
         className: "vdp-search-badge vdp-badge-allowed",
       };
     }
