@@ -41,23 +41,18 @@
 
     if (typeof node !== "object") return;
 
-    // Skip guest reviews / ratings subtrees completely (guest opinions are not official host policy)
-    if (node.__typename && /review|rating|feedback/i.test(node.__typename)) return;
-
     let nextHeader = headerCtx;
     let nextSection = sectionCtx;
 
     const headerText = typeof node.header === "object" ? node.header?.text : (typeof node.header === "string" ? node.header : "");
     if (typeof headerText === "string" && headerText.trim()) {
       nextHeader = headerText.trim();
-      if (/reviews|ratings|guest\s+reviews|feedback/i.test(nextHeader)) return;
       if (/house rules|polic|important information/i.test(nextHeader)) nextSection = "House Rules / Policies";
       else if (/about this property|about this space|about this listing/i.test(nextHeader)) nextSection = "About this property";
       else if (!nextSection) nextSection = nextHeader;
     }
     if (typeof node.sectionName === "string" && node.sectionName.trim()) {
       nextHeader = node.sectionName.trim();
-      if (/reviews|ratings|guest\s+reviews|feedback/i.test(nextHeader)) return;
       if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
     }
 

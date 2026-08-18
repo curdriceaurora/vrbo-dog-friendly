@@ -233,12 +233,9 @@
         return false;
       }
 
-      const REVIEWS_SELECTOR = '[data-stid*="review" i], [class*="review" i], [id*="review" i], [data-section-type*="review" i], [data-stid*="Review"], [data-stid*="ratings-and-reviews"]';
-
       const candidates = Array.from(document.querySelectorAll('button, [role="button"], a, [aria-expanded]')).filter((el) => {
         if (!(el.offsetParent !== null || el.getClientRects().length > 0)) return false;
         if (el.closest(OFF_LIMITS)) return false;
-        if (el.closest(REVIEWS_SELECTOR)) return false;
         const label = (el.textContent || el.getAttribute("aria-label") || "").trim();
         if (TOGGLE_TEXT_RE.test(label)) return true;
         if (el.getAttribute("aria-expanded") === "false") return inRelevantSection(el);
@@ -291,9 +288,8 @@
   // landing in the panel's notes as though the host had written it about
   // this property. Scoping to <main> isn't enough; what separates it from
   // listing prose is that it lives in form controls, which listing prose
-  // never does. We also explicitly ignore guest reviews so traveler reviews
-  // are never mistaken for host policy. So walk text nodes and skip those subtrees.
-  const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], [data-stid*="review" i], [class*="review" i], [id*="review" i], [data-section-type*="review" i], [data-stid*="Review"], [data-stid*="ratings-and-reviews"], #vdp-panel';
+  // never does. So walk text nodes and skip those subtrees.
+  const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], #vdp-panel';
 
   function collectDomPetSentences() {
     const root = document.querySelector("main") || document.body;

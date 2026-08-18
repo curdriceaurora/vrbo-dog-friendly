@@ -59,14 +59,9 @@
 
     let nextHeader = headerCtx;
     let nextSection = sectionCtx;
-
-    // Skip guest reviews / ratings subtrees completely (guest opinions are not official host policy)
-    if (node.__typename && /review|rating|feedback/i.test(node.__typename)) return;
-
     const headerText = node?.header?.text;
     if (typeof headerText === "string" && headerText.trim()) {
       nextHeader = headerText.trim();
-      if (/reviews|ratings|guest\s+reviews|feedback/i.test(nextHeader)) return;
       // Track a coarser "section" label too (House Rules / About this
       // property / etc.) so we can point the user roughly the right way
       // even when the fine-grained header is something like "Pets".
@@ -76,7 +71,6 @@
     }
     if (typeof node.sectionName === "string" && node.sectionName.trim()) {
       nextHeader = node.sectionName.trim();
-      if (/reviews|ratings|guest\s+reviews|feedback/i.test(nextHeader)) return;
       if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
     }
 
