@@ -2,15 +2,19 @@
   <img src="icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
 </p>
 
-# <p align="center">Vrbow: Vrbo Dog Policy Callout</p>
+# Vrbow: Vrbo Dog Policy Callout
 
 <p align="center">
   <strong>A Chrome extension that extracts pet rules from Vrbo listings and shows them in a summary card.</strong>
 </p>
 
 <p align="center">
-  <img src="docs/panel-dog-friendly.png" alt="Callout showing max dogs 2, weight limit 50 lbs, pre-registration required" width="420">
+  <video src="docs/vrbow-demo.mp4" controls autoplay loop muted playsinline width="100%" poster="docs/panel-dog-friendly.png">
+    <a href="docs/vrbow-demo.mp4">Watch demo video</a>
+  </video>
 </p>
+
+---
 
 ## Problem
 
@@ -47,7 +51,7 @@ It shows a single summary card with all extracted pet policy details.
 - **Extra Notes**: Collects all other pet sentences (such as leash rules or breed limits) in an expandable drawer.
 - **Automatic Theme**: Uses a light or dark theme that follows your operating system preference.
 - **Local Operation**: Runs directly inside your browser. The extension does not send personal data or telemetry to external services.
-- **Search Badges & Tooltips**: Shows pet policy badges and hover summary dialogs directly on search result cards.
+- **Search Badges and Tooltips**: Shows pet policy badges and hover summary dialogs directly on search result cards.
 
 <p align="center">
   <img src="docs/panel-not-allowed.png" alt="Callout showing pets not allowed policy" width="420">
