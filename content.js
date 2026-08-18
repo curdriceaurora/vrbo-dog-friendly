@@ -535,10 +535,24 @@
     const entries = raw.entries || policy.entries;
     const found = raw.found ?? policy.found ?? policy.restrictionsFound;
     const usedApollo = entries && entries.some((e) => e.priority > 1);
+
+    const calloutSources = [
+      raw.petsAllowedSource,
+      raw.maxDogsSource,
+      raw.weightSource,
+      raw.preRegSource,
+      raw.feeSource,
+      raw.depositSource,
+    ].filter(Boolean);
+
+    const hasReviewCallout = calloutSources.some((s) => /review|rating/i.test(s));
+
     const sourceBadge = found
-      ? usedApollo
-        ? "Source: listing data (incl. collapsed/lazy sections)"
-        : "Source: visible page text only"
+      ? hasReviewCallout
+        ? "Source: review"
+        : usedApollo
+          ? "Source: listing data (incl. collapsed/lazy sections)"
+          : "Source: visible page text only"
       : "";
 
     panel.innerHTML = `
