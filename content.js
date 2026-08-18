@@ -744,19 +744,35 @@
       (document.body || document.documentElement).appendChild(searchTooltipEl);
     }
 
+    const VIEWPORT_DWELL_MS = 400;
+
     if (!searchCardObserver) {
       searchCardObserver = new IntersectionObserver((entries) => {
         for (const entry of entries) {
+          const card = entry.target;
           if (entry.isIntersecting) {
-            const card = entry.target;
-            const propId = card.getAttribute("data-vdp-prop-id");
-            const fetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
-            if (propId && fetchUrl && searchQueue) {
-              enqueueSearch(propId, fetchUrl, "normal");
+            if (card._vdpDwellTimer) {
+              clearTimeout(card._vdpDwellTimer);
+              card._vdpDwellTimer = null;
+            }
+            // Dwell debounce: only enqueue after card remains in viewport for VIEWPORT_DWELL_MS
+            card._vdpDwellTimer = setTimeout(() => {
+              card._vdpDwellTimer = null;
+              const propId = card.getAttribute("data-vdp-prop-id");
+              const fetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+              if (propId && fetchUrl && searchQueue && card.isConnected) {
+                enqueueSearch(propId, fetchUrl, "normal");
+              }
+            }, VIEWPORT_DWELL_MS);
+          } else {
+            // Scrolled out of viewport before dwell threshold: cancel background request
+            if (card._vdpDwellTimer) {
+              clearTimeout(card._vdpDwellTimer);
+              card._vdpDwellTimer = null;
             }
           }
         }
-      }, { rootMargin: "200px 0px" });
+      }, { rootMargin: "150px 0px" });
     }
 
     scanSearchCards();
@@ -778,6 +794,10 @@
     for (const b of badges) b.remove();
     const cards = document.querySelectorAll("[data-vdp-prop-id]");
     for (const c of cards) {
+      if (c._vdpDwellTimer) {
+        clearTimeout(c._vdpDwellTimer);
+        c._vdpDwellTimer = null;
+      }
       if (c._vdpUnsub) {
         c._vdpUnsub();
         c._vdpUnsub = null;
@@ -824,7 +844,11 @@
       return;
     }
 
-    // Clean up previous subscription if card was recycled
+    // Clean up previous subscription and dwell timer if card was recycled
+    if (card._vdpDwellTimer) {
+      clearTimeout(card._vdpDwellTimer);
+      card._vdpDwellTimer = null;
+    }
     if (card._vdpUnsub) {
       card._vdpUnsub();
       card._vdpUnsub = null;
@@ -975,6 +999,11 @@
 
   function onBadgeHover(badge, propId, fetchUrl, navUrl, isHighPriority) {
     clearTooltipLeaveTimer();
+    const parentCard = badge.closest ? badge.closest("[data-vdp-prop-id]") : null;
+    if (parentCard && parentCard._vdpDwellTimer) {
+      clearTimeout(parentCard._vdpDwellTimer);
+      parentCard._vdpDwellTimer = null;
+    }
     if (isHighPriority && searchQueue) {
       enqueueSearch(propId, fetchUrl, "high");
     }

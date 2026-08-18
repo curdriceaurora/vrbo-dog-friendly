@@ -80,111 +80,69 @@ async function inspectStressSearchUrl(ws, url, label) {
   await evalCdp(ws, `window.location.href = ${JSON.stringify(url)};`);
   await sleep(7000);
 
-  // 2. Tap "Zoom out" on the map ONCE to expand search bounds and reload results
-  console.log("Tapping map 'Zoom out' once to expand results boundary and trigger reload...");
-  const zoomOutResult = await evalCdp(ws, `(() => {
+  // 2. Real-time realistic user session: Tap Zoom Out -> Immediately browse, scroll & hover
+  console.log("Executing realistic user flow: Click Zoom Out -> Immediately scroll & hover target cards...");
+  const sessionResult = await evalCdp(ws, `(async () => {
+    const targetIndices = [1, 3, 8, 21, 50];
+    const targetedResults = [];
+    const t0 = performance.now();
+
+    // 1. Tap Zoom out ONCE
     const zoomOutBtn = document.querySelector('button[aria-label="Zoom out"], button[title="Zoom out"], div.gm-style > div:nth-of-type(5) button:nth-of-type(2)');
+    let zoomClicked = false;
     if (zoomOutBtn) {
       zoomOutBtn.click();
-      return { clicked: true, tag: "BUTTON", ariaLabel: zoomOutBtn.getAttribute("aria-label") };
+      zoomClicked = true;
+    } else {
+      const allMapBtns = Array.from(document.querySelectorAll('.gm-style button, button[aria-label*="zoom" i]'));
+      if (allMapBtns.length >= 2) {
+        allMapBtns[1].click();
+        zoomClicked = true;
+      }
     }
-    const allMapBtns = Array.from(document.querySelectorAll('.gm-style button, button[aria-label*="zoom" i]'));
-    if (allMapBtns.length >= 2) {
-      allMapBtns[1].click();
-      return { clicked: true, tag: "BUTTON", index: 1 };
-    }
-    return { clicked: false, totalMapBtns: allMapBtns.length };
-  })()`);
-  console.log("Zoom out tap result:", JSON.stringify(zoomOutResult));
 
-  // Realistic human pacing: immediate scroll start after map tap (500ms reaction time)
-  await sleep(500);
+    // Realistic human reaction time: 300ms reaction time before first interaction
+    await new Promise(r => setTimeout(r, 300));
 
-  // 3. Progressive realistic human scrolling down the feed
-  console.log("Simulating immediate human scroll down the results feed...");
-  let cardCount = 0;
-  for (let scrollStep = 1; scrollStep <= 15; scrollStep++) {
-    await evalCdp(ws, `window.scrollBy(0, window.innerHeight * 0.8);`);
-    await sleep(400); // 400ms realistic human scroll cadence
-
-    cardCount = await evalCdp(ws, `document.querySelectorAll('[data-vdp-prop-id]').length`) || 0;
-    if (cardCount >= 50) break;
-
-    // Check if there is a "Show more results" button to click
-    await evalCdp(ws, `(() => {
-      const btns = Array.from(document.querySelectorAll('button'));
-      const showMore = btns.find(b => /show more|see more|load more/i.test(b.textContent));
-      if (showMore) showMore.click();
-    })()`);
-  }
-
-  console.log(`Total Vrbow-stamped cards mounted: ${cardCount}`);
-  // Short pause (4s) for in-flight requests as user reviews the feed
-  await sleep(4000);
-
-  // 3. Capture aggregate queue, memory, and performance metrics
-  const performanceMetrics = await evalCdp(ws, `(() => {
-    const memory = performance && performance.memory ? {
-      usedJSHeapSizeMB: (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(2),
-      totalJSHeapSizeMB: (performance.memory.totalJSHeapSize / (1024 * 1024)).toFixed(2)
-    } : { note: "performance.memory not available in context" };
-
-    const badges = Array.from(document.querySelectorAll('.vdp-search-badge'));
-    const statusCounts = {};
-    const sourceBreakdown = {};
-
-    badges.forEach(b => {
-      const status = b.dataset.vdpStatus || 'unknown';
-      const source = b.dataset.vdpSource || 'unknown';
-      statusCounts[status] = (statusCounts[status] || 0) + 1;
-      sourceBreakdown[source] = (sourceBreakdown[source] || 0) + 1;
-    });
-
-    return {
-      totalCards: badges.length,
-      statusCounts,
-      sourceBreakdown,
-      memory
-    };
-  })()`);
-
-  console.log("\nAggregate Performance & Queue Status Across Entire Page:");
-  console.log(JSON.stringify(performanceMetrics, null, 2));
-
-  // 4. Target specific listings: 1, 3, 8, 21, 50
-  const targetedResults = await evalCdp(ws, `(async () => {
-    const targetIndices = [1, 3, 8, 21, 50];
-    const allCards = Array.from(document.querySelectorAll('[data-vdp-prop-id]'));
-    const out = [];
-
+    // Interleaved realistic scroll & hover loop
     for (const targetIdx of targetIndices) {
       const zeroIdx = targetIdx - 1;
-      const card = allCards[zeroIdx];
+
+      // Scroll progressively until the target card is mounted
+      let cards = Array.from(document.querySelectorAll('[data-vdp-prop-id]'));
+      let scrollAttempts = 0;
+      while (cards.length < targetIdx && scrollAttempts < 15) {
+        scrollAttempts++;
+        window.scrollBy(0, window.innerHeight * 0.8);
+        await new Promise(r => setTimeout(r, 350));
+        const showMore = Array.from(document.querySelectorAll('button')).find(b => /show more|see more|load more/i.test(b.textContent));
+        if (showMore) showMore.click();
+        const prevCount = cards.length;
+        cards = Array.from(document.querySelectorAll('[data-vdp-prop-id]'));
+        if (cards.length === prevCount && scrollAttempts > 3) break;
+      }
+
+      const card = cards[zeroIdx];
+      const elapsedSec = ((performance.now() - t0) / 1000).toFixed(2);
+
       if (!card) {
-        out.push({
+        targetedResults.push({
           targetIndex: targetIdx,
           found: false,
-          note: "Index exceeds available cards on page (Total cards: " + allCards.length + ")"
+          elapsedSinceZoomSec: elapsedSec,
+          note: "Index exceeds available cards on page (Total cards: " + cards.length + ")"
         });
         continue;
       }
 
+      // Scroll target into view
+      card.scrollIntoView({ behavior: 'instant', block: 'center' });
+      await new Promise(r => setTimeout(r, 150));
+
       const propId = card.getAttribute('data-vdp-prop-id');
       const badge = card.querySelector('.vdp-search-badge');
       const link = card.querySelector('a[href*="/"]');
-      let cleanUrl = null;
-      if (link && link.href) {
-        try {
-          const u = new URL(link.href);
-          cleanUrl = u.origin + u.pathname;
-        } catch {
-          cleanUrl = link.href.split('?')[0];
-        }
-      }
-
-      // Scroll card into view and hover badge to activate high-priority queue resolution
-      card.scrollIntoView({ behavior: 'instant', block: 'center' });
-      await new Promise(r => setTimeout(r, 300));
+      let cleanUrl = link && link.href ? link.href.split('?')[0] : null;
 
       let tooltipRows = [];
       let tooltipNotes = [];
@@ -192,14 +150,14 @@ async function inspectStressSearchUrl(ws, url, label) {
       if (badge) {
         badge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
 
-        // Wait up to 5s for on-hover resolution if currently loading / capped
-        for (let w = 0; w < 10; w++) {
+        // Wait up to 4s for high-priority on-hover resolution
+        for (let w = 0; w < 8; w++) {
           if (badge.dataset.vdpStatus && badge.dataset.vdpStatus !== 'loading') break;
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 300));
         }
 
-        // Wait for async getCached / renderTooltipContent to populate dialog DOM
-        await new Promise(r => setTimeout(r, 600));
+        // Allow async tooltip DOM update to finish
+        await new Promise(r => setTimeout(r, 300));
 
         const activeTooltip = document.querySelector('#vdp-search-tooltip');
         if (activeTooltip && activeTooltip.style.display !== 'none') {
@@ -217,14 +175,15 @@ async function inspectStressSearchUrl(ws, url, label) {
         }
 
         badge.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }));
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 150));
       }
 
-      out.push({
+      targetedResults.push({
         targetIndex: targetIdx,
         actualPosition: zeroIdx + 1,
         propId,
         url: cleanUrl,
+        elapsedSinceZoomSec: elapsedSec,
         badgeText: badge ? badge.textContent.trim() : null,
         badgeClass: badge ? badge.className : null,
         badgeStatus: badge ? (badge.dataset.vdpStatus || 'unknown') : null,
@@ -234,13 +193,38 @@ async function inspectStressSearchUrl(ws, url, label) {
       });
     }
 
-    return out;
+    // Capture post-flow performance & memory metrics
+    const memory = performance && performance.memory ? {
+      usedJSHeapSizeMB: (performance.memory.usedJSHeapSize / (1024 * 1024)).toFixed(2),
+      totalJSHeapSizeMB: (performance.memory.totalJSHeapSize / (1024 * 1024)).toFixed(2)
+    } : {};
+
+    const badges = Array.from(document.querySelectorAll('.vdp-search-badge'));
+    const statusCounts = {};
+    const sourceBreakdown = {};
+    badges.forEach(b => {
+      const status = b.dataset.vdpStatus || 'unknown';
+      const source = b.dataset.vdpSource || 'unknown';
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+      sourceBreakdown[source] = (sourceBreakdown[source] || 0) + 1;
+    });
+
+    return {
+      zoomClicked,
+      performanceMetrics: {
+        totalCards: badges.length,
+        statusCounts,
+        sourceBreakdown,
+        memory
+      },
+      targetedResults
+    };
   })()`);
 
-  return {
-    performanceMetrics,
-    targetedResults
-  };
+  console.log("\nTargeted Results & Post-Flow Metrics:");
+  console.log(JSON.stringify(sessionResult, null, 2));
+
+  return sessionResult;
 }
 
 async function main() {
