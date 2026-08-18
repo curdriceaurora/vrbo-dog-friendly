@@ -86,10 +86,10 @@ When you visit a listing on `vrbo.com`, the policy card opens in the bottom-righ
 
 ### 3. Search Results Badging & Hover Tooltips
 When you browse search results on `vrbo.com`:
-- **Inline Badges**: The extension shows a compact badge on each search card (such as `🐾 Dogs allowed (2 dogs · ≤50 lbs)` or `🚫 Pets not allowed`).
-- **Hover Tooltip**: Hover over any badge or focus it with your keyboard to open a floating summary card.
-- **Throttled Retrieval**: The extension fetches listing details with a controlled queue to prevent rate limits.
-- **24-Hour Cache**: Extracted policies are stored locally for 24 hours for instant loading.
+- **Inline Badges**: The extension shows a compact badge on each search card (such as `🐾 Max 2 dogs allowed · 50 lbs · $150/stay`, `🐾 Dogs allowed · 1st free · $25/add'l/stay`, or `🚫 Pets not allowed`).
+- **Hover Tooltip**: Hover over any badge or focus it with your keyboard to open a floating summary dialog with detailed pet policies, fees, deposits, and source information.
+- **Throttled Retrieval**: The extension fetches listing details with a controlled queue (maximum 2 requests, 400 ms safety delay) to prevent rate limits.
+- **Fast Path & 24-Hour Cache**: Instantly reads search-page Apollo state when available and stores extracted policies locally in `chrome.storage.local` for 24 hours.
 
 ---
 

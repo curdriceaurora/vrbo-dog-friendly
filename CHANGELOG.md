@@ -2,23 +2,25 @@
 
 This document records all changes to **Vrbow**.
 
-## [v1.2.0] - In Development
+## [v1.2.0] - 2026-08-18
 
-### Search Results Badging and Tooltip (Issues #13 & #14)
-- **Inline Card Badging**: Injects compact dog policy badges into property cards on Vrbo search pages (`Hotel-Search`, `/search`).
-- **Accessible Hover and Focus Tooltip**: Displays a floating policy summary card when you hover over or focus any search card badge. Supports keyboard navigation (`tabindex`, `Escape` to close).
-- **Throttled Background Queue**: Enqueues visible search cards with controlled concurrency (maximum 2 requests, 400 ms delay) to prevent bot challenges.
+### Search Results Badging & Accessible Tooltips
+- **Inline Card Badging**: Injects compact dog policy badges into property cards on Vrbo search pages (`Hotel-Search`, `/search`) with dynamic phrasing (`Max 1 dog allowed`, `Max 2 dogs allowed`, `Dogs allowed`, `Pets not allowed`, `Pet restrictions`).
+- **Accessible Hover & Focus Tooltip**: Displays a floating policy summary dialog when you hover over or focus any search card badge. Fully accessible per WCAG 2.1 AA (`role="dialog"`, non-modal semantics, focus trap, and `Escape` dismiss).
+- **Search-Page Apollo Fast Path**: Instantly resolves property cards directly from the search page's existing Apollo GraphQL cache (`PropertyInfo:<id>`) synchronously before issuing background requests.
+- **Throttled Background Queue**: Enqueues visible search cards in viewport with controlled concurrency (maximum 2 requests, 400 ms safety delay) with 400 ms dwell debouncing.
 - **Bot Challenge Protection**: Automatically pauses the fetch queue for 30 seconds if a 429 status or challenge is detected.
-- **Persistent Local Cache**: Caches parsed policies in `chrome.storage.local` with a 24-hour TTL for instant subsequent rendering with zero network requests.
-- **Search-Page Apollo Fast Path**: Resolves property cards directly from the search page's own `__APOLLO_STATE__` (`PropertyInfo:<id>` records) before issuing any listing-page request, skipping the fetch entirely when a concrete policy is already on the page. Falls through to the queue when no usable record exists.
+- **Persistent Local Cache & 24-Hour Maintenance**: Caches parsed policies in `chrome.storage.local` with strict schema serialization, plus automatic background maintenance sweeps on startup and every 24 hours.
 
----
+### Policy Extraction & Attributions
+- **Tiered Pet Fee Support**: Intelligently parses tiered pricing models (e.g. *"First dog free, each subsequent dog is $25"*), correctly distinguishing allowance from fixed limits and rendering tiered fee structures accurately across search badges, tooltips, and listing panels.
+- **Multi-Clause Max Dogs Parsing**: Preserves legitimate maximum dog limits in sentences containing additional/extra pet rules (e.g. *"We allow up to 2 dogs; each additional dog is $25 per night"*).
+- **Granular Section Attribution**: Notes and callout sources now identify specific Vrbo listing sections (*House Rules / Policies*, *About this property*, *Property amenities*, *Guest reviews*).
+- **Mixed Source Attribution**: Distinguishes listing data, visible text, and guest review signals (e.g., *"Source: listing data + review"*).
 
-## [Unreleased]
-
-### Theme System
-- Added shared semantic color tokens for the listing panel and toolbar popup.
-- Added automatic light and dark themes with accessible policy-state and focus colors.
+### Theme & Design System
+- **Unified Semantic Token Architecture**: Shared CSS variables across listing panel, search badge, search tooltip, and toolbar popup with 0 component-level color literals.
+- **Automatic Dark Mode & High Contrast**: Follows operating system `prefers-color-scheme` dynamically and supports `@media (forced-colors: active)`. All text meets or exceeds WCAG AA contrast standards.
 
 ---
 
