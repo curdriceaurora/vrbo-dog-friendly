@@ -45,7 +45,7 @@ function readScript(rel) {
   return fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 
-async function startChrome(port, extensionDir) {
+async function startChrome(port, extensionDir, startUrl) {
   const binary = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "vrbow-search-"));
   const isTesting = /testing|chromium/i.test(binary);
@@ -63,7 +63,7 @@ async function startChrome(port, extensionDir) {
     args.push(`--disable-extensions-except=${extensionDir}`);
   }
 
-  args.push("about:blank");
+  args.push(startUrl || DEFAULT_SEARCH_URL);
 
   const proc = spawn(binary, args, { stdio: ["ignore", "ignore", "ignore"] });
   proc.unref();
@@ -107,9 +107,13 @@ class CdpConnection {
 
   send(method, params = {}) {
     const id = this.id++;
+    const cleanParams = {};
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined) cleanParams[k] = v;
+    }
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      this.ws.send(JSON.stringify({ id, method, params: cleanParams }));
     });
   }
 
@@ -120,8 +124,12 @@ class CdpConnection {
 
 async function run() {
   const port = 9333;
+  const searchUrl = process.argv.includes("--url")
+    ? process.argv[process.argv.indexOf("--url") + 1]
+    : DEFAULT_SEARCH_URL;
+
   console.log("Starting Chrome for search page verification...");
-  const { proc, userDataDir, mode } = await startChrome(port, ROOT);
+  const { proc, userDataDir, mode } = await startChrome(port, ROOT, searchUrl);
   console.log(`Chrome started (mode: ${mode}).`);
 
   let targetCdp = null;
@@ -129,7 +137,7 @@ async function run() {
   try {
     const listRes = await fetch(`http://127.0.0.1:${port}/json/list`);
     const targets = await listRes.json();
-    const pageTarget = targets.find((t) => t.type === "page") || targets[0];
+    const pageTarget = targets.find((t) => t.type === "page" && !t.url.startsWith("chrome-extension://") && !t.url.startsWith("chrome://")) || targets[0];
 
     targetCdp = new CdpConnection(pageTarget.webSocketDebuggerUrl);
     await targetCdp.open();
@@ -138,15 +146,37 @@ async function run() {
     await targetCdp.send("Runtime.enable");
     await targetCdp.send("DOM.enable");
 
-    const searchUrl = process.argv.includes("--url")
-      ? process.argv[process.argv.indexOf("--url") + 1]
-      : DEFAULT_SEARCH_URL;
-
     console.log(`Navigating to search URL: ${searchUrl}`);
     await targetCdp.send("Page.navigate", { url: searchUrl });
 
-    console.log("Waiting for search results to load (12s)...");
-    await sleep(12000);
+    console.log("Waiting for search page and property cards to load...");
+    let cardsMounted = false;
+    for (let i = 0; i < 30; i++) {
+      await sleep(1000);
+      const readyRes = await targetCdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const cards = document.querySelectorAll('[data-stid="property-card"], [data-stid="lodging-card-responsive"], .uitk-card, a[href*="/"]');
+          const title = document.title;
+          const href = location.href;
+          return { ready: document.readyState, count: cards.length, title, href };
+        })()`,
+        returnByValue: true,
+      });
+      const val = readyRes.result?.value;
+      if (val && val.count > 5) {
+        console.log(`Property cards mounted (${i + 1}s): ${val.count} candidates found on "${val.title}" (${val.href})`);
+        cardsMounted = true;
+        break;
+      }
+    }
+
+    if (!cardsMounted) {
+      const diagRes = await targetCdp.send("Runtime.evaluate", {
+        expression: `({ title: document.title, href: location.href, bodySnippet: document.body?.innerText?.slice(0, 400) })`,
+        returnByValue: true,
+      });
+      console.warn("⚠️ Property cards were slow or not found:", JSON.stringify(diagRes.result?.value, null, 2));
+    }
 
     // Click the "Pets allowed" filter in the search results sidebar if available
     console.log("Ensuring 'Pets allowed' filter is applied in search results...");
@@ -192,7 +222,10 @@ async function run() {
       });
 
       for (const file of ["extract.js", "search-fetcher.js", "content.js"]) {
-        await targetCdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
+        const evalRes = await targetCdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
+        if (evalRes.exceptionDetails) {
+          console.error(`❌ Exception evaluating ${file}:`, evalRes.exceptionDetails);
+        }
       }
     }
 

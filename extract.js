@@ -342,18 +342,53 @@
     return result;
   }
 
+  const CURRENCY_MAP = {
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "A$": "AUD",
+    "AUD": "AUD",
+    "CA$": "CAD",
+    "CAD": "CAD",
+    "NZ$": "NZD",
+    "NZD": "NZD",
+  };
+
+  function normalizeCurrencyCode(symbolOrCode) {
+    if (!symbolOrCode) return "USD";
+    const clean = String(symbolOrCode).trim().toUpperCase();
+    return CURRENCY_MAP[symbolOrCode] || CURRENCY_MAP[clean] || clean;
+  }
+
+  function formatCurrencyDisplay(amount, currency = "USD") {
+    if (typeof amount !== "number") return "";
+    const code = normalizeCurrencyCode(currency);
+    const symbolMap = {
+      USD: "$",
+      EUR: "€",
+      GBP: "£",
+      JPY: "¥",
+      AUD: "A$",
+      CAD: "CA$",
+      NZD: "NZ$",
+    };
+    const sym = symbolMap[code] || `${code} `;
+    return `${sym}${amount}`;
+  }
+
   function normalizePolicy(extracted, propertyId = null, source = "search-response") {
     if (!extracted) return null;
 
     // 1. Weight limit normalization
     let weightLimit = null;
     if (extracted.weightPerDog) {
-      const wm = String(extracted.weightPerDog).match(/(\d+)\s*(lbs?|kg)/i);
+      const wm = String(extracted.weightPerDog).match(/(\d+(?:\.\d+)?)\s*(lbs?|kg)/i);
       if (wm) {
-        const val = parseInt(wm[1], 10);
+        const val = parseFloat(wm[1]);
         const isKg = /kg/i.test(wm[2]);
         const unit = isKg ? "kg" : "lb";
-        const pounds = isKg ? Math.round(val * 2.20462) : val;
+        const pounds = isKg ? val * 2.20462262 : val;
         weightLimit = { value: val, unit, pounds };
       }
     }
@@ -361,11 +396,10 @@
     // 2. Fee normalization
     let fee = null;
     if (extracted.fee && extracted.fee !== "No fee mentioned") {
-      const fm = String(extracted.fee).match(/([$€£¥A-Z]{1,3})?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(stay|night|pet|day))?/i);
+      const fm = String(extracted.fee).match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(stay|night|pet|day))?/i);
       if (fm) {
         const curSym = fm[1] || "$";
-        const curMap = { "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "CAD": "CAD", "AUD": "AUD" };
-        const currency = curMap[curSym] || curSym;
+        const currency = normalizeCurrencyCode(curSym);
         const amount = parseFloat(fm[2]);
         const period = fm[3] ? (fm[3].toLowerCase() === "day" ? "night" : fm[3].toLowerCase()) : "unknown";
         fee = { amount, currency, period };
@@ -377,28 +411,39 @@
     // 3. Deposit normalization
     let deposit = null;
     if (extracted.deposit) {
-      const dm = String(extracted.deposit).match(/([$€£¥A-Z]{1,3})?\s*(\d+(?:\.\d+)?)/i);
+      const dm = String(extracted.deposit).match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)/i);
       if (dm) {
         const curSym = dm[1] || "$";
-        const curMap = { "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY", "CAD": "CAD", "AUD": "AUD" };
-        const currency = curMap[curSym] || curSym;
+        const currency = normalizeCurrencyCode(curSym);
         const amount = parseFloat(dm[2]);
         deposit = { amount, currency };
       }
     }
 
-    // 4. Contradictions mapping
+    // 4. Notes-only restrictions tracking
+    const otherNotes = Array.isArray(extracted.otherNotes) ? extracted.otherNotes : [];
+    const restrictionNoteCount = otherNotes.length;
+    const restrictionsFound = Boolean(
+      extracted.preReg ||
+      restrictionNoteCount > 0 ||
+      weightLimit ||
+      fee ||
+      extracted.maxDogs ||
+      extracted.petsAllowed === true
+    );
+
+    // 5. Contradictions mapping
     const contradictions = {
       maxDogs: Boolean(extracted.maxDogsAlternates && extracted.maxDogsAlternates.length > 0),
       weightLimit: Boolean(extracted.weightAlternates && extracted.weightAlternates.length > 0),
       fee: Boolean(extracted.feeAlternates && extracted.feeAlternates.length > 0),
     };
 
-    // 5. Confidence rating
+    // 6. Confidence rating
     let confidence = "low";
     if (extracted.petsAllowed !== null) {
       confidence = (weightLimit || fee || extracted.maxDogs) ? "high" : "medium";
-    } else if (extracted.preReg || (extracted.otherNotes && extracted.otherNotes.length > 0)) {
+    } else if (extracted.preReg || restrictionNoteCount > 0) {
       confidence = "medium";
     }
 
@@ -410,6 +455,8 @@
       fee,
       deposit,
       approvalRequired: extracted.preReg ? true : (extracted.preReg === false ? false : null),
+      restrictionsFound,
+      restrictionNoteCount,
       contradictions,
       confidence,
       source: source || "search-response",
@@ -441,8 +488,8 @@
     if (policy.petsAllowed === true) {
       const details = [];
       if (policy.maxDogs) details.push(`Max ${policy.maxDogs}`);
-      if (policy.weightLimit) details.push(`${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}`);
-      if (policy.fee && policy.fee.amount > 0) details.push(`$${policy.fee.amount} pet fee`);
+      if (policy.weightLimit) details.push(`${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}`);
+      if (policy.fee && policy.fee.amount > 0) details.push(`${formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)} pet fee`);
       if (policy.approvalRequired && details.length < 2) details.push("Approval required");
 
       const detailStr = details.length ? ` · ${details.slice(0, 2).join(" · ")}` : "";
@@ -458,12 +505,12 @@
       return {
         statusKey: "allowed",
         icon: "🐾",
-        text: "Dogs allowed · Approval required",
+        text: "Pet restrictions · Approval required",
         className: "vdp-search-badge vdp-badge-allowed",
       };
     }
 
-    if (policy.weightLimit || policy.fee || policy.maxDogs) {
+    if (policy.restrictionsFound || policy.weightLimit || policy.fee || policy.maxDogs || policy.restrictionNoteCount > 0) {
       return {
         statusKey: "allowed",
         icon: "🐾",

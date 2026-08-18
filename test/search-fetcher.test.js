@@ -146,10 +146,11 @@ test("search-fetcher queue and caching", async (t) => {
     const mockStorage = {
       store: {
         "vrbow_cache_old": {
-          version: 1,
+          cacheVersion: 1,
           propertyId: "old",
-          data: { status: "ok", policy: { petsAllowed: true } },
-          ts: Date.now() - (48 * 60 * 60 * 1000),
+          storedAt: Date.now() - (48 * 60 * 60 * 1000),
+          expiresAt: Date.now() - (24 * 60 * 60 * 1000),
+          data: { status: "ok", policy: { schemaVersion: 2, petsAllowed: true } },
         },
       },
       get(keys, cb) {
@@ -203,6 +204,102 @@ test("search-fetcher queue and caching", async (t) => {
 
     assert.equal(startedCount, 1);
     assert.equal(queue.isPaused(), true);
+    queue.dispose();
+  });
+
+  await t.test("prioritizes high-priority items and promotes existing queued items on hover", async () => {
+    const executionOrder = [];
+    const mockFetch = async (url) => {
+      const id = url.split("/").pop();
+      executionOrder.push(id);
+      await new Promise((r) => setTimeout(r, 20));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>Pets welcome</section>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 1,
+      minDelayMs: 15,
+    });
+
+    // Enqueue a, b, c in order
+    queue.enqueue("a", "https://www.vrbo.com/a", "normal");
+    queue.enqueue("b", "https://www.vrbo.com/b", "normal");
+    queue.enqueue("c", "https://www.vrbo.com/c", "normal");
+
+    // Promote 'c' on hover while 'a' is in flight
+    queue.enqueue("c", "https://www.vrbo.com/c", "high");
+
+    await new Promise((r) => setTimeout(r, 250));
+
+    // Order must be a (in-flight) -> c (promoted high) -> b (normal)
+    assert.deepEqual(executionOrder, ["a", "c", "b"], `Expected [a, c, b], got ${JSON.stringify(executionOrder)}`);
+    queue.dispose();
+  });
+
+  await t.test("cache validates cacheVersion and policy schemaVersion, discarding obsolete envelopes", async () => {
+    const removedKeys = [];
+    const mockStorage = {
+      store: {
+        "vrbow_cache_valid": {
+          cacheVersion: 1,
+          propertyId: "valid",
+          storedAt: Date.now() - 1000,
+          expiresAt: Date.now() + 100000,
+          data: {
+            status: "ok",
+            policy: {
+              schemaVersion: 2,
+              petsAllowed: true,
+            },
+          },
+        },
+        "vrbow_cache_obsolete_schema": {
+          cacheVersion: 1,
+          propertyId: "obsolete_schema",
+          storedAt: Date.now() - 1000,
+          expiresAt: Date.now() + 100000,
+          data: {
+            status: "ok",
+            policy: {
+              schemaVersion: 1, // Obsolete
+              petsAllowed: true,
+            },
+          },
+        },
+      },
+      get(keys, cb) {
+        const res = {};
+        for (const k of keys) {
+          if (this.store[k]) res[k] = this.store[k];
+        }
+        cb(res);
+      },
+      remove(keys, cb) {
+        for (const k of keys) {
+          delete this.store[k];
+          removedKeys.push(k);
+        }
+        cb && cb();
+      },
+    };
+
+    const queue = createSearchFetchQueue({
+      storage: mockStorage,
+    });
+
+    const validHit = await queue.getCached("valid");
+    assert.ok(validHit !== null, "Valid schemaVersion: 2 should hit cache");
+    assert.equal(validHit.policy.petsAllowed, true);
+
+    const obsoleteHit = await queue.getCached("obsolete_schema");
+    assert.equal(obsoleteHit, null, "Obsolete policy schema should be treated as cache miss");
+    assert.ok(removedKeys.includes("vrbow_cache_obsolete_schema"), "Obsolete entry must be pruned");
+
     queue.dispose();
   });
 });

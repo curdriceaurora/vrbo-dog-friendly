@@ -390,12 +390,13 @@
     let rowsHtml = "";
     let headline = "";
     let headlineTone = "neutral";
+    const raw = policy._raw || policy;
 
     if (policy.petsAllowed === false) {
       headline = "🚫 Pets are not allowed";
       headlineTone = "bad";
-      rowsHtml = row("Policy", "No pets allowed", "bad", policy.petsAllowedSnippet, policy.petsAllowedSource);
-    } else if (!policy.found) {
+      rowsHtml = row("Policy", "No pets allowed", "bad", raw.petsAllowedSnippet, raw.petsAllowedSource);
+    } else if (!raw.found && !policy.restrictionsFound) {
       headline = "🐾 No dog policy details detected";
       headlineTone = "unknown";
       rowsHtml = `<div class="vdp-empty">This page didn't mention pets/dogs in its listing data or visible text. Try Rescan after the page fully loads, or check House Rules manually.</div>`;
@@ -407,41 +408,48 @@
         "Max dogs",
         policy.maxDogs !== null ? `${policy.maxDogs}` : "Not specified",
         policy.maxDogs !== null ? "good" : "unknown",
-        policy.maxDogsSnippet,
-        policy.maxDogsSource,
-        policy.maxDogsAlternates
+        raw.maxDogsSnippet,
+        raw.maxDogsSource,
+        raw.maxDogsAlternates
       );
       rowsHtml += row(
         "Weight limit",
-        policy.weightPerDog || "Not specified",
-        policy.weightPerDog ? "good" : "unknown",
-        policy.weightSnippet,
-        policy.weightSource,
-        policy.weightAlternates
+        policy.weightLimit ? `${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified"),
+        policy.weightLimit || raw.weightPerDog ? "good" : "unknown",
+        raw.weightSnippet,
+        raw.weightSource,
+        raw.weightAlternates
       );
       rowsHtml += row(
         "Pre-registration",
-        policy.preReg ? "Required" : "Not mentioned",
-        policy.preReg ? "warn" : "unknown",
-        policy.preRegSnippet,
-        policy.preRegSource
+        (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned",
+        (policy.approvalRequired || raw.preReg) ? "warn" : "unknown",
+        raw.preRegSnippet,
+        raw.preRegSource
       );
+      const feeDisplay = policy.fee && policy.fee.amount !== null
+        ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}` : `$${policy.fee.amount}`)
+        : (raw.fee || "Not specified");
       rowsHtml += row(
         "Fee",
-        policy.fee || "Not specified",
-        policy.fee && policy.fee !== "No fee mentioned" ? "warn" : policy.fee === "No fee mentioned" ? "good" : "unknown",
-        policy.feeSnippet,
-        policy.feeSource,
-        policy.feeAlternates
+        feeDisplay,
+        policy.fee && policy.fee.amount > 0 ? "warn" : policy.fee && policy.fee.amount === 0 ? "good" : (raw.fee && raw.fee !== "No fee mentioned" ? "warn" : "unknown"),
+        raw.feeSnippet,
+        raw.feeSource,
+        raw.feeAlternates
       );
-      if (policy.deposit) {
-        rowsHtml += row("Refundable deposit", policy.deposit, "warn", policy.depositSnippet, policy.depositSource);
+      if (policy.deposit || raw.deposit) {
+        const depDisplay = policy.deposit && policy.deposit.amount !== null
+          ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? VDPExtract.formatCurrencyDisplay(policy.deposit.amount, policy.deposit.currency) : `$${policy.deposit.amount}`)
+          : raw.deposit;
+        rowsHtml += row("Refundable deposit", depDisplay, "warn", raw.depositSnippet, raw.depositSource);
       }
 
-      if (policy.otherNotes.length) {
-        rowsHtml += `<div class="vdp-other-toggle">Other pet notes (${policy.otherNotes.length}) ▾</div>
+      const notes = raw.otherNotes || [];
+      if (notes.length) {
+        rowsHtml += `<div class="vdp-other-toggle">Other pet notes (${notes.length}) ▾</div>
           <div class="vdp-other-list">
-            ${policy.otherNotes
+            ${notes
               .map((n) => `<div class="vdp-other-item">"${escapeHtml(n.text)}" <span class="vdp-other-source">— ${escapeHtml(n.source)}</span></div>`)
               .join("")}
           </div>`;
@@ -533,10 +541,14 @@
         entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
       }
       if (location.href !== startUrl) return;
-      const policy = extractPolicy(entries);
-      window.__vdpLastPolicy = policy;
-      chrome.storage?.local?.set?.({ vdpLastPolicy: policy, vdpLastUrl: startUrl });
-      renderPanel(policy);
+      const rawPolicy = extractPolicy(entries);
+      const propId = getListingIdFromUrl(startUrl);
+      const canonicalPolicy = typeof VDPExtract?.normalizePolicy === "function"
+        ? VDPExtract.normalizePolicy(rawPolicy, propId, "listing-page")
+        : rawPolicy;
+      window.__vdpLastPolicy = canonicalPolicy;
+      chrome.storage?.local?.set?.({ vdpLastPolicy: canonicalPolicy, vdpLastUrl: startUrl });
+      renderPanel(canonicalPolicy);
     } finally {
       isScanning = false;
       if (pendingRescan) {

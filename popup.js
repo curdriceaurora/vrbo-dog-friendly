@@ -21,28 +21,38 @@ function renderPolicy(policy) {
     return;
   }
 
+  const raw = policy._raw || policy;
+
   if (policy.petsAllowed === false) {
     c.appendChild(el(`<div class="row"><span class="label">Policy</span><span class="value tone-bad">No pets allowed</span></div>`));
-    if (policy.petsAllowedSnippet) {
-      c.appendChild(el(`<div class="snippet">"${escapeHtml(policy.petsAllowedSnippet)}"</div>`));
+    if (raw.petsAllowedSnippet) {
+      c.appendChild(el(`<div class="snippet">"${escapeHtml(raw.petsAllowedSnippet)}"</div>`));
     }
     return;
   }
 
-  if (!policy.found) {
+  if (!raw.found && !policy.restrictionsFound) {
     c.appendChild(el(`<p class="muted">No dog policy details detected on this page yet. Try Rescan after the page fully loads, or check House Rules manually.</p>`));
     return;
   }
 
+  const maxDogsVal = policy.maxDogs !== null ? String(policy.maxDogs) : (raw.maxDogs !== null ? String(raw.maxDogs) : "Not specified");
+  const weightVal = policy.weightLimit ? `${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified");
+  const preRegVal = (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned";
+  const feeVal = policy.fee && policy.fee.amount !== null
+    ? `$${policy.fee.amount}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}`
+    : (raw.fee || "Not specified");
+
   const rows = [
-    ["Max dogs", policy.maxDogs !== null ? String(policy.maxDogs) : "Not specified", policy.maxDogs !== null ? "good" : "unknown"],
-    ["Weight limit", policy.weightPerDog || "Not specified", policy.weightPerDog ? "good" : "unknown"],
-    ["Pre-registration", policy.preReg ? "Required" : "Not mentioned", policy.preReg ? "warn" : "unknown"],
-    ["Fee", policy.fee || "Not specified", policy.fee && policy.fee !== "No fee mentioned" ? "warn" : policy.fee === "No fee mentioned" ? "good" : "unknown"],
+    ["Max dogs", maxDogsVal, maxDogsVal !== "Not specified" ? "good" : "unknown"],
+    ["Weight limit", weightVal, weightVal !== "Not specified" ? "good" : "unknown"],
+    ["Pre-registration", preRegVal, preRegVal === "Required" ? "warn" : "unknown"],
+    ["Fee", feeVal, policy.fee && policy.fee.amount > 0 ? "warn" : policy.fee && policy.fee.amount === 0 ? "good" : (raw.fee && raw.fee !== "No fee mentioned" ? "warn" : "unknown")],
   ];
 
-  if (policy.deposit) {
-    rows.push(["Refundable deposit", policy.deposit, "warn"]);
+  if (policy.deposit || raw.deposit) {
+    const depVal = policy.deposit && policy.deposit.amount !== null ? `$${policy.deposit.amount}` : raw.deposit;
+    rows.push(["Refundable deposit", depVal, "warn"]);
   }
 
   for (const [label, value, tone] of rows) {
@@ -51,8 +61,9 @@ function renderPolicy(policy) {
     );
   }
 
-  if (policy.otherNotes && policy.otherNotes.length) {
-    c.appendChild(el(`<p class="muted" style="margin-top:8px;">+ ${policy.otherNotes.length} other pet note(s) — see the on-page panel for details.</p>`));
+  const notes = raw.otherNotes || [];
+  if (notes.length) {
+    c.appendChild(el(`<p class="muted" style="margin-top:8px;">+ ${notes.length} other pet note(s) — see the on-page panel for details.</p>`));
   }
 }
 

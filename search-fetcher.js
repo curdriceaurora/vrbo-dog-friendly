@@ -11,7 +11,8 @@
   "use strict";
 
   const CACHE_PREFIX = "vrbow_cache_";
-  const CACHE_VERSION = 1;
+  const CACHE_RECORD_VERSION = 1;
+  const POLICY_SCHEMA_VERSION = 2;
   const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   const DEFAULT_CONCURRENCY = 2;
   const DEFAULT_MIN_DELAY_MS = 400;
@@ -148,6 +149,17 @@
     let lastRequestStartTime = 0;
     let maxObservedConcurrency = 0;
     let pauseTimer = null;
+    const scheduledTimers = new Set();
+
+    function scheduleTimer(fn, ms) {
+      if (isDisposed) return null;
+      const timer = setTimeout(() => {
+        scheduledTimers.delete(timer);
+        if (!isDisposed) fn();
+      }, ms);
+      scheduledTimers.add(timer);
+      return timer;
+    }
 
     function subscribe(propertyId, callback) {
       if (!subscribers.has(propertyId)) {
@@ -195,13 +207,20 @@
                 return;
               }
               const entry = items ? items[CACHE_PREFIX + propertyId] : null;
-              if (entry && entry.ts && Date.now() - entry.ts < ttlMs) {
-                memoryCache.set(propertyId, { data: entry, ts: entry.ts });
-                resolve(entry);
+              if (
+                entry &&
+                entry.cacheVersion === CACHE_RECORD_VERSION &&
+                entry.propertyId === propertyId &&
+                entry.expiresAt &&
+                Date.now() < entry.expiresAt &&
+                entry.data?.policy?.schemaVersion === POLICY_SCHEMA_VERSION
+              ) {
+                memoryCache.set(propertyId, { data: entry.data, ts: entry.storedAt || Date.now() });
+                resolve(entry.data);
               } else {
                 if (entry) {
-                  // Expired: prune asynchronously
-                  storage.remove([CACHE_PREFIX + propertyId]);
+                  // Incompatible or expired: prune asynchronously
+                  try { storage.remove([CACHE_PREFIX + propertyId], () => {}); } catch {}
                 }
                 resolve(null);
               }
@@ -216,31 +235,24 @@
 
     async function setCached(propertyId, data) {
       if (!propertyId || isDisposed) return;
-      const ts = Date.now();
-      const entry = { ...data, ts };
-      memoryCache.set(propertyId, { data: entry, ts });
+      const storedAt = Date.now();
+      const expiresAt = storedAt + ttlMs;
+      const entry = {
+        cacheVersion: CACHE_RECORD_VERSION,
+        propertyId,
+        storedAt,
+        expiresAt,
+        data,
+      };
+      memoryCache.set(propertyId, { data, ts: storedAt });
 
       if (storage) {
         try {
-          storage.set({ [CACHE_PREFIX + propertyId]: entry });
+          storage.set({ [CACHE_PREFIX + propertyId]: entry }, () => {});
         } catch (e) {
           console.warn("Vrbow failed to write cache:", e);
         }
       }
-    }
-
-    function subscribe(propertyId, callback) {
-      if (!subscribers.has(propertyId)) {
-        subscribers.set(propertyId, new Set());
-      }
-      subscribers.get(propertyId).add(callback);
-      return () => {
-        const set = subscribers.get(propertyId);
-        if (set) {
-          set.delete(callback);
-          if (set.size === 0) subscribers.delete(propertyId);
-        }
-      };
     }
 
     async function processQueue() {
@@ -250,7 +262,7 @@
       }
       if (Date.now() < pausedUntil) {
         const remainingPause = pausedUntil - Date.now();
-        setTimeout(processQueue, remainingPause + 50);
+        scheduleTimer(processQueue, remainingPause + 50);
         return;
       }
 
@@ -268,12 +280,12 @@
           const elapsed = now - lastRequestStartTime;
           if (elapsed < minDelayMs) {
             const waitTime = minDelayMs - elapsed;
-            setTimeout(processQueue, waitTime);
+            scheduleTimer(processQueue, waitTime);
             break;
           }
 
-          // Pick next item: prioritize items in highPriorityIds
-          let nextIndex = queue.findIndex((item) => highPriorityIds.has(item.propertyId));
+          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
+          let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
           if (nextIndex === -1) nextIndex = 0;
           const [nextItem] = queue.splice(nextIndex, 1);
           highPriorityIds.delete(nextItem.propertyId);
@@ -414,10 +426,14 @@
       // 2. Synchronous duplicate check to prevent race conditions
       if (enqueuedOrActive.has(propertyId)) {
         if (priority === "high") {
+          highPriorityIds.add(propertyId);
           const item = queue.find((q) => q.propertyId === propertyId);
           if (item) item.priority = "high";
         }
         return;
+      }
+      if (priority === "high") {
+        highPriorityIds.add(propertyId);
       }
       enqueuedOrActive.add(propertyId);
 
@@ -438,6 +454,7 @@
     function clearQueue() {
       queue.length = 0;
       enqueuedOrActive.clear();
+      highPriorityIds.clear();
       sessionRequestsCount = 0;
     }
 
@@ -458,6 +475,10 @@
         try { ctrl.abort(); } catch {}
       }
       activeControllers.clear();
+      for (const t of scheduledTimers) {
+        clearTimeout(t);
+      }
+      scheduledTimers.clear();
       if (pauseTimer) {
         clearTimeout(pauseTimer);
         pauseTimer = null;
