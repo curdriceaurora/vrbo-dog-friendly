@@ -75,8 +75,12 @@
         }
       }
     }
-    for (const sentence of domSentences || []) {
-      bucket.push({ text: sentence, source: "Visible page text", priority: 1 });
+    for (const item of domSentences || []) {
+      const sentence = typeof item === "string" ? item : item?.text;
+      const source = (typeof item === "object" && item?.source) ? item.source : "Visible page text";
+      if (sentence) {
+        bucket.push({ text: sentence, source, priority: 1 });
+      }
     }
 
     // De-dupe by normalized text, keeping the highest-priority occurrence.

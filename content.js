@@ -291,25 +291,88 @@
   // never does. So walk text nodes and skip those subtrees.
   const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], #vdp-panel';
 
+  function findSectionHeadingForElement(element) {
+    if (!element) return "Listing details";
+
+    if (element.closest('[data-stid*="review" i], [class*="review" i], [id*="review" i], [data-section-type*="review" i], [data-stid*="ratings-and-reviews"]')) {
+      return "Guest reviews";
+    }
+    if (element.closest('[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]')) {
+      return "House Rules / Policies";
+    }
+    if (element.closest('[data-stid*="about" i], [class*="about" i], [id*="about" i]')) {
+      return "About this property";
+    }
+    if (element.closest('[data-stid*="amenit" i], [class*="amenit" i], [id*="amenit" i]')) {
+      return "Property amenities";
+    }
+    if (element.closest('[data-stid*="host" i], [class*="host" i], [id*="host" i]')) {
+      return "About the host";
+    }
+    if (element.closest('[data-stid*="faq" i], [class*="faq" i], [id*="faq" i], [data-stid*="qna" i]')) {
+      return "Questions & answers";
+    }
+
+    let curr = element;
+    for (let i = 0; i < 8 && curr && curr !== document.body; i++, curr = curr.parentElement) {
+      const heading = curr.querySelector('h1, h2, h3, h4, h5, h6, [role="heading"], [class*="heading" i], [class*="title" i]');
+      if (heading && heading !== element && !heading.contains(element)) {
+        const text = heading.textContent?.trim();
+        if (text && text.length > 2 && text.length < 50) {
+          if (/review|rating/i.test(text)) return "Guest reviews";
+          if (/house rules|polic/i.test(text)) return "House Rules / Policies";
+          if (/about this property|about this space|description/i.test(text)) return "About this property";
+          if (/amenit/i.test(text)) return "Property amenities";
+          if (/host/i.test(text)) return "About the host";
+          return text;
+        }
+      }
+      const label = curr.getAttribute("aria-label") || curr.getAttribute("data-stid") || curr.id;
+      if (label) {
+        if (/review/i.test(label)) return "Guest reviews";
+        if (/house-rules|policies/i.test(label)) return "House Rules / Policies";
+        if (/about/i.test(label)) return "About this property";
+        if (/amenit/i.test(label)) return "Property amenities";
+        if (/host/i.test(label)) return "About the host";
+      }
+    }
+
+    return "Listing details";
+  }
+
   function collectDomPetSentences() {
     const root = document.querySelector("main") || document.body;
     if (!root) return [];
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    const parts = [];
+    const results = [];
     let node;
     while ((node = walker.nextNode())) {
-      const text = node.textContent && node.textContent.trim();
-      if (!text) continue;
-      if (node.parentElement && node.parentElement.closest(DOM_EXCLUDE)) continue;
-      parts.push(text);
+      const rawText = node.textContent && node.textContent.trim();
+      if (!rawText) continue;
+      const parent = node.parentElement;
+      if (parent && parent.closest(DOM_EXCLUDE)) continue;
+      const section = findSectionHeadingForElement(parent);
+      for (const sentence of getSentences(rawText)) {
+        if (isPetRelated(sentence)) {
+          results.push({ text: sentence, source: section });
+        }
+      }
     }
     // Dialogs we opened and closed again are no longer walkable, so their
     // text comes from the harvest instead — but only while we are still on
     // the listing it was taken from.
     if (harvestedForUrl === location.href) {
-      for (const text of harvestedDialogText) parts.push(text);
+      for (const item of harvestedDialogText) {
+        const text = typeof item === "string" ? item : item?.text;
+        const source = (typeof item === "object" && item?.source) ? item.source : "Amenities dialog";
+        for (const sentence of getSentences(text)) {
+          if (isPetRelated(sentence)) {
+            results.push({ text: sentence, source });
+          }
+        }
+      }
     }
-    return getSentences(parts.join("\n")).filter(isPetRelated);
+    return results;
   }
 
   // ---------- DOM helpers (jump-to-source) ----------
@@ -328,10 +391,15 @@
   }
 
   function findHeadingFor(sourceLabel) {
-    const re = /about this property/i.test(sourceLabel || "") ? /about this property/i : /house rules|polic/i;
-    const candidates = document.querySelectorAll('h1,h2,h3,h4,[role="heading"],a[href^="#"]');
+    if (!sourceLabel) return null;
+    let re = /house rules|polic/i;
+    if (/about this property|about this space|description/i.test(sourceLabel)) re = /about this property|about this space|description/i;
+    else if (/review|rating|feedback/i.test(sourceLabel)) re = /reviews|ratings/i;
+    else if (/amenit/i.test(sourceLabel)) re = /amenit/i;
+    else if (/host/i.test(sourceLabel)) re = /about the host|host/i;
+    const candidates = document.querySelectorAll('h1,h2,h3,h4,[role="heading"],a[href^="#"],section,[data-stid]');
     for (const el of candidates) {
-      if (re.test(el.textContent || "")) return el;
+      if (re.test(el.textContent || "") || re.test(el.getAttribute("data-stid") || "")) return el;
     }
     return null;
   }

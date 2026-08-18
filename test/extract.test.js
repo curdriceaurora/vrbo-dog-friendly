@@ -380,4 +380,13 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(matches.length, 1);
     assert.strictEqual(matches[0].source, "House Rules / Policies");
   });
+
+  await t.test("preserves specific section names for section-tagged DOM items", () => {
+    const entries = buildCorpus(payload, [
+      { text: "Only pets under 20 lbs allowed per contract.", source: "Guest reviews" },
+    ]);
+    const reviewEntry = entries.find((e) => /under 20 lbs/.test(e.text));
+    assert.ok(reviewEntry);
+    assert.strictEqual(reviewEntry.source, "Guest reviews");
+  });
 });
