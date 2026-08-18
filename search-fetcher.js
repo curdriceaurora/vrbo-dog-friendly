@@ -80,20 +80,54 @@
     const items = [];
 
     // 1. Check for embedded Apollo state in <script> tags
-    const apolloMatch = html.match(/window\.__APOLLO_STATE__\s*=\s*(\{.+?\});/s) ||
-      html.match(/<script[^>]*id="__APOLLO_STATE__"[^>]*>([\s\S]*?)<\/script>/i);
+    let state = null;
 
-    if (apolloMatch && apolloMatch[1]) {
+    // Pattern A: window.__APOLLO_STATE__ = JSON.parse("...");
+    const idx = html.indexOf("window.__APOLLO_STATE__");
+    if (idx !== -1) {
+      const endScriptIdx = html.indexOf("</script>", idx);
+      const slice = endScriptIdx !== -1 ? html.slice(idx, endScriptIdx) : html.slice(idx, idx + 5000000);
+      
+      const jsonParseMatch = /window\.__APOLLO_STATE__\s*=\s*JSON\.parse\((["'])([\s\S]+?)\1\s*\);/.exec(slice);
+      if (jsonParseMatch) {
+        const rawQuoted = jsonParseMatch[0].slice(jsonParseMatch[0].indexOf("(") + 1, jsonParseMatch[0].lastIndexOf(")"));
+        try {
+          const jsonStr = JSON.parse(rawQuoted);
+          state = JSON.parse(jsonStr);
+        } catch {}
+      }
+
+      if (!state) {
+        const directObjMatch = /window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]+?\});\s*(?:<\/script>|\n|$)/.exec(slice);
+        if (directObjMatch) {
+          try {
+            state = JSON.parse(directObjMatch[1]);
+          } catch {}
+        }
+      }
+    }
+
+    // Pattern B: <script id="__APOLLO_STATE__">...</script>
+    if (!state) {
+      const tagMatch = /<script[^>]*id="__APOLLO_STATE__"[^>]*>([\s\S]*?)<\/script>/i.exec(html);
+      if (tagMatch) {
+        try {
+          state = JSON.parse(tagMatch[1]);
+        } catch {}
+      }
+    }
+
+    if (state && typeof state === "object") {
       try {
-        const state = JSON.parse(apolloMatch[1]);
-        const targetKey = propertyId ? `PropertyInfo:${propertyId}` : Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
+        const targetKey = (propertyId && state[`PropertyInfo:${propertyId}`])
+          ? `PropertyInfo:${propertyId}`
+          : Object.keys(state).find((k) => k.startsWith("PropertyInfo:")) ||
+            Object.keys(state).find((k) => k.startsWith("Property:"));
         const root = targetKey ? state[targetKey] : null;
         if (root) {
           walkApolloNode(state, root, null, null, items);
         }
-      } catch {
-        // Fall back to text parsing if JSON parse fails
-      }
+      } catch {}
     }
 
     // 2. Extract visible text sections from raw HTML (strip markup)
