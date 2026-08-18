@@ -389,4 +389,22 @@ test("buildCorpus", async (t) => {
     assert.ok(reviewEntry);
     assert.strictEqual(reviewEntry.source, "Guest reviews");
   });
+
+  await t.test("parses tiered pet fee and does not mistake 'One dog allowed for free' as Max dogs: 1", () => {
+    const raw = policyFor("One dog is allowed at no additional cost, each subsequent dog is $25 each per stay.");
+    assert.strictEqual(raw.petsAllowed, true);
+    assert.strictEqual(raw.maxDogs, null, "Must not set maxDogs: 1 when sentence mentions subsequent dogs");
+    assert.strictEqual(raw.fee, "$0 1st dog, $25 each subsequent dog per stay");
+
+    const canonical = normalizePolicy(raw);
+    assert.strictEqual(canonical.maxDogs, null);
+    assert.strictEqual(canonical.fee.amount, 25);
+    assert.strictEqual(canonical.fee.currency, "USD");
+    assert.strictEqual(canonical.fee.period, "stay");
+    assert.strictEqual(canonical.fee.perPet, true);
+    assert.strictEqual(canonical.fee.tiered, true);
+
+    const badge = deriveSearchBadge(canonical);
+    assert.strictEqual(badge.text, "Dogs allowed · 1st free · $25/add'l stay");
+  });
 });

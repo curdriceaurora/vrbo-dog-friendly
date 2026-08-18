@@ -88,7 +88,7 @@
     for (const item of domSentences || []) {
       const sentence = typeof item === "string" ? item : item?.text;
       const source = (typeof item === "object" && item?.source) ? item.source : "Visible page text";
-      if (sentence) {
+      if (sentence && !/^(?:pets?|dogs?)$/i.test(sentence.trim())) {
         bucket.push({ text: sentence, source, priority: 1 });
       }
     }
@@ -201,11 +201,11 @@
     // rendered "Pets are not allowed" on a free, pet-welcoming listing.
     const NOT_ALLOWED_RE = new RegExp(
       `\\bno\\s+${PET}\\b(?!\\s*(?:over|above|larger|bigger|heavier|weighing|without|unless|except|fee|fees|deposit|deposits|charge|charges|surcharge))` +
-        `|\\b${PET}\\s+(?:are\\s+)?not\\s+(?:allowed|permitted)\\b(?!\\s*(?:over|above|without|unless|except))` +
+        `|\\b${PET}\\s+(?:(?:are|is)\\s+)?not\\s+(?:allowed|permitted)\\b(?!\\s*(?:over|above|without|unless|except))` +
         `|\\b(?:pet|dog)[-\\s]?free\\b`,
       "i"
     );
-    const ALLOWED_RE = new RegExp(`\\b${PET}\\s+(?:are\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b|\\b(?:dog|pet)[-\\s]?friendly\\b`, "i");
+    const ALLOWED_RE = new RegExp(`\\b${PET}\\s+(?:(?:are|is)\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b|\\b(?:dog|pet)[-\\s]?friendly\\b`, "i");
 
     const MAX_DOGS_RE = [
       new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM}\\s*${PET}\\b`, "i"),
@@ -231,6 +231,13 @@
     // inflections have to be part of the alternative itself — a bare
     // "pre-?register" can't match it, since the \b lands on the "ed".
     const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
+
+    const TIERED_FEE_RE = new RegExp(
+      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:is\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:is\\s+)?free))` +
+      `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:is\\s+)?` +
+      `${CUR}?\\s?${AMT}\\s*(?:each)?(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`,
+      "i"
+    );
 
     const FEE_RE = [
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
@@ -289,7 +296,9 @@
         }
       }
 
-      const dogsMatch = firstMatch(MAX_DOGS_RE, s);
+      // Do not mistake tiered pricing phrases like "one dog free, subsequent dogs $25" for a maxDogs limit of 1
+      const hasSubsequentDogs = /\b(?:subsequent|additional|extra|further|other|2nd|second)\s+(?:pets?|dogs?)\b/i.test(s);
+      const dogsMatch = !hasSubsequentDogs ? firstMatch(MAX_DOGS_RE, s) : null;
       if (dogsMatch) {
         record("maxDogs", "maxDogsSnippet", "maxDogsSource", "maxDogsAlternates", toNumber(dogsMatch.groups.num), entry);
         usedForField = true;
@@ -319,25 +328,34 @@
       }
 
       const feeNormalized = normalizeFeePhrasing(s);
-      const feeMatch = firstMatch(FEE_RE, feeNormalized);
-      if (feeMatch) {
-        const target = feeMatch.groups.target ? (feeMatch.groups.target.toLowerCase() === "dog" ? "pet" : feeMatch.groups.target.toLowerCase()) : null;
-        const time = feeMatch.groups.time ? feeMatch.groups.time.toLowerCase() : null;
-        let suffix = "";
-        if (target && time) {
-          suffix = ` per ${target} per ${time}`;
-        } else if (time) {
-          suffix = ` per ${time}`;
-        } else if (target) {
-          suffix = ` per ${target}`;
-        } else if (/per\s+stay/i.test(s)) {
-          suffix = ` per stay`;
+      const tieredMatch = feeNormalized.match(TIERED_FEE_RE);
+      if (tieredMatch) {
+        const amtStr = formatMoney(tieredMatch.groups.cur || "$", tieredMatch.groups.amt);
+        const time = tieredMatch.groups.time ? tieredMatch.groups.time.toLowerCase() : "stay";
+        const feeStr = `$0 1st dog, ${amtStr} each subsequent dog per ${time}`;
+        record("fee", "feeSnippet", "feeSource", "feeAlternates", feeStr, entry);
+        usedForField = true;
+      } else {
+        const feeMatch = firstMatch(FEE_RE, feeNormalized);
+        if (feeMatch) {
+          const target = feeMatch.groups.target ? (feeMatch.groups.target.toLowerCase() === "dog" ? "pet" : feeMatch.groups.target.toLowerCase()) : null;
+          const time = feeMatch.groups.time ? feeMatch.groups.time.toLowerCase() : null;
+          let suffix = "";
+          if (target && time) {
+            suffix = ` per ${target} per ${time}`;
+          } else if (time) {
+            suffix = ` per ${time}`;
+          } else if (target) {
+            suffix = ` per ${target}`;
+          } else if (/per\s+stay/i.test(s)) {
+            suffix = ` per stay`;
+          }
+          record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur, feeMatch.groups.amt)}${suffix}`, entry);
+          usedForField = true;
+        } else if (!result.fee && UNPRICED_FEE_RE.test(s)) {
+          record("fee", "feeSnippet", "feeSource", "feeAlternates", "Pet fee applies", entry);
+          usedForField = true;
         }
-        record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur, feeMatch.groups.amt)}${suffix}`, entry);
-        usedForField = true;
-      } else if (!result.fee && UNPRICED_FEE_RE.test(s)) {
-        record("fee", "feeSnippet", "feeSource", "feeAlternates", "Pet fee applies", entry);
-        usedForField = true;
       }
 
       if (NO_FEE_RE.test(s)) {
@@ -359,7 +377,7 @@
         usedForField = true;
       }
 
-      if (!usedForField) {
+      if (!usedForField && !/^(?:pets?|dogs?)$/i.test(s.trim())) {
         result.otherNotes.push({ text: s, source: entry.source });
       }
     }
@@ -441,29 +459,46 @@
     }
 
     // 2. Fee normalization
-    // fee: { amount: number | null, text?: string, currency: string, period: "night" | "day" | "stay" | "pet" | "unknown", perPet?: boolean }
+    // fee: { amount: number | null, text?: string, currency: string, period: "night" | "day" | "stay" | "pet" | "unknown", perPet?: boolean, tiered?: boolean }
     let fee = null;
     if (extracted.fee && extracted.fee !== "No fee mentioned") {
       const str = String(extracted.fee);
-      const isPerPet = /\b(?:per\s+(?:pet|dog)|each\s+(?:pet|dog)?)\b/i.test(str);
-      const fm = str.match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(?:pet|dog|each)\s+per\s+(stay|night|day)|per\s+(stay|night|day|pet))?/i);
-      if (fm && fm[2]) {
-        const curSym = fm[1] || "$";
+      const isTiered = /\$0\s+(?:1st|first)\s+(?:dog|pet)/i.test(str);
+      if (isTiered) {
+        const tm = str.match(/,\s*(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:each)?\s*(?:subsequent|additional|extra|add'l)?\s*(?:dog|pet)?\s*(?:per\s+(stay|night|day))?/i);
+        const curSym = (tm && tm[1]) || "$";
         const currency = normalizeCurrencyCode(curSym);
-        const amount = parseFloat(fm[2]);
-        let period = "unknown";
-        const matchedPeriod = fm[3] || fm[4];
-        if (matchedPeriod) {
-          period = matchedPeriod.toLowerCase();
-        } else if (isPerPet) {
-          period = "pet";
-        }
-        fee = { amount, currency, period };
-        if (isPerPet) {
-          fee.perPet = true;
-        }
+        const amount = tm && tm[2] ? parseFloat(tm[2]) : 0;
+        const period = (tm && tm[3]) ? tm[3].toLowerCase() : "stay";
+        fee = {
+          amount,
+          currency,
+          period,
+          perPet: true,
+          text: str,
+          tiered: true,
+        };
       } else {
-        fee = { amount: null, text: extracted.fee, currency: "USD", period: "unknown" };
+        const isPerPet = /\b(?:per\s+(?:pet|dog)|each\s+(?:pet|dog)?)\b/i.test(str);
+        const fm = str.match(/(?:([A-Z]{1,3}\$|[$€£¥A-Z]{1,3}))?\s*(\d+(?:\.\d+)?)\s*(?:per\s+(?:pet|dog|each)\s+per\s+(stay|night|day)|per\s+(stay|night|day|pet))?/i);
+        if (fm && fm[2]) {
+          const curSym = fm[1] || "$";
+          const currency = normalizeCurrencyCode(curSym);
+          const amount = parseFloat(fm[2]);
+          let period = "unknown";
+          const matchedPeriod = fm[3] || fm[4];
+          if (matchedPeriod) {
+            period = matchedPeriod.toLowerCase();
+          } else if (isPerPet) {
+            period = "pet";
+          }
+          fee = { amount, currency, period };
+          if (isPerPet) {
+            fee.perPet = true;
+          }
+        } else {
+          fee = { amount: null, text: extracted.fee, currency: "USD", period: "unknown" };
+        }
       }
     } else if (extracted.noFeeMentioned) {
       fee = { amount: 0, currency: "USD", period: "unknown" };
@@ -478,15 +513,15 @@
         const currency = normalizeCurrencyCode(curSym);
         const amount = parseFloat(dm[2]);
         deposit = { amount, currency };
+      } else {
+        deposit = { amount: null, text: extracted.deposit, currency: "USD" };
       }
     }
 
-    // 4. Notes-only restrictions tracking
-    const otherNotes = Array.isArray(extracted.otherNotes) ? extracted.otherNotes : [];
-    const restrictionNoteCount = otherNotes.length;
+    // 4. Restrictions found boolean
     const restrictionsFound = Boolean(
       extracted.preReg ||
-      restrictionNoteCount > 0 ||
+      extracted.deposit ||
       weightLimit ||
       fee ||
       extracted.maxDogs ||
@@ -502,9 +537,10 @@
 
     // 6. Confidence rating
     let confidence = "low";
+    const otherNotesCount = Array.isArray(extracted.otherNotes) ? extracted.otherNotes.length : 0;
     if (extracted.petsAllowed !== null) {
       confidence = (weightLimit || fee || extracted.maxDogs) ? "high" : "medium";
-    } else if (extracted.preReg || restrictionNoteCount > 0) {
+    } else if (extracted.preReg || otherNotesCount > 0) {
       confidence = "medium";
     }
 
@@ -520,7 +556,7 @@
       deposit,
       approvalRequired: extracted.preReg ? true : (extracted.preReg === false ? false : null),
       restrictionsFound,
-      restrictionNoteCount,
+      restrictionNoteCount: otherNotesCount,
       contradictions,
       confidence,
       _raw: extracted,
@@ -529,6 +565,10 @@
 
   function formatFeeShort(fee) {
     if (!fee) return null;
+    if (fee.tiered || (fee.text && /\$0\s+(?:1st|first)\s+(?:dog|pet)/i.test(fee.text))) {
+      const curSym = formatCurrencyDisplay(fee.amount, fee.currency);
+      return `1st free · ${curSym}/add'l${fee.period && fee.period !== 'unknown' ? ' ' + fee.period : ''}`;
+    }
     if (fee.amount === 0) return "No pet fee";
     if (fee.amount === null && fee.text) return fee.text;
     if (typeof fee.amount !== "number") return null;
