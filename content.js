@@ -351,7 +351,7 @@
       if (!rawText) continue;
       const parent = node.parentElement;
       if (parent && parent.closest(DOM_EXCLUDE)) continue;
-      
+
       let section = null;
       for (const sentence of getSentences(rawText)) {
         if (isPetRelated(sentence)) {

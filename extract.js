@@ -233,7 +233,7 @@
     const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const TIERED_FEE_RE = new RegExp(
-      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:(?:is|are)\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:is|are\\s+)?free))` +
+      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:(?:is|are)\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:(?:is|are)\\s+)?free))` +
       `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:(?:is|are)\\s+)?` +
       `${CUR}?\\s?${AMT}\\s*(?:each)?(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`,
       "i"
@@ -409,24 +409,40 @@
     return result;
   }
 
-  function normalizeCurrencyCode(code) {
-    if (!code) return "USD";
-    const clean = String(code).trim().toUpperCase();
-    if (clean === "$" || clean === "US$") return "USD";
-    if (clean === "€") return "EUR";
-    if (clean === "£") return "GBP";
-    if (clean === "A$" || clean === "AU$") return "AUD";
-    if (clean === "CA$") return "CAD";
-    if (clean === "NZ$" || clean === "NZD") return "NZD";
-    return clean;
+  const CURRENCY_MAP = {
+    "$": "USD",
+    "US$": "USD",
+    "USD": "USD",
+    "€": "EUR",
+    "EUR": "EUR",
+    "£": "GBP",
+    "GBP": "GBP",
+    "¥": "JPY",
+    "JPY": "JPY",
+    "A$": "AUD",
+    "AU$": "AUD",
+    "AUD": "AUD",
+    "CA$": "CAD",
+    "C$": "CAD",
+    "CAD": "CAD",
+    "NZ$": "NZD",
+    "NZD": "NZD",
+  };
+
+  function normalizeCurrencyCode(symbolOrCode) {
+    if (!symbolOrCode) return "USD";
+    const clean = String(symbolOrCode).trim().toUpperCase();
+    return CURRENCY_MAP[symbolOrCode] || CURRENCY_MAP[clean] || clean;
   }
 
   function formatCurrencyDisplay(amount, currency = "USD") {
+    if (typeof amount !== "number") return "";
     const code = normalizeCurrencyCode(currency);
     const symbolMap = {
       USD: "$",
       EUR: "€",
       GBP: "£",
+      JPY: "¥",
       AUD: "A$",
       CAD: "CA$",
       NZD: "NZ$",
@@ -560,8 +576,8 @@
     if (!fee) return null;
     if (fee.tiered || (fee.text && /\$0\s+(?:1st|first)\s+(?:dog|pet)/i.test(fee.text))) {
       const amountStr = formatCurrencyDisplay(fee.amount, fee.currency);
-      const perPeriodStr = fee.period && fee.period !== "unknown" ? ` per ${fee.period}` : "";
-      return `1st free · ${amountStr}/add'l${perPeriodStr}`;
+      const periodSuffix = fee.period && fee.period !== "unknown" ? `/${fee.period}` : "";
+      return `1st free · ${amountStr}/add'l${periodSuffix}`;
     }
     if (fee.amount === 0) return "No pet fee";
     if (fee.amount === null && fee.text) return fee.text;
@@ -652,8 +668,9 @@
     }
 
     if (policy.petsAllowed === true) {
-      // If maxDogs prefix is used, limit secondary details to 2 items (3 items total) to stay within compact length budget
-      const maxSecondary = policy.maxDogs ? 2 : 3;
+      const isTieredFee = policy.fee?.tiered || (policy.fee?.text && /\$0\s+(?:1st|first)/i.test(policy.fee.text));
+      // If maxDogs prefix is used or fee is tiered (which is multi-part), limit secondary details to 2 items to stay within compact budget (< 60 chars)
+      const maxSecondary = (policy.maxDogs || isTieredFee) ? 2 : 3;
       const details = collectPolicyBadgeDetails(policy, false).slice(0, maxSecondary);
       const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       const prefix = policy.maxDogs

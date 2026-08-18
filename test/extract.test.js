@@ -413,7 +413,21 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(canonical.fee.tiered, true);
 
     const badge = deriveSearchBadge(canonical);
-    assert.strictEqual(badge.text, "Dogs allowed · 1st free · $25/add'l per stay");
+    assert.strictEqual(badge.text, "Dogs allowed · 1st free · $25/add'l/stay");
+    assert.ok(badge.text.length < 60, `Badge text (${badge.text.length} chars) must be under 60 chars`);
+  });
+
+  await t.test("tiered fee badge stays within 60 char budget even with weight limit and approval required", () => {
+    const canonical = {
+      petsAllowed: true,
+      maxDogs: null,
+      weightLimit: { value: 50, unit: "lb", pounds: 50 },
+      fee: { amount: 25, currency: "USD", period: "night", tiered: true },
+      approvalRequired: true,
+    };
+    const badge = deriveSearchBadge(canonical);
+    assert.strictEqual(badge.text, "Dogs allowed · 50 lbs · 1st free · $25/add'l/night");
+    assert.ok(badge.text.length < 60, `Badge text (${badge.text.length} chars) must be under 60 chars`);
   });
 
   await t.test("retains legitimate max-dog limits in sentences with additional/extra pets clauses", () => {

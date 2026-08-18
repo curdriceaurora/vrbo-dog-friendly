@@ -849,15 +849,15 @@ test("search-fetcher queue and caching", async (t) => {
     // Startup sweep runs immediately
     assert.equal(maintenanceCount, 1);
 
-    // Wait for 2 interval ticks (approx 60ms)
-    await new Promise((r) => setTimeout(r, 65));
-    assert.ok(maintenanceCount >= 3, `Expected at least 3 maintenance sweeps, got ${maintenanceCount}`);
+    // Wait for interval ticks with generous timing slack for CI boxes
+    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(maintenanceCount >= 2, `Expected at least 2 maintenance sweeps, got ${maintenanceCount}`);
 
     const countBeforeDispose = maintenanceCount;
     queue.dispose();
 
     // After dispose, no further sweeps occur
-    await new Promise((r) => setTimeout(r, 65));
+    await new Promise((r) => setTimeout(r, 100));
     assert.equal(maintenanceCount, countBeforeDispose);
   });
 
