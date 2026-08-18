@@ -1,7 +1,7 @@
 // test/search-fetcher.test.js
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseListingHtml, createSearchFetchQueue, validateListingUrl, performStorageMaintenance, CACHE_PREFIX } = require("../search-fetcher.js");
+const { parseListingHtml, createSearchFetchQueue, validateListingUrl, performStorageMaintenance, CACHE_PREFIX, serializeSearchPolicyForCache, calculatePolicyCompleteness, canPolicyUpgrade } = require("../search-fetcher.js");
 
 test("search-fetcher HTML parsing", async (t) => {
   await t.test("detects bot challenge HTML and marks as challenge", () => {
@@ -799,6 +799,163 @@ test("search-fetcher queue and caching", async (t) => {
 
     // Queue operation succeeded without delay
     assert.equal(fetchCount, 1);
+
+    queue.dispose();
+  });
+
+  await t.test("persistence boundary: serializeSearchPolicyForCache allowlists canonical fields and strips all raw DOM excerpts", () => {
+    const rawPolicyWithSnippets = {
+      schemaVersion: 1,
+      propertyId: "12345",
+      source: "listing-page",
+      extractedAt: "2026-08-18T00:00:00.000Z",
+      petsAllowed: true,
+      maxDogs: 2,
+      weightLimit: { value: 50, unit: "lb", pounds: 50 },
+      fee: { amount: 150, currency: "USD", period: "stay" },
+      deposit: { amount: 200, currency: "USD" },
+      approvalRequired: false,
+      restrictionsFound: true,
+      confidence: "high",
+      _raw: {
+        petsAllowedSnippet: "Full host text snippet here that should not be in cache",
+        maxDogsSnippet: "Host max dogs quote",
+        otherNotes: [{ text: "Long host description paragraph", source: "House Rules" }],
+        rawEntries: ["<div>Lots of raw HTML</div>"],
+      },
+      snippets: ["snippet 1", "snippet 2"],
+      alternates: [{ value: 75, snippet: "alt snippet" }],
+    };
+
+    const serialized = serializeSearchPolicyForCache(rawPolicyWithSnippets);
+
+    // Allowlisted canonical fields
+    assert.equal(serialized.schemaVersion, 1);
+    assert.equal(serialized.propertyId, "12345");
+    assert.equal(serialized.petsAllowed, true);
+    assert.equal(serialized.maxDogs, 2);
+    assert.deepStrictEqual(serialized.weightLimit, { value: 50, unit: "lb", pounds: 50 });
+    assert.deepStrictEqual(serialized.fee, { amount: 150, currency: "USD", period: "stay" });
+    assert.deepStrictEqual(serialized.deposit, { amount: 200, currency: "USD" });
+    assert.equal(serialized.approvalRequired, false);
+    assert.equal(serialized.restrictionsFound, true);
+    assert.equal(serialized.confidence, "high");
+
+    // Strictly forbidden raw fields
+    assert.equal(serialized._raw, undefined, "Cache serialization must never retain _raw");
+    assert.equal(serialized.snippets, undefined, "Cache serialization must never retain snippets");
+    assert.equal(serialized.alternates, undefined, "Cache serialization must never retain alternates");
+    assert.equal(serialized.rawEntries, undefined, "Cache serialization must never retain rawEntries");
+  });
+
+  await t.test("cache precedence contract: shallow search Apollo payload never downgrades detailed cached listing policy", async () => {
+    const mockStorage = {
+      store: {},
+      get(keys, cb) {
+        if (!keys) {
+          cb({ ...this.store });
+          return;
+        }
+        const res = {};
+        for (const k of keys) {
+          if (this.store[k] !== undefined) res[k] = this.store[k];
+        }
+        cb(res);
+      },
+      set(items, cb) {
+        Object.assign(this.store, items);
+        cb && cb();
+      },
+      remove(keys, cb) {
+        for (const k of keys) delete this.store[k];
+        cb && cb();
+      },
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: true, status: 200, text: async () => "" }),
+      storage: mockStorage,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    const detailedListingPolicy = {
+      schemaVersion: 1,
+      propertyId: "prop_detailed",
+      source: "listing-page",
+      petsAllowed: true,
+      maxDogs: 2,
+      weightLimit: { value: 50, unit: "lb", pounds: 50 },
+      fee: { amount: 150, currency: "USD", period: "stay" },
+      deposit: { amount: 200, currency: "USD" },
+      approvalRequired: true,
+      restrictionsFound: true,
+      confidence: "high",
+    };
+
+    // 1. Prime cache with detailed listing policy
+    await queue.setCached("prop_detailed", {
+      status: "ok",
+      policy: detailedListingPolicy,
+    });
+
+    const primeCache = await queue.getCached("prop_detailed");
+    assert.equal(primeCache.policy.maxDogs, 2);
+    assert.equal(primeCache.policy.weightLimit.value, 50);
+
+    // 2. Incoming shallow search Apollo payload with only petsAllowed: true
+    const shallowApolloPolicy = {
+      schemaVersion: 1,
+      propertyId: "prop_detailed",
+      source: "search-page-state",
+      petsAllowed: true,
+      maxDogs: null,
+      weightLimit: null,
+      fee: null,
+      deposit: null,
+      approvalRequired: null,
+      restrictionsFound: false,
+      confidence: "medium",
+    };
+
+    // Attempt to setCached with shallow Apollo policy
+    await queue.setCached("prop_detailed", {
+      status: "ok",
+      policy: shallowApolloPolicy,
+    });
+
+    // 3. Assert detailed policy was preserved and not downgraded
+    const afterShallowAttempt = await queue.getCached("prop_detailed");
+    assert.equal(afterShallowAttempt.policy.maxDogs, 2, "Detailed maxDogs must be preserved");
+    assert.equal(afterShallowAttempt.policy.weightLimit.value, 50, "Detailed weightLimit must be preserved");
+    assert.equal(afterShallowAttempt.policy.fee.amount, 150, "Detailed fee must be preserved");
+
+    // 4. Assert upgrading a partial policy with a richer listing policy succeeds
+    const partialPolicy = {
+      schemaVersion: 1,
+      propertyId: "prop_partial",
+      source: "search-page-state",
+      petsAllowed: true,
+      maxDogs: null,
+      weightLimit: null,
+      fee: null,
+    };
+    await queue.setCached("prop_partial", { status: "ok", policy: partialPolicy });
+
+    const richIncomingPolicy = {
+      schemaVersion: 1,
+      propertyId: "prop_partial",
+      source: "listing-page",
+      petsAllowed: true,
+      maxDogs: 1,
+      weightLimit: { value: 30, unit: "lb", pounds: 30 },
+      fee: { amount: 50, currency: "USD", period: "stay" },
+    };
+    await queue.setCached("prop_partial", { status: "ok", policy: richIncomingPolicy });
+
+    const upgraded = await queue.getCached("prop_partial");
+    assert.equal(upgraded.policy.maxDogs, 1, "Richer policy must upgrade partial policy");
+    assert.equal(upgraded.policy.fee.amount, 50, "Richer policy must upgrade partial fee");
 
     queue.dispose();
   });

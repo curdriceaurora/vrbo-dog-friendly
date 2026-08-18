@@ -67,6 +67,8 @@ function renderPolicy(policy) {
     ? `${formatMoney(policy.fee.amount, policy.fee.currency)}${feePerStr}`
     : (raw.fee || "Not specified");
 
+  const preRegVal = (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned";
+
   const rows = [
     ["Max dogs", maxDogsVal, maxDogsVal !== "Not specified" ? "good" : "unknown"],
     ["Weight limit", weightVal, weightVal !== "Not specified" ? "good" : "unknown"],

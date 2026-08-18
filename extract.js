@@ -296,7 +296,15 @@
         usedForField = true;
       }
 
-      const feeMatch = firstMatch(FEE_RE, s);
+      function normalizeFeePhrasing(text) {
+        if (!text || typeof text !== "string") return text;
+        return text
+          .replace(/\bper\s+each\s+(pet|dog)s?\b/gi, "per $1")
+          .replace(/\beach\s+(pet|dog)s?\b/gi, "per $1");
+      }
+
+      const feeNormalized = normalizeFeePhrasing(s);
+      const feeMatch = firstMatch(FEE_RE, feeNormalized);
       if (feeMatch) {
         const target = feeMatch.groups.target ? (feeMatch.groups.target.toLowerCase() === "dog" ? "pet" : feeMatch.groups.target.toLowerCase()) : null;
         const time = feeMatch.groups.time ? feeMatch.groups.time.toLowerCase() : null;
@@ -526,6 +534,7 @@
   function collectPolicyBadgeDetails(policy) {
     const details = [];
 
+    // Primary constraints in priority order: maxDogs -> weight -> fee -> approval
     if (policy.maxDogs) {
       details.push(`Max ${policy.maxDogs}`);
     }
@@ -536,30 +545,16 @@
     }
 
     const feeStr = formatFeeShort(policy.fee);
-    if (feeStr) {
+    if (feeStr && details.length < 2) {
       details.push(feeStr);
     }
 
-    const depStr = formatDepositShort(policy.deposit);
-    if (depStr) {
-      details.push(depStr);
-    }
-
-    if (policy.approvalRequired) {
+    if (policy.approvalRequired && details.length < 2) {
       details.push("Approval required");
     }
 
-    const hasContradictions = Boolean(
-      policy.contradictions && (policy.contradictions.maxDogs || policy.contradictions.weightLimit || policy.contradictions.fee)
-    );
-    if (hasContradictions) {
-      details.push("⚠ Conflicting info");
-    } else if (policy.confidence) {
-      const confFormatted = `${policy.confidence.charAt(0).toUpperCase() + policy.confidence.slice(1)} confidence`;
-      details.push(confFormatted);
-    }
-
-    return details;
+    // Return at most 2 secondary constraints for compact search badge
+    return details.slice(0, 2);
   }
 
   function deriveSearchBadge(canonical) {
@@ -593,13 +588,10 @@
     }
 
     if (policy.petsAllowed === false) {
-      const details = [];
-      if (policy.confidence) details.push(`${policy.confidence.charAt(0).toUpperCase() + policy.confidence.slice(1)} confidence`);
-      const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       return {
         statusKey: "banned",
         icon: "🚫",
-        text: `Pets not allowed${detailStr}`,
+        text: "Pets not allowed",
         className: "vdp-search-badge vdp-badge-banned",
       };
     }

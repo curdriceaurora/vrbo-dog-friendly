@@ -159,6 +159,80 @@
   }
 
   /**
+   * Calculate a numeric completeness score for a policy based on concrete fields.
+   */
+  function calculatePolicyCompleteness(policy) {
+    if (!policy) return 0;
+    let score = 0;
+    if (policy.petsAllowed !== null && policy.petsAllowed !== undefined) score += 2;
+    if (policy.maxDogs !== null && policy.maxDogs !== undefined) score += 2;
+    if (policy.weightLimit && policy.weightLimit.value !== null) score += 2;
+    if (policy.fee && policy.fee.amount !== null) score += 2;
+    if (policy.deposit && policy.deposit.amount !== null) score += 1;
+    if (policy.approvalRequired !== null && policy.approvalRequired !== undefined) score += 1;
+    if (policy.restrictionsFound) score += 1;
+    return score;
+  }
+
+  /**
+   * Enforces data quality precedence:
+   * valid detailed cache > detailed listing > detailed Apollo > shallow Apollo > unknown.
+   */
+  function canPolicyUpgrade(existingPolicy, newPolicy, newSource) {
+    if (!existingPolicy) return true;
+    if (!newPolicy) return false;
+
+    const existingScore = calculatePolicyCompleteness(existingPolicy);
+    const newScore = calculatePolicyCompleteness(newPolicy);
+
+    // If new is strictly more complete, allow upgrade
+    if (newScore > existingScore) return true;
+    // If existing is strictly more complete, prevent downgrade
+    if (existingScore > newScore) return false;
+
+    // If scores are equal, prefer direct listing fetch over search Apollo state
+    const sourcePriority = { "listing-page": 3, "search-response": 2, "search-page-state": 1 };
+    const existingPri = sourcePriority[existingPolicy.source] || 0;
+    const newPri = sourcePriority[newSource || newPolicy.source] || 0;
+
+    return newPri >= existingPri;
+  }
+
+  /**
+   * Strict persistence serializer that allowlists canonical schema fields
+   * and strips unneeded _raw objects, snippets, and DOM text from storage.
+   */
+  function serializeSearchPolicyForCache(policy) {
+    if (!policy || typeof policy !== "object") return null;
+    return {
+      schemaVersion: POLICY_SCHEMA_VERSION,
+      propertyId: policy.propertyId || null,
+      source: policy.source || "search-response",
+      extractedAt: policy.extractedAt || new Date().toISOString(),
+      petsAllowed: policy.petsAllowed !== undefined ? policy.petsAllowed : null,
+      maxDogs: policy.maxDogs !== undefined ? policy.maxDogs : null,
+      weightLimit: policy.weightLimit ? {
+        value: policy.weightLimit.value,
+        unit: policy.weightLimit.unit,
+        ...(policy.weightLimit.pounds !== undefined ? { pounds: policy.weightLimit.pounds } : {}),
+      } : null,
+      fee: policy.fee ? {
+        amount: policy.fee.amount,
+        currency: policy.fee.currency,
+        period: policy.fee.period,
+        ...(policy.fee.perPet ? { perPet: true } : {}),
+      } : null,
+      deposit: policy.deposit ? {
+        amount: policy.deposit.amount,
+        currency: policy.deposit.currency,
+      } : null,
+      approvalRequired: policy.approvalRequired !== undefined ? policy.approvalRequired : null,
+      restrictionsFound: Boolean(policy.restrictionsFound),
+      confidence: policy.confidence || "low",
+    };
+  }
+
+  /**
    * Search Fetch Queue & Cache Manager
    */
   function createSearchFetchQueue(options = {}) {
@@ -293,7 +367,23 @@
     }
 
     async function setCached(propertyId, data) {
-      if (!propertyId || isDisposed) return;
+      if (!propertyId || isDisposed || !data) return;
+
+      // Check precedence against existing cache to prevent downgrading richer data
+      const existing = await getCached(propertyId);
+      if (existing && existing.policy && data.policy) {
+        if (!canPolicyUpgrade(existing.policy, data.policy, data.source || data.policy.source)) {
+          return;
+        }
+      }
+
+      // Serialize policy with field allowlist (strips _raw, snippets, etc.)
+      const persistentPolicy = serializeSearchPolicyForCache(data.policy);
+      const persistentData = {
+        ...data,
+        policy: persistentPolicy || data.policy,
+      };
+
       const storedAt = Date.now();
       const expiresAt = storedAt + ttlMs;
       const entry = {
@@ -301,9 +391,9 @@
         propertyId,
         storedAt,
         expiresAt,
-        data,
+        data: persistentData,
       };
-      memoryCache.set(propertyId, { data, ts: storedAt });
+      memoryCache.set(propertyId, { data: persistentData, ts: storedAt });
 
       if (storage) {
         try {
@@ -706,6 +796,9 @@
     createSearchFetchQueue,
     validateListingUrl,
     performStorageMaintenance,
+    calculatePolicyCompleteness,
+    canPolicyUpgrade,
+    serializeSearchPolicyForCache,
   };
 });
 

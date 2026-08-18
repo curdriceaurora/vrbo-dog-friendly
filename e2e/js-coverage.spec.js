@@ -173,12 +173,31 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
       <style>${tokensCss}\n${popupCss}</style>
       <script>
         window.chrome = {
+          runtime: {
+            lastError: null,
+            sendMessage(msg, cb) { cb && cb({}); },
+          },
+          storage: {
+            local: {
+              get(k, cb) { cb({}); },
+              set(k, cb) { cb && cb(); }
+            }
+          },
           tabs: {
             query(opts, cb) { cb([{ id: 101, url: "https://www.vrbo.com/123456" }]); },
             sendMessage(id, msg, cb) {
               cb({
-                raw: { found: true, petsAllowed: true, maxDogs: 2, fee: "$150 per stay" },
-                policy: { schemaVersion: 1, petsAllowed: true, maxDogs: 2, fee: { amount: 150, currency: "USD", period: "stay" } }
+                policy: {
+                  schemaVersion: 1,
+                  petsAllowed: true,
+                  maxDogs: 2,
+                  weightLimit: { value: 50, unit: "lb" },
+                  fee: { amount: 150, currency: "USD", period: "stay" },
+                  deposit: { amount: 200, currency: "USD" },
+                  approvalRequired: true,
+                  restrictionsFound: true,
+                  _raw: { found: true, preReg: true, otherNotes: ["Breed restrictions apply."] }
+                }
               });
             }
           }
@@ -287,12 +306,24 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   collectCoverage(await listingPage.coverage.stopJSCoverage());
   await listingPage.close();
 
-  // Execute Popup Flow
+  // Execute Popup Flow with populated policy and approval required
   const popupPage = await context.newPage();
+  const popupErrors = [];
+  popupPage.on("pageerror", (err) => popupErrors.push(err));
+
   await popupPage.coverage.startJSCoverage();
   await popupPage.goto("https://www.vrbo.com/popup.html");
   const rescan = popupPage.locator("#rescan");
   await expect(rescan).toBeVisible();
+
+  // Assert populated rows render without crashing
+  const rows = popupPage.locator("#content .row");
+  await expect(rows).toHaveCount(5);
+  await expect(popupPage.locator("#content")).toContainText("Pre-registration");
+  await expect(popupPage.locator("#content")).toContainText("Required");
+  await expect(popupPage.locator("#content")).toContainText("Refundable deposit");
+  expect(popupErrors).toHaveLength(0);
+
   await rescan.click();
 
   collectCoverage(await popupPage.coverage.stopJSCoverage());

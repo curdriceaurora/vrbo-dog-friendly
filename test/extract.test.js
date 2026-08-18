@@ -214,7 +214,28 @@ test("fees and deposits", async (t) => {
     assert.equal(canonical.weightLimit.unit, "kg");
 
     const badge = deriveSearchBadge(canonical);
-    assert.equal(badge.text, "Dogs allowed · 22.5 kg · High confidence", "Must not round 22.5 kg up to 23 kg");
+    assert.equal(badge.text, "Dogs allowed · 22.5 kg", "Must not round 22.5 kg up to 23 kg");
+  });
+
+  await t.test("fee language synonyms normalize to identical canonical representations", () => {
+    const synonyms = [
+      "A $25 per pet per night fee applies.",
+      "A $25 each pet per night fee applies.",
+      "A $25 per each pet per night fee applies.",
+      "A $25 each dog per night fee applies.",
+      "A $25 per each dog per night fee applies.",
+    ];
+
+    for (const phrase of synonyms) {
+      const extracted = extractPolicy([{ text: phrase, source: "House Rules", priority: 1 }]);
+      assert.ok(extracted.fee, `Failed to extract fee from: "${phrase}"`);
+      const canonical = normalizePolicy(extracted);
+      assert.deepStrictEqual(
+        canonical.fee,
+        { amount: 25, currency: "USD", period: "night", perPet: true },
+        `Synonym "${phrase}" did not produce expected canonical model`
+      );
+    }
   });
 
   await t.test("deriveSearchBadge returns restrictions warning status for approvalRequired and restrictionsFound", () => {
@@ -267,7 +288,7 @@ test("fees and deposits", async (t) => {
     assert.strictEqual(p.deposit, "$200");
   });
 
-  await t.test("separate sentences for max allowed dogs and stay-level fee are extracted independently and unified", () => {
+  await t.test("compact badge budget: enforces status + at most two secondary constraints", () => {
     const raw = policyFor(
       "Up to 2 dogs are welcome.",
       "A $150 pet fee applies per stay.",
@@ -290,7 +311,8 @@ test("fees and deposits", async (t) => {
 
     const badge = deriveSearchBadge(canonical);
     assert.strictEqual(badge.statusKey, "allowed");
-    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay · $200 deposit · High confidence");
+    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs");
+    assert.ok(badge.text.length < 50, `Badge text "${badge.text}" exceeds compact length budget of 50 chars`);
   });
 
   await t.test("conflicting fees are flagged", () => {
