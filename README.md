@@ -30,6 +30,8 @@ The extension reads the pet policy information available on a listing and consol
 - Registration or prior approval requirements
 - Other restrictions, such as breed or leash rules
 
+![Listing Pet Policy Summary Pop-up](docs/listing-summary-popup.png)
+
 Where possible, extracted rules link back to the source text on the listing, with the relevant text highlighted. If two sections contain conflicting rules, the extension flags the discrepancy rather than attempting to decide which one is authoritative.
 
 ## Search Result Badges
@@ -67,7 +69,6 @@ When you visit a listing on `vrbo.com`, the policy card opens in the top-right c
 - **Source verification**: Click the **source** link next to any value to highlight the original text on the page.
 - **Other pet notes**: Click **Other pet notes** to read extra guidelines (such as leash rules or crate requirements).
 - **Contradiction alerts (⚠️)**: The card alerts you if the host wrote conflicting rules in different sections.
-- **Minimize / Close**: Click the header to collapse the card, or click **×** to remove it.
 - **Rescan (↻)**: Click the refresh icon to re-run extraction if a listing loads slowly.
 - **Data Source**: The footer shows if data came from structured listing data or visible page text.
 
