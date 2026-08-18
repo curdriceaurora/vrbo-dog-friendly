@@ -2,6 +2,25 @@
 
 This document records all changes to **Vrbow**.
 
+## [v1.1.1] - 2026-08-18
+
+### Policy Extraction & Edge Case Fixes
+- **Active Verb & Modifier Allowances**: Correctly parses active phrasing (`This property allows 1 dog`, `We permit up to 2 pets`) and modifier fee phrasing (`additional fee of $500`, `extra fee of $250`).
+- **Compound Pet Phrasings**: Supports compound phrases including `Dogs and cats allowed`, `Dogs & cats welcome`, and `Cats and dogs welcome`.
+- **Colloquial Weight Units**: Recognizes `pds` / `pd` weight units and normalizes them to canonical `lb`.
+- **Bare Numeric Pet Fees**: Parses pet fees written without currency symbols (such as `Pet fee 100.00`, `200 pet fee for the whole trip`, and `Dog fee: 75`).
+- **Dog Count & Fee Disambiguation**: Added negative lookahead to prevent fee descriptions (e.g. `200 pet fee`, `150 dog deposit`) from being misattributed as dog count limits.
+- **Trip & Stay Normalization**: Maps `whole trip` and `entire stay` to standard `period: stay`.
+
+### Architecture & Network Reliability
+- **Apollo Node Attribute Cross-Referencing**: Resolves root property nodes across `propertyId`, `vrboPropertyId`, `expediaPropertyId`, and `id` when Apollo keys use internal Expedia IDs.
+- **Redirects & Canonical ID Resolution**: Detects `res.url` redirects in background fetches and dual-caches policy under requested and canonical IDs.
+- **English Locale & Language Forcing**: Injects `locale=en_US&siteid=1` and `Accept-Language: en-US,en;q=0.9` on background fetches to guarantee consistent English extraction.
+- **Multi-Unit Hierarchy Pruning**: Prunes child `Unit`, `RentalUnit`, `Room`, `RatePlan` entities to protect top-level property badges from child unit restriction pollution.
+- **Default Search Badging Setting**: Enabled search badging by default on installation.
+
+---
+
 ## [v1.1.0] - 2026-08-18
 
 ### Search Page Badges and Tooltips
