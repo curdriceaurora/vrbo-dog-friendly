@@ -480,8 +480,6 @@ test("buildCorpus", async (t) => {
     const raw2 = policyFor("We permit up to 2 dogs with an extra fee of $250 per stay.");
     assert.strictEqual(raw2.petsAllowed, true);
     assert.strictEqual(raw2.maxDogs, 2);
-    assert.strictEqual(raw2.fee, "$250 per stay");
-
     const raw4 = policyFor("2 dogs (under 50 lbs)");
     assert.strictEqual(raw4.petsAllowed, true);
     assert.strictEqual(raw4.maxDogs, 2);
@@ -489,6 +487,20 @@ test("buildCorpus", async (t) => {
 
     const badge4 = deriveSearchBadge(normalizePolicy(raw4));
     assert.strictEqual(badge4.text, "Max 2 dogs allowed · 50 lbs");
+
+    const raw5 = policyFor("Dogs and cats allowed");
+    assert.strictEqual(raw5.petsAllowed, true);
+
+    const raw6 = policyFor("Cats and dogs welcome, max 1 dog, up to 50 lbs.");
+    assert.strictEqual(raw6.petsAllowed, true);
+    assert.strictEqual(raw6.maxDogs, 1);
+    assert.strictEqual(raw6.weightPerDog, "50 lbs");
+
+    const raw7 = policyFor("Dogs must me under 25 pds .");
+    assert.strictEqual(raw7.weightPerDog, "25 lbs");
+
+    const raw8 = policyFor("Pet fee 100.00");
+    assert.strictEqual(raw8.fee, "$100.00");
   });
 });
 

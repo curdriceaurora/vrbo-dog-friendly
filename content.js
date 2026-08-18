@@ -1461,7 +1461,7 @@
 
   // initial run
   chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
-    const searchBadgingEnabled = data && data.vrbow_enable_search_badging === true; // Default OFF
+    const searchBadgingEnabled = data ? data.vrbow_enable_search_badging !== false : true; // Default ON
     if (isSearchUrl(location.href)) {
       if (searchBadgingEnabled) initSearchManager();
     } else {
@@ -1473,7 +1473,7 @@
   // Listen for settings toggle live
   chrome.storage?.onChanged?.addListener?.((changes, area) => {
     if (area === "local" && changes.vrbow_enable_search_badging) {
-      const enabled = changes.vrbow_enable_search_badging.newValue === true;
+      const enabled = changes.vrbow_enable_search_badging.newValue !== false;
       if (isSearchUrl(location.href)) {
         if (enabled) {
           initSearchManager();

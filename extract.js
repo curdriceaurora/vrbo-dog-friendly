@@ -129,14 +129,15 @@
   const WORD_NUMS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
   const NUM = `(?<num>\\d+|${Object.keys(WORD_NUMS).join("|")})`;
 
-  // Every polarity/limit pattern accepts "dog" wherever it accepts "pet".
+  // Every polarity/limit pattern accepts "dog" wherever it accepts "pet",
+  // as well as common compound phrasings like "dogs and cats", "dogs & cats", "cats and dogs".
   // Hosts write both interchangeably ("No dogs allowed", "Dogs welcome"),
   // and matching only "pet" silently dropped those listings to "unknown".
-  const PET = "(?:pets?|dogs?|canines?)";
+  const PET = "(?:pets?|dogs?(?:\\s*(?:and|&|or|\\/)\\s*cats?)?|canines?|cats?\\s*(?:and|&|or|\\/)\\s*dogs?)";
 
   // Weight is only meaningful with its unit attached: the manifest claims
   // fewo-direkt.de / abritel.fr / stayz.com.au, and those listings quote kg.
-  const WEIGHT_UNIT = "(?<unit>lbs?\\.?|pounds?|kgs?\\.?|kilos?|kilograms?)";
+  const WEIGHT_UNIT = "(?<unit>lbs?\\.?|pounds?|pds?\\.?|kgs?\\.?|kilos?|kilograms?)";
 
   // Longer symbols first so "AU$50" isn't read as a bare "$" match.
   const CUR = "(?<cur>AU\\$|NZ\\$|CA\\$|US\\$|A\\$|\\$|€|£|USD|EUR|GBP|AUD|NZD)";
@@ -285,8 +286,8 @@
     );
 
     const FEE_RE = [
-      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
@@ -294,6 +295,7 @@
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
+      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
     ];
     const RELAXED_MAX_DOGS_RE = [
       new RegExp(`^(?:max(?:imum)?|limit)?:?\\s*${NUM}(?:\\s*(?:pets?|dogs?))?$`, "i"),
@@ -532,10 +534,10 @@
     // 1. Weight limit normalization
     let weightLimit = null;
     if (extracted.weightPerDog) {
-      const wm = String(extracted.weightPerDog).match(/(\d+(?:\.\d+)?)\s*(lbs?|kg)/i);
+      const wm = String(extracted.weightPerDog).match(/(\d+(?:\.\d+)?)\s*(lbs?|pounds?|pds?|kgs?|kilos?)/i);
       if (wm) {
         const val = parseFloat(wm[1]);
-        const isKg = /kg/i.test(wm[2]);
+        const isKg = /kg|kilo/i.test(wm[2]);
         const unit = isKg ? "kg" : "lb";
         const pounds = isKg ? val * 2.20462262 : val;
         weightLimit = { value: val, unit, pounds };

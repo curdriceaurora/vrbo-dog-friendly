@@ -99,6 +99,19 @@ test("exercises 100% of production theme rules across color schemes and forced c
           finalRow.className = "row";
           document.body.appendChild(finalRow);
           getComputedStyle(finalRow).borderBottomStyle;
+
+          const settings = document.createElement("div");
+          settings.className = "settings";
+          const label = document.createElement("label");
+          label.className = "toggle-label";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          label.appendChild(input);
+          settings.appendChild(label);
+          document.body.appendChild(settings);
+          getComputedStyle(settings).borderTopStyle;
+          getComputedStyle(label).display;
+          getComputedStyle(input).cursor;
         });
       }
 
