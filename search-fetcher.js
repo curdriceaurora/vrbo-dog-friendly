@@ -5,7 +5,7 @@
   if (typeof module === "object" && module.exports) {
     module.exports = factory(require("./extract.js"));
   } else {
-    root.VdpSearchFetcher = factory(root.VdpExtract);
+    root.VdpSearchFetcher = factory(root.VDPExtract || root.VdpExtract);
   }
 })(typeof globalThis !== "undefined" ? globalThis : this, function (extract) {
   "use strict";
