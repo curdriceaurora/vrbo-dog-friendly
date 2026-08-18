@@ -257,11 +257,10 @@
       new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}\\b`, "i"),
       new RegExp(`\\b${NUM}\\s*${PET}\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
       new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?:\\s*total)?\\b`, "i"),
-      // "Two Dogs up to 50lbs welcome" — the count leads and the
-      // allowance word only arrives after an intervening weight clause,
-      // so the qualifier can't be required adjacent to the noun. Bounded
+      // "Two Dogs up to 50lbs welcome", "2 dogs (under 50 lbs)", "2 dogs, 50 lbs max" —
+      // the count leads and the qualifier or weight clause follows. Bounded
       // to the same sentence and 40 characters so it stays a local claim.
-      new RegExp(`\\b${NUM}\\s+${PET}\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?)\\b)`, "i"),
+      new RegExp(`\\b${NUM}\\s+${PET}\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?|under|less than|up to|max(?:imum)?|lbs?|pounds?|kg|weight|limit|fee)\\b)`, "i"),
       // "Pets allowed: dogs (limit 2 total)" — count without a repeated noun.
       new RegExp(`\\blimit(?:ed)?\\s*(?:to\\s*)?${NUM}\\s*total\\b`, "i"),
     ];

@@ -175,7 +175,7 @@
       .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, " ")
       .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ")
       .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|section|article|li|h[1-6]|tr|td|blockquote)>/gi, "\n");
+      .replace(/<\/(p|div|section|article|li|h[1-6]|tr|td|th|dd|dt|blockquote)>/gi, "\n");
 
     const rawText = cleanHtml.replace(/<[^>]+>/g, " ");
     const sentences = typeof extract.getSentences === "function"
