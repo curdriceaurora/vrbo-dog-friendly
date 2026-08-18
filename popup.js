@@ -104,6 +104,24 @@ function withActiveTab(cb) {
   });
 }
 
+function isSearchUrl(urlStr) {
+  try {
+    const u = new URL(urlStr);
+    if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
+    return /^\/(search|Hotel-Search|vacation-rentals\/search)/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function renderSearchPageNotice() {
+  const c = document.getElementById("content");
+  c.innerHTML = "";
+  c.appendChild(
+    el(`<p class="muted">You are on a search results page. Pet policy badges and quick-view tooltips appear directly on each listing card below.</p>`)
+  );
+}
+
 function isListingUrl(urlStr) {
   try {
     const u = new URL(urlStr);
@@ -120,7 +138,15 @@ function isListingUrl(urlStr) {
 
 function loadPolicy() {
   withActiveTab((tab) => {
-    if (!tab || !tab.url || !isListingUrl(tab.url)) {
+    if (!tab || !tab.url) {
+      renderNotVrbo();
+      return;
+    }
+    if (isSearchUrl(tab.url)) {
+      renderSearchPageNotice();
+      return;
+    }
+    if (!isListingUrl(tab.url)) {
       renderNotVrbo();
       return;
     }
