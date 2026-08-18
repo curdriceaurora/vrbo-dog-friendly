@@ -193,7 +193,7 @@
     const ALLOWED_RE = new RegExp(`\\b${PET}\\s+(?:are\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b|\\b(?:dog|pet)[-\\s]?friendly\\b`, "i");
 
     const MAX_DOGS_RE = [
-      new RegExp(`\\b(?:up to|maximum of|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM}\\s*${PET}\\b`, "i"),
+      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM}\\s*${PET}\\b`, "i"),
       new RegExp(`\\b${NUM}\\s*${PET}\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
       new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?:\\s*total)?\\b`, "i"),
       // "Two Dogs up to 50lbs welcome" — the count leads and the
