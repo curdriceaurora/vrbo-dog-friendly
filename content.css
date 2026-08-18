@@ -181,6 +181,16 @@
   transition: outline-color 0.3s ease;
 }
 
+/* Elevate container hosting badge above full-card anchor overlays */
+[data-vdp-prop-id] :has(> .vdp-search-badge),
+[data-vdp-prop-id] .uitk-card-content,
+[data-vdp-prop-id] [data-stid*="content"],
+[data-vdp-prop-id] [data-stid*="price"] {
+  position: relative !important;
+  z-index: 2 !important;
+  pointer-events: auto !important;
+}
+
 /* Search Results Inline Badge */
 .vdp-search-badge {
   display: inline-flex;

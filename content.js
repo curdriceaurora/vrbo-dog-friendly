@@ -1006,6 +1006,11 @@
       badge.textContent = "⏳ Checking pet policy...";
 
       const targetContainer = card.querySelector('[data-stid*="price"], [data-stid*="content"], .uitk-card-content') || card;
+      if (targetContainer !== card) {
+        targetContainer.style.position = "relative";
+        targetContainer.style.zIndex = "2";
+        targetContainer.style.pointerEvents = "auto";
+      }
       targetContainer.appendChild(badge);
 
       // Dynamic handlers read card data attributes at event time
