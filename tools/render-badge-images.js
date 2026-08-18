@@ -45,6 +45,15 @@ async function renderBadges() {
   <div class="badge-container">
     <div class="vdp-search-badge vdp-badge-banned" id="badge-banned" tabindex="0" role="button">🚫 Pets not allowed</div>
   </div>
+  <div class="badge-container">
+    <div class="vdp-search-badge vdp-badge-loading" id="badge-loading" tabindex="0" role="button">⏳ Checking pet policy...</div>
+  </div>
+  <div class="badge-container">
+    <div class="vdp-search-badge vdp-badge-restrictions" id="badge-restrictions" tabindex="0" role="button">🐾 Pet restrictions · Max 1 dog · $100/stay</div>
+  </div>
+  <div class="badge-container">
+    <div class="vdp-search-badge vdp-badge-unknown" id="badge-unknown" tabindex="0" role="button">🐾 Check pet rules on listing</div>
+  </div>
 </body>
 </html>
 `;
@@ -59,6 +68,9 @@ async function renderBadges() {
     { id: "#badge-limits", filename: "badge-max-2-dogs.png" },
     { id: "#badge-tiered", filename: "badge-dogs-allowed-tiered.png" },
     { id: "#badge-banned", filename: "badge-pets-not-allowed.png" },
+    { id: "#badge-loading", filename: "badge-loading.png" },
+    { id: "#badge-restrictions", filename: "badge-restrictions.png" },
+    { id: "#badge-unknown", filename: "badge-check-rules.png" },
   ];
 
   for (const b of badges) {
@@ -71,7 +83,7 @@ async function renderBadges() {
     console.log(`Saved ${b.filename}`);
   }
 
-  // Also create a combined search card showcase
+  // Complete showcase card excluding capped
   const showcaseHtml = `
 <!DOCTYPE html>
 <html>
@@ -106,11 +118,15 @@ async function renderBadges() {
       font-size: 12px;
       font-weight: 600;
       color: #64748b;
-      min-width: 140px;
+      min-width: 150px;
     }
   </style>
 </head>
 <body>
+  <div class="badge-row">
+    <span class="badge-label">In-Flight / Queued</span>
+    <div class="vdp-search-badge vdp-badge-loading">⏳ Checking pet policy...</div>
+  </div>
   <div class="badge-row">
     <span class="badge-label">Limits & Flat Fee</span>
     <div class="vdp-search-badge vdp-badge-allowed">🐾 Max 2 dogs allowed · 50 lbs · $150/stay</div>
@@ -120,8 +136,16 @@ async function renderBadges() {
     <div class="vdp-search-badge vdp-badge-allowed">🐾 Dogs allowed · 1st free · $25/add'l/stay</div>
   </div>
   <div class="badge-row">
+    <span class="badge-label">Pet Restrictions Apply</span>
+    <div class="vdp-search-badge vdp-badge-restrictions">🐾 Pet restrictions · Max 1 dog · $100/stay</div>
+  </div>
+  <div class="badge-row">
     <span class="badge-label">Pets Prohibited</span>
     <div class="vdp-search-badge vdp-badge-banned">🚫 Pets not allowed</div>
+  </div>
+  <div class="badge-row">
+    <span class="badge-label">Fallback / Verification</span>
+    <div class="vdp-search-badge vdp-badge-unknown">🐾 Check pet rules on listing</div>
   </div>
 </body>
 </html>
