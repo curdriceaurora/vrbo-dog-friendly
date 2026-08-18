@@ -467,7 +467,29 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(raw.weightPerDog, "50 lbs");
     assert.strictEqual(raw.maxDogs, 2);
   });
+
+  await t.test("extracts active verb allowances and additional fee phrasing in freeform prose", () => {
+    const raw1 = policyFor("This property allows 1 dog with an additional fee of $500.");
+    assert.strictEqual(raw1.petsAllowed, true);
+    assert.strictEqual(raw1.maxDogs, 1);
+    assert.strictEqual(raw1.fee, "$500");
+
+    const badge1 = deriveSearchBadge(normalizePolicy(raw1));
+    assert.strictEqual(badge1.text, "Max 1 dog allowed · $500 pet fee");
+
+    const raw2 = policyFor("We permit up to 2 dogs with an extra fee of $250 per stay.");
+    assert.strictEqual(raw2.petsAllowed, true);
+    assert.strictEqual(raw2.maxDogs, 2);
+    assert.strictEqual(raw2.fee, "$250 per stay");
+
+    const raw3 = policyFor("The host welcomes 1 pet with a $300 fee.");
+    assert.strictEqual(raw3.petsAllowed, true);
+    assert.strictEqual(raw3.maxDogs, 1);
+    assert.strictEqual(raw3.fee, "$300");
+  });
 });
+
+
 
 
 

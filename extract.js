@@ -246,10 +246,15 @@
         `|\\b(?:pet|dog)[-\\s]?free\\b`,
       "i"
     );
-    const ALLOWED_RE = new RegExp(`\\b${PET}\\s+(?:(?:are|is)\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b|\\b(?:dog|pet)[-\\s]?friendly\\b`, "i");
+    const ALLOWED_RE = new RegExp(
+      `\\b${PET}\\s+(?:(?:are|is)\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b` +
+      `|\\b(?:dog|pet)[-\\s]?friendly\\b` +
+      `|\\b(?:allows?|permits?|welcomes?|accepts?)\\s+(?:up\\s+to\\s+)?(?:${NUM}\\s+)?${PET}\\b`,
+      "i"
+    );
 
     const MAX_DOGS_RE = [
-      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of)\\s*${NUM}\\s*${PET}\\b`, "i"),
+      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}\\b`, "i"),
       new RegExp(`\\b${NUM}\\s*${PET}\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
       new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?:\\s*total)?\\b`, "i"),
       // "Two Dogs up to 50lbs welcome" — the count leads and the
@@ -281,10 +286,10 @@
     );
 
     const FEE_RE = [
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`(?:pet|dog)\\s*fee\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
