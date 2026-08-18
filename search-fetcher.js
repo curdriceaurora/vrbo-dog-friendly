@@ -346,6 +346,7 @@
           parsed.policy.weightPerDog !== null ||
           parsed.policy.fee !== null ||
           parsed.policy.deposit !== null ||
+          parsed.policy.preReg !== null ||
           (parsed.policy.otherNotes && parsed.policy.otherNotes.length > 0)
         );
 

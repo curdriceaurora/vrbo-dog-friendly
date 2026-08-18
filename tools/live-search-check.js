@@ -222,32 +222,28 @@ async function run() {
 
     // 2. Discover Search Card DOM elements
     const domRes = await targetCdp.send("Runtime.evaluate", {
+      contextId,
       expression: `(() => {
-        // Collect all anchors with hrefs on the page
         const allLinks = Array.from(document.querySelectorAll('a[href]')).map(a => ({
           href: a.href,
           text: a.textContent.trim().slice(0, 50),
           className: a.className,
-          parentTag: a.parentElement ? a.parentElement.tagName : null,
-          parentClass: a.parentElement ? a.parentElement.className : null,
           dataStid: a.getAttribute('data-stid') || a.closest('[data-stid]')?.getAttribute('data-stid')
         }));
 
         const listingLinks = allLinks.filter(l => /vrbo\.com\/(?:\d+|pdp|vacation-rental|hotel)/i.test(l.href) || /\/\d{5,}/.test(l.href));
 
-        // Inspect .uitk-card structures
         const uitkCards = Array.from(document.querySelectorAll('.uitk-card, [class*="card"], [class*="listing"], [class*="property"]')).slice(0, 5).map(el => ({
           tag: el.tagName,
           className: el.className,
           dataStid: el.getAttribute('data-stid'),
-          dataTestid: el.getAttribute('data-testid'),
-          innerLinks: Array.from(el.querySelectorAll('a')).map(a => a.href)
+          dataTestid: el.getAttribute('data-testid')
         }));
 
         return {
           totalLinks: allLinks.length,
           listingLinksFound: listingLinks.length,
-          sampleListingLinks: listingLinks.slice(0, 8),
+          sampleListingLinks: listingLinks.slice(0, 5).map(l => l.href),
           sampleCardContainers: uitkCards
         };
       })()`,
@@ -255,16 +251,22 @@ async function run() {
     });
     console.log("\n2. Live DOM Deep Inspection:", JSON.stringify(domRes.result.value, null, 2));
 
-    // 3. Inspect Injected Badges
+    // 3. Inspect Injected Badges & Verify Card IDs
     const badgeRes = await targetCdp.send("Runtime.evaluate", {
+      contextId,
       expression: `(() => {
         const badges = document.querySelectorAll('.vdp-search-badge');
-        const badgeDetails = Array.from(badges).map(b => ({
-          text: b.textContent.trim(),
-          className: b.className,
-          status: b.dataset.vdpStatus,
-          propId: b.closest('[data-vdp-prop-id]')?.getAttribute('data-vdp-prop-id')
-        }));
+        const badgeDetails = Array.from(badges).map(b => {
+          const card = b.closest('[data-vdp-prop-id]');
+          const link = card ? card.querySelector('a[href*="/"]') : null;
+          return {
+            text: b.textContent.trim(),
+            className: b.className,
+            status: b.dataset.vdpStatus,
+            propId: card ? card.getAttribute('data-vdp-prop-id') : null,
+            linkHref: link ? link.href : null
+          };
+        });
         return {
           totalBadges: badges.length,
           sampleBadges: badgeDetails.slice(0, 5)
@@ -272,45 +274,91 @@ async function run() {
       })()`,
       returnByValue: true,
     });
-    // 4. Assertive Hover / Tooltip Interaction Test
-    const tooltipTestRes = await targetCdp.send("Runtime.evaluate", {
+    console.log("\n3. Vrbow Search Badges:", JSON.stringify(badgeRes.result.value, null, 2));
+
+    // 4. Assertive Hover, Mouse Gap Transit, Close Button, and Keyboard Flow Verification
+    const interactionTestRes = await targetCdp.send("Runtime.evaluate", {
       contextId,
       expression: `(async () => {
         const firstBadge = document.querySelector('.vdp-search-badge');
         if (!firstBadge) return { error: 'No badge found to hover' };
+
+        const parentCard = firstBadge.closest('[data-vdp-prop-id]');
+        const expectedPropId = parentCard ? parentCard.getAttribute('data-vdp-prop-id') : null;
+
+        // Step A: Mouse enters badge
         firstBadge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
         await new Promise(r => setTimeout(r, 400));
         const tooltip = document.querySelector('.vdp-search-tooltip');
-        const isVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
-        const hasText = tooltip && tooltip.textContent.includes('Dog Policy Details');
+        const initialVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
+        const hasHeader = tooltip && tooltip.textContent.includes('Dog Policy Details');
+
+        // Step B: Pointer moves across the gap to enter the tooltip (grace period test)
+        firstBadge.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true, relatedTarget: tooltip }));
+        tooltip.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 300));
+        const preservedAcrossGap = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
+
+        // Step C: Verify listing link inside tooltip matches listing card
+        const tooltipLink = tooltip.querySelector('a[href*="/"]');
+        const linkMatchesProp = tooltipLink && expectedPropId && tooltipLink.href.includes(expectedPropId);
+
+        // Step D: Dismiss via Close Button click
+        const closeBtn = tooltip.querySelector('.vdp-tooltip-close');
+        if (closeBtn) closeBtn.click();
+        await new Promise(r => setTimeout(r, 200));
+        const dismissedViaClose = tooltip.style.display === 'none';
+
+        // Step E: Keyboard activation (Enter key on badge)
+        firstBadge.focus();
+        firstBadge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        await new Promise(r => setTimeout(r, 300));
+        const openedViaKeyboard = tooltip.style.display !== 'none';
+
+        // Step F: Dismiss via Escape key inside dialog
+        tooltip.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await new Promise(r => setTimeout(r, 200));
+        const dismissedViaEscape = tooltip.style.display === 'none';
+
         return {
+          expectedPropId,
           badgeFound: true,
-          tooltipExists: !!tooltip,
-          tooltipVisible: isVisible,
-          hasExpectedHeader: hasText,
-          tooltipText: tooltip ? tooltip.textContent.trim().slice(0, 80) : null
+          initialVisible,
+          hasHeader,
+          preservedAcrossGap,
+          linkMatchesProp,
+          dismissedViaClose,
+          openedViaKeyboard,
+          dismissedViaEscape
         };
       })()`,
       awaitPromise: true,
       returnByValue: true,
     });
-    console.log("\n4. Assertive Tooltip Hover Verification:", JSON.stringify(tooltipTestRes.result.value, null, 2));
+    console.log("\n4. Assertive Tooltip & Interaction Verification:", JSON.stringify(interactionTestRes.result.value, null, 2));
 
     // 5. Verification Assertions
     const totalBadges = badgeRes.result.value?.totalBadges || 0;
-    const tooltipOk = tooltipTestRes.result.value?.tooltipVisible && tooltipTestRes.result.value?.hasExpectedHeader;
+    const inter = interactionTestRes.result.value;
+    const allInteractionsPassed = inter?.initialVisible &&
+      inter?.hasHeader &&
+      inter?.preservedAcrossGap &&
+      inter?.linkMatchesProp &&
+      inter?.dismissedViaClose &&
+      inter?.openedViaKeyboard &&
+      inter?.dismissedViaEscape;
 
     console.log("\n══════════════════════════════════════════════════════");
     if (totalBadges === 0) {
       console.error("❌ ASSERTION FAILED: Zero search badges were injected on live page.");
       process.exit(1);
     }
-    if (!tooltipOk) {
-      console.error("❌ ASSERTION FAILED: Hover tooltip failed to display on live badge.");
+    if (!allInteractionsPassed) {
+      console.error("❌ ASSERTION FAILED: Live tooltip interaction checks did not all pass:", inter);
       process.exit(1);
     }
 
-    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, interactive tooltip verified.`);
+    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, interactive mouse gap transit, close button, link matching, and keyboard flows verified.`);
     console.log("══════════════════════════════════════════════════════\n");
   } finally {
     if (targetCdp) targetCdp.close();

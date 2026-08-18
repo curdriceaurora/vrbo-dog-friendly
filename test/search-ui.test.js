@@ -138,4 +138,38 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     assert.equal(storageWrites.length, 1, "Valid policy must be cached to storage");
     queue.dispose();
   });
+
+  await t.test("pre-registration-only policies produce and cache ok", async () => {
+    const storageWrites = [];
+    const mockStorage = {
+      get(keys, cb) { cb({}); },
+      set(obj, cb) { storageWrites.push(obj); cb && cb(); },
+      remove(keys, cb) { cb && cb(); },
+    };
+
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "<section>House Rules: Prior approval is required for pets.</section>",
+    });
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      storage: mockStorage,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    const notifications = [];
+    queue.subscribe("prop_prereg", (res) => notifications.push(res));
+    queue.enqueue("prop_prereg", "https://www.vrbo.com/prereg");
+
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].status, "ok");
+    assert.equal(notifications[0].policy.preReg, true);
+    assert.equal(storageWrites.length, 1, "Pre-reg policy must be cached");
+    queue.dispose();
+  });
 });

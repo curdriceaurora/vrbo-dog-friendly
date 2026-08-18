@@ -18,6 +18,19 @@ class MockElement {
     this.eventListeners = new Map();
     this.parentNode = null;
     this._textContent = "";
+    this._classes = new Set();
+    this.classList = {
+      add: (cls) => this._classes.add(cls),
+      remove: (cls) => this._classes.delete(cls),
+      contains: (cls) => this._classes.has(cls),
+    };
+  }
+
+  get className() {
+    return Array.from(this._classes).join(" ");
+  }
+  set className(val) {
+    this._classes = new Set(String(val).split(/\s+/).filter(Boolean));
   }
 
   get textContent() {
@@ -295,13 +308,43 @@ test("Consolidated State-Transition Suite", async (t) => {
   });
 
   await t.test("4. Search query A → search query B (URL change dismisses open dialog)", () => {
-    let isDialogVisible = true;
-    function onUrlChange() {
-      isDialogVisible = false; // Always dismiss
+    let lastScannedUrl = "https://www.vrbo.com/Hotel-Search?destination=Miami";
+    const tooltip = new MockElement("div");
+    tooltip.className = "vdp-search-tooltip vdp-tooltip-visible";
+    tooltip.style.display = "block";
+    tooltip.setAttribute("aria-hidden", "false");
+
+    let activeTooltipTarget = new MockElement("div");
+    let activeTooltipPropId = "prop_123";
+
+    function hideTooltip() {
+      tooltip.classList.remove("vdp-tooltip-visible");
+      tooltip.setAttribute("aria-hidden", "true");
+      tooltip.style.display = "none";
+      if (activeTooltipTarget) {
+        activeTooltipTarget.setAttribute("aria-expanded", "false");
+        activeTooltipTarget = null;
+        activeTooltipPropId = null;
+      }
     }
 
-    onUrlChange();
-    assert.equal(isDialogVisible, false);
+    function onUrlMaybeChanged(newUrl) {
+      if (newUrl !== lastScannedUrl) {
+        lastScannedUrl = newUrl;
+        hideTooltip();
+      }
+    }
+
+    assert.equal(tooltip.style.display, "block");
+    assert.equal(tooltip.getAttribute("aria-hidden"), "false");
+
+    // Navigate to new search query
+    onUrlMaybeChanged("https://www.vrbo.com/Hotel-Search?destination=Orlando");
+
+    assert.equal(tooltip.style.display, "none", "Tooltip must be hidden on URL change");
+    assert.equal(tooltip.getAttribute("aria-hidden"), "true");
+    assert.equal(activeTooltipTarget, null, "Active tooltip target must be cleared");
+    assert.equal(activeTooltipPropId, null, "Active tooltip property ID must be cleared");
   });
 
   await t.test("5. Visible → hidden → visible (Queue pauses on hidden and resumes on visible)", async () => {

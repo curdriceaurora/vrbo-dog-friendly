@@ -1096,6 +1096,7 @@
   function onUrlMaybeChanged() {
     if (location.href !== lastScannedUrl) {
       lastScannedUrl = location.href;
+      hideTooltip();
 
       if (isSearchUrl(location.href)) {
         removePanel();
