@@ -788,7 +788,7 @@
     if (!badge || !data) return;
     let statusKey = data.status || "unknown";
     let icon = "🐾";
-    let text = "Policy on listing";
+    let text = "Check listing for pet rules";
     let className = "vdp-search-badge vdp-badge-unknown";
 
     if (data.status === "ok" && data.policy) {
@@ -805,24 +805,34 @@
         if (p.maxDogs) details.push(`${p.maxDogs} dog${p.maxDogs > 1 ? "s" : ""}`);
         if (p.weightPerDog) details.push(`≤${p.weightPerDog}`);
         if (p.fee) details.push(p.fee);
-        const detailStr = details.length ? ` (${details.join(" · ")})` : "";
+        const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
         text = `Dogs allowed${detailStr}`;
         className = "vdp-search-badge vdp-badge-allowed";
       }
     } else if (data.status === "capped") {
       statusKey = "capped";
       icon = "🐾";
-      text = "Hover for pet policy";
+      text = "Hover or open listing";
       className = "vdp-search-badge vdp-badge-capped";
     } else if (data.status === "rate_limited") {
       statusKey = "rate_limited";
       icon = "🐾";
-      text = "View listing for rules";
+      text = "Open listing to check rules";
+      className = "vdp-search-badge vdp-badge-unknown";
+    } else if (data.status === "timeout") {
+      statusKey = "timeout";
+      icon = "🐾";
+      text = "Open listing to check rules";
+      className = "vdp-search-badge vdp-badge-unknown";
+    } else if (data.status === "error") {
+      statusKey = "error";
+      icon = "🐾";
+      text = "Check rules on listing";
       className = "vdp-search-badge vdp-badge-unknown";
     } else if (data.status === "unknown") {
       statusKey = "unknown";
       icon = "🐾";
-      text = "Pet rules on listing";
+      text = "Check listing for pet rules";
       className = "vdp-search-badge vdp-badge-unknown";
     }
 
@@ -901,7 +911,7 @@
     header.appendChild(closeBtn);
     searchTooltipEl.appendChild(header);
 
-    if (!data || data.status !== "ok" || !data.policy) {
+    if (!data || data.status === "loading") {
       const row = document.createElement("div");
       row.className = "vdp-tooltip-row";
       const lbl = document.createElement("span");
@@ -909,7 +919,67 @@
       lbl.textContent = "Status";
       const val = document.createElement("span");
       val.className = "vdp-tooltip-val";
-      val.textContent = data?.status === "unknown" ? "Pet rules not specified in summary" : "Checking policy...";
+      val.textContent = "Checking the listing summary for pet rules...";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "timeout") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "The quick policy check timed out. Open the listing for a complete check.";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "rate_limited") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "Vrbo stopped the quick policy check. Open the listing for a complete check.";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "error") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "The quick policy check was unavailable.";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "capped") {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "The automatic search-page check was skipped to limit background requests.";
+      row.appendChild(lbl);
+      row.appendChild(val);
+      searchTooltipEl.appendChild(row);
+    } else if (data.status === "unknown" || !data.policy) {
+      const row = document.createElement("div");
+      row.className = "vdp-tooltip-row";
+      const lbl = document.createElement("span");
+      lbl.className = "vdp-tooltip-label";
+      lbl.textContent = "Status";
+      const val = document.createElement("span");
+      val.className = "vdp-tooltip-val";
+      val.textContent = "Pet rules were not available in the search-page response.";
       row.appendChild(lbl);
       row.appendChild(val);
       searchTooltipEl.appendChild(row);

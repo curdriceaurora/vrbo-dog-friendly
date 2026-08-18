@@ -3,7 +3,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createSearchFetchQueue } = require("../search-fetcher.js");
+const { createSearchFetchQueue, parseListingHtml } = require("../search-fetcher.js");
 
 test("search-fetcher request lifecycle & cancellation", async (t) => {
   await t.test("aborts active fetch requests on queue.dispose()", async () => {
@@ -39,10 +39,20 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     assert.equal(queue.getActiveCount(), 0, "Active count should be 0 after dispose");
   });
 
-  await t.test("aborts stalled fetch requests on requestTimeoutMs", async () => {
+  await t.test("timeout emits exactly one terminal status: timeout notification, frees slot, never retries, and never writes to storage", async () => {
     let wasAborted = false;
+    let fetchAttempts = 0;
+    const notifications = [];
+    const storageWrites = [];
+
+    const mockStorage = {
+      get(keys, cb) { cb({}); },
+      set(obj, cb) { storageWrites.push(obj); cb && cb(); },
+      remove(keys, cb) { cb && cb(); },
+    };
 
     const mockFetch = (url, options) => {
+      fetchAttempts++;
       return new Promise((resolve, reject) => {
         if (options?.signal) {
           options.signal.addEventListener("abort", () => {
@@ -57,9 +67,14 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
 
     const queue = createSearchFetchQueue({
       fetchFn: mockFetch,
+      storage: mockStorage,
       maxConcurrent: 1,
       minDelayMs: 10,
-      requestTimeoutMs: 50, // 50ms timeout
+      requestTimeoutMs: 40, // 40ms timeout
+    });
+
+    queue.subscribe("prop_timeout", (res) => {
+      notifications.push(res);
     });
 
     queue.enqueue("prop_timeout", "https://www.vrbo.com/timeout");
@@ -67,6 +82,60 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
 
     assert.equal(wasAborted, true, "Stalled request should abort on timeout");
     assert.equal(queue.getActiveCount(), 0, "Slot should be freed after timeout");
+    assert.equal(fetchAttempts, 1, "Timed out request must never automatically retry");
+    assert.equal(notifications.length, 1, "Must emit exactly one notification");
+    assert.deepEqual(notifications[0], { status: "timeout", propertyId: "prop_timeout" });
+    assert.equal(storageWrites.length, 0, "Timeout must never write to persistent storage");
+    queue.dispose();
+  });
+
+  await t.test("generic pet filter copy produces unknown, never ok", () => {
+    const htmlWithGenericCopy = `
+      <html>
+        <body>
+          <div class="search-widget">
+            <input type="checkbox" name="pets">
+            <label>I am traveling with pets If checked, only properties that allow pets will be shown</label>
+          </div>
+        </body>
+      </html>
+    `;
+    const parsed = parseListingHtml(htmlWithGenericCopy, "prop_generic");
+    assert.equal(parsed, null, "Generic search filter copy should produce null/no policy");
+  });
+
+  await t.test("valid property policy produces and caches ok", async () => {
+    const storageWrites = [];
+    const mockStorage = {
+      get(keys, cb) { cb({}); },
+      set(obj, cb) { storageWrites.push(obj); cb && cb(); },
+      remove(keys, cb) { cb && cb(); },
+    };
+
+    const mockFetch = async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "<section>House Rules: Pets welcome! Maximum of 2 dogs allowed, $50 fee.</section>",
+    });
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      storage: mockStorage,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    const notifications = [];
+    queue.subscribe("prop_valid", (res) => notifications.push(res));
+    queue.enqueue("prop_valid", "https://www.vrbo.com/valid");
+
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(notifications.length, 1);
+    assert.equal(notifications[0].status, "ok");
+    assert.equal(notifications[0].policy.petsAllowed, true);
+    assert.equal(notifications[0].policy.maxDogs, 2);
+    assert.equal(storageWrites.length, 1, "Valid policy must be cached to storage");
     queue.dispose();
   });
 });

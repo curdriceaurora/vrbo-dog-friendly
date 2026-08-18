@@ -397,14 +397,14 @@ test("Consolidated State-Transition Suite", async (t) => {
     assert.equal(focusedElement, badge, "Focus should restore to badge upon Escape");
   });
 
-  await t.test("8. Cache status matrix (miss, hit, unknown, error, rate_limited)", async () => {
+  await t.test("8. Cache status matrix & distinct terminal states (miss, hit, unknown, timeout, error, rate_limited, capped)", async () => {
     let callCount = 0;
     const mockFetch = async (url) => {
       callCount++;
       if (url.includes("429")) return { ok: false, status: 429 };
       if (url.includes("500")) return { ok: false, status: 500 };
       if (url.includes("unknown")) return { ok: true, status: 200, text: async () => "<html>None</html>" };
-      return { ok: true, status: 200, text: async () => "<section>Dogs allowed</section>" };
+      return { ok: true, status: 200, text: async () => "<section>House Rules: Dogs allowed, limit 1 dog</section>" };
     };
 
     const queue = createSearchFetchQueue({
@@ -431,7 +431,7 @@ test("Consolidated State-Transition Suite", async (t) => {
     await new Promise((r) => setTimeout(r, 20));
     assert.equal(callCount, 1, "Cache hit should not trigger network call");
 
-    // Unknown
+    // Unknown (no pet policy in response)
     queue.enqueue("p_unknown", "https://www.vrbo.com/unknown");
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(results.p_unknown?.status, "unknown");

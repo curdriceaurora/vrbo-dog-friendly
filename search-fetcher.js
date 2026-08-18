@@ -113,7 +113,9 @@
 
     // Build corpus and extract policy
     const corpus = extract.buildCorpus({ items }, []);
+    if (!corpus || corpus.length === 0) return null;
     const policy = extract.extractPolicy(corpus);
+    if (!policy || !policy.found) return null;
     return { ok: true, propertyId, policy, rawItemsCount: items.length };
   }
 
@@ -343,7 +345,8 @@
           parsed.policy.maxDogs !== null ||
           parsed.policy.weightPerDog !== null ||
           parsed.policy.fee !== null ||
-          parsed.policy.deposit !== null
+          parsed.policy.deposit !== null ||
+          (parsed.policy.otherNotes && parsed.policy.otherNotes.length > 0)
         );
 
         if (hasConcretePolicy) {
@@ -356,20 +359,18 @@
           await setCached(propertyId, data);
           notify(propertyId, data);
         } else {
-          const data = {
+          const result = {
             status: "unknown",
             propertyId,
             policy: null,
-            ts: Date.now(),
           };
-          await setCached(propertyId, data);
-          notify(propertyId, data);
+          notify(propertyId, result);
         }
       } catch (err) {
         if (isDisposed) return;
         if (err.name === "AbortError") {
-          // Stalled request timed out: clear loading badge with unknown status
-          const result = { status: "unknown", propertyId, error: "timeout" };
+          // Stalled request timed out: emit terminal timeout result (never cached)
+          const result = { status: "timeout", propertyId };
           notify(propertyId, result);
           return;
         }
