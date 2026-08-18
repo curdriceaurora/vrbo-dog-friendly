@@ -536,19 +536,19 @@
 
     if (policy.approvalRequired === true) {
       return {
-        statusKey: "allowed",
+        statusKey: "restrictions",
         icon: "🐾",
         text: "Pet restrictions · Approval required",
-        className: "vdp-search-badge vdp-badge-allowed",
+        className: "vdp-search-badge vdp-badge-restrictions",
       };
     }
 
     if (policy.restrictionsFound || policy.weightLimit || policy.fee || policy.maxDogs || policy.restrictionNoteCount > 0) {
       return {
-        statusKey: "allowed",
+        statusKey: "restrictions",
         icon: "🐾",
         text: "Pet restrictions found",
-        className: "vdp-search-badge vdp-badge-allowed",
+        className: "vdp-search-badge vdp-badge-restrictions",
       };
     }
 

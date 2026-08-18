@@ -969,8 +969,6 @@
       if (hasConflict) {
         const warnBox = document.createElement("div");
         warnBox.className = "vdp-tooltip-notes vdp-tone-warn";
-        warnBox.style.background = "#fef7e0";
-        warnBox.style.color = "#b06000";
         warnBox.innerHTML = "⚠️ <strong>Some pet-policy details conflict.</strong><br>Open the listing to verify the complete rules.";
         searchTooltipEl.appendChild(warnBox);
       }

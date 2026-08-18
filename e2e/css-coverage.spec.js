@@ -45,6 +45,19 @@ test("exercises 100% of production theme rules across both color schemes", async
         const button = page.locator("#vdp-panel button").first();
         await button.hover();
         await button.focus();
+
+        const searchBadge = page.locator(".vdp-search-badge").first();
+        await searchBadge.hover();
+        await searchBadge.focus();
+
+        const tooltipClose = page.locator(".vdp-tooltip-close");
+        await tooltipClose.hover();
+        await tooltipClose.focus();
+
+        const tooltipLink = page.locator(".vdp-tooltip-footer a");
+        await tooltipLink.hover();
+        await tooltipLink.focus();
+
         await page.locator("#vdp-panel").evaluate((panel) => {
           panel.classList.add("vdp-collapsed");
           const header = panel.querySelector(".vdp-header");
@@ -60,6 +73,22 @@ test("exercises 100% of production theme rules across both color schemes", async
           finalRow.className = "vdp-row-wrap";
           panel.querySelector(".vdp-body").appendChild(finalRow);
           getComputedStyle(finalRow).borderBottomStyle;
+        });
+
+        await page.evaluate(() => {
+          for (const badge of document.querySelectorAll(".vdp-search-badge")) {
+            getComputedStyle(badge).backgroundColor;
+            getComputedStyle(badge).color;
+          }
+          const warnBadge = document.createElement("span");
+          warnBadge.className = "vdp-search-badge vdp-badge-warn";
+          document.body.appendChild(warnBadge);
+          getComputedStyle(warnBadge).backgroundColor;
+
+          const finalTooltipRow = document.createElement("div");
+          finalTooltipRow.className = "vdp-tooltip-row";
+          document.getElementById("vdp-search-tooltip").appendChild(finalTooltipRow);
+          getComputedStyle(finalTooltipRow).borderBottomStyle;
         });
       } else {
         const button = page.locator("#rescan");

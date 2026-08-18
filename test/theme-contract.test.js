@@ -100,7 +100,7 @@ test("theme assets load in the required order and remain scoped", () => {
 
   const tokens = read("tokens.css");
   assert.doesNotMatch(tokens, /(^|[,{]\s*):root\b/m, "tokens must not be defined on the Vrbo document root");
-  assert.match(tokens, /:where\(#vdp-panel, \.vdp-theme-root\)/);
+  assert.match(tokens, /:where\(#vdp-panel, \.vdp-theme-root, \.vdp-search-badge, \.vdp-search-tooltip\)/);
   assert.match(tokens, /\.vdp-highlight\s*\{\s*--vdp-color-highlight-ring:/);
 });
 

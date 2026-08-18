@@ -8,6 +8,12 @@ const fixtureUrl = (name) => pathToFileURL(path.join(fixtures, name)).href;
 const EXPECTED_ROLES = [
   "allowed-surface",
   "allowed-text",
+  "badge-allowed",
+  "badge-banned",
+  "badge-capped",
+  "badge-loading",
+  "badge-restrictions",
+  "badge-unknown",
   "capped-text",
   "highlight",
   "link",
@@ -21,25 +27,39 @@ const EXPECTED_ROLES = [
 const EXPECTED_COLORS = {
   light: {
     surface: "rgb(255, 255, 255)",
+    text: "rgb(32, 33, 36)",
     allowed: "rgb(19, 115, 51)",
+    allowedSurface: "rgb(230, 244, 234)",
     capped: "rgb(103, 78, 167)",
+    cappedSurface: "rgb(240, 235, 250)",
     warning: "rgb(117, 75, 0)",
+    warningSurface: "rgb(255, 244, 206)",
     prohibited: "rgb(179, 38, 30)",
+    prohibitedSurface: "rgb(252, 232, 230)",
     unknown: "rgb(95, 99, 104)",
+    unknownSurface: "rgb(241, 243, 244)",
     link: "rgb(11, 87, 208)",
     loading: "rgb(79, 85, 89)",
+    loadingSurface: "rgb(238, 241, 242)",
     focus: "rgb(0, 95, 204)",
     controlBorder: "rgb(115, 120, 124)"
   },
   dark: {
     surface: "rgb(32, 33, 36)",
+    text: "rgb(241, 243, 244)",
     allowed: "rgb(129, 201, 149)",
+    allowedSurface: "rgb(23, 60, 37)",
     capped: "rgb(215, 185, 255)",
+    cappedSurface: "rgb(59, 46, 82)",
     warning: "rgb(253, 214, 99)",
+    warningSurface: "rgb(74, 53, 16)",
     prohibited: "rgb(242, 139, 130)",
+    prohibitedSurface: "rgb(75, 32, 32)",
     unknown: "rgb(189, 193, 198)",
+    unknownSurface: "rgb(53, 54, 58)",
     link: "rgb(138, 180, 248)",
     loading: "rgb(210, 213, 216)",
+    loadingSurface: "rgb(48, 50, 54)",
     focus: "rgb(168, 199, 250)",
     controlBorder: "rgb(138, 143, 148)"
   }
@@ -69,11 +89,40 @@ for (const scheme of ["light", "dark"]) {
       await expect(page.locator('[data-theme-role="capped-text"]')).toHaveCSS("color", colors.capped);
       await expect(page.locator('[data-theme-role="link"]')).toHaveCSS("color", colors.link);
 
+      // Search badge variants
+      await expect(page.locator('[data-theme-role="badge-allowed"]')).toHaveCSS("color", colors.allowed);
+      await expect(page.locator('[data-theme-role="badge-allowed"]')).toHaveCSS("background-color", colors.allowedSurface);
+      await expect(page.locator('[data-theme-role="badge-banned"]')).toHaveCSS("color", colors.prohibited);
+      await expect(page.locator('[data-theme-role="badge-banned"]')).toHaveCSS("background-color", colors.prohibitedSurface);
+      await expect(page.locator('[data-theme-role="badge-loading"]')).toHaveCSS("color", colors.loading);
+      await expect(page.locator('[data-theme-role="badge-loading"]')).toHaveCSS("background-color", colors.loadingSurface);
+      await expect(page.locator('[data-theme-role="badge-unknown"]')).toHaveCSS("color", colors.unknown);
+      await expect(page.locator('[data-theme-role="badge-unknown"]')).toHaveCSS("background-color", colors.unknownSurface);
+      await expect(page.locator('[data-theme-role="badge-capped"]')).toHaveCSS("color", colors.capped);
+      await expect(page.locator('[data-theme-role="badge-capped"]')).toHaveCSS("background-color", colors.cappedSurface);
+      await expect(page.locator('[data-theme-role="badge-restrictions"]')).toHaveCSS("color", colors.warning);
+      await expect(page.locator('[data-theme-role="badge-restrictions"]')).toHaveCSS("background-color", colors.warningSurface);
+
+      // Search tooltip
+      const tooltip = page.locator("#vdp-search-tooltip");
+      await expect(tooltip).toBeVisible();
+      await expect(tooltip).toHaveCSS("background-color", colors.surface);
+      await expect(tooltip).toHaveCSS("color", colors.text);
+      await expect(tooltip.locator(".vdp-tooltip-notes.vdp-tone-warn")).toHaveCSS("color", colors.warning);
+      await expect(tooltip.locator(".vdp-tooltip-notes.vdp-tone-warn")).toHaveCSS("background-color", colors.warningSurface);
+      await expect(tooltip.locator(".vdp-tooltip-footer a")).toHaveCSS("color", colors.link);
+
       const hostStyle = await page.locator("#host-content").evaluate((element) => {
         const style = getComputedStyle(element);
         return { color: style.color, background: style.backgroundColor };
       });
       expect(hostStyle).toEqual({ color: "rgb(0, 0, 0)", background: "rgba(0, 0, 0, 0)" });
+
+      const searchCardStyle = await page.locator(".search-card").evaluate((element) => {
+        const style = getComputedStyle(element);
+        return { color: style.color, background: style.backgroundColor };
+      });
+      expect(searchCardStyle).toEqual({ color: "rgb(0, 0, 0)", background: "rgba(0, 0, 0, 0)" });
 
       const highlightedHostStyle = await page.locator(".vdp-highlight").evaluate((element) => {
         const style = getComputedStyle(element);
@@ -81,9 +130,17 @@ for (const scheme of ["light", "dark"]) {
       });
       expect(highlightedHostStyle).toEqual({ color: "rgb(0, 0, 0)", colorScheme: "normal" });
 
-      const close = page.getByRole("button", { name: "Close" });
+      const close = page.getByRole("button", { name: "Close" }).first();
       await close.focus();
       await expect(close).toHaveCSS("outline-color", colors.focus);
+
+      const tooltipClose = tooltip.locator(".vdp-tooltip-close");
+      await tooltipClose.focus();
+      await expect(tooltipClose).toHaveCSS("outline-color", colors.focus);
+
+      const badge = page.locator("#badge-allowed");
+      await badge.focus();
+      await expect(badge).toHaveCSS("outline-color", colors.focus);
 
       const viewport = page.viewportSize();
       const box = await panel.boundingBox();
@@ -116,3 +173,27 @@ for (const scheme of ["light", "dark"]) {
     });
   });
 }
+
+test("updates search badges and tooltips dynamically on live prefers-color-scheme media switch", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto(fixtureUrl("panel-theme.html"));
+
+  const badge = page.locator("#badge-allowed");
+  const tooltip = page.locator("#vdp-search-tooltip");
+
+  await expect(badge).toHaveCSS("color", EXPECTED_COLORS.light.allowed);
+  await expect(badge).toHaveCSS("background-color", EXPECTED_COLORS.light.allowedSurface);
+  await expect(tooltip).toHaveCSS("background-color", EXPECTED_COLORS.light.surface);
+
+  // Live switch to dark without reloading page
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(badge).toHaveCSS("color", EXPECTED_COLORS.dark.allowed);
+  await expect(badge).toHaveCSS("background-color", EXPECTED_COLORS.dark.allowedSurface);
+  await expect(tooltip).toHaveCSS("background-color", EXPECTED_COLORS.dark.surface);
+
+  // Live switch back to light
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(badge).toHaveCSS("color", EXPECTED_COLORS.light.allowed);
+  await expect(badge).toHaveCSS("background-color", EXPECTED_COLORS.light.allowedSurface);
+  await expect(tooltip).toHaveCSS("background-color", EXPECTED_COLORS.light.surface);
+});

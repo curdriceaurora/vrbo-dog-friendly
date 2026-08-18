@@ -150,12 +150,12 @@
   flex-grow: 1;
 }
 
-#vdp-panel .vdp-tone-good { color: var(--vdp-policy-allowed-text); }
-#vdp-panel .vdp-tone-bad { color: var(--vdp-policy-prohibited-text); }
-#vdp-panel .vdp-tone-warn { color: var(--vdp-policy-warning-text); }
-#vdp-panel .vdp-tone-unknown { color: var(--vdp-policy-unknown-text); }
-#vdp-panel .vdp-tone-loading { color: var(--vdp-policy-loading-text); }
-#vdp-panel .vdp-tone-capped { color: var(--vdp-policy-capped-text); }
+.vdp-tone-good { color: var(--vdp-policy-allowed-text); }
+.vdp-tone-bad { color: var(--vdp-policy-prohibited-text); }
+.vdp-tone-warn { color: var(--vdp-policy-warning-text); }
+.vdp-tone-unknown { color: var(--vdp-policy-unknown-text); }
+.vdp-tone-loading { color: var(--vdp-policy-loading-text); }
+.vdp-tone-capped { color: var(--vdp-policy-capped-text); }
 
 #vdp-panel .vdp-jump {
   border: none;
@@ -189,12 +189,12 @@
   padding: 4px 8px;
   margin: 6px 0;
   border-radius: 6px;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--vdp-font-family);
   font-size: 11.5px;
   font-weight: 600;
   line-height: 1.2;
   cursor: pointer;
-  border: 1px solid rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--vdp-color-border-subtle);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   user-select: none;
   z-index: 10;
@@ -204,40 +204,47 @@
 .vdp-search-badge:hover,
 .vdp-search-badge:focus-visible {
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  outline: 2px solid #0d6efd;
+  box-shadow: var(--vdp-shadow-panel);
+  outline: 2px solid var(--vdp-color-focus-ring);
   outline-offset: 1px;
 }
 
 .vdp-search-badge.vdp-badge-allowed {
-  background: #e6f4ea;
-  color: #137333;
-  border-color: #ceead6;
+  background: var(--vdp-policy-allowed-surface);
+  color: var(--vdp-policy-allowed-text);
+  border-color: var(--vdp-policy-allowed-surface);
 }
 
 .vdp-search-badge.vdp-badge-banned {
-  background: #fdeceb;
-  color: #c5221f;
-  border-color: #fad2cf;
+  background: var(--vdp-policy-prohibited-surface);
+  color: var(--vdp-policy-prohibited-text);
+  border-color: var(--vdp-policy-prohibited-surface);
 }
 
 .vdp-search-badge.vdp-badge-loading {
-  background: #f8f9fa;
-  color: #5f6368;
-  border-color: #dadce0;
+  background: var(--vdp-policy-loading-surface);
+  color: var(--vdp-policy-loading-text);
+  border-color: var(--vdp-color-border-subtle);
   font-weight: 500;
 }
 
 .vdp-search-badge.vdp-badge-unknown {
-  background: #f1f3f4;
-  color: #5f6368;
-  border-color: #dadce0;
+  background: var(--vdp-policy-unknown-surface);
+  color: var(--vdp-policy-unknown-text);
+  border-color: var(--vdp-color-border-subtle);
 }
 
 .vdp-search-badge.vdp-badge-capped {
-  background: #fef7e0;
-  color: #b06000;
-  border-color: #feefc3;
+  background: var(--vdp-policy-capped-surface);
+  color: var(--vdp-policy-capped-text);
+  border-color: var(--vdp-policy-capped-surface);
+}
+
+.vdp-search-badge.vdp-badge-restrictions,
+.vdp-search-badge.vdp-badge-warn {
+  background: var(--vdp-policy-warning-surface);
+  color: var(--vdp-policy-warning-text);
+  border-color: var(--vdp-policy-warning-surface);
 }
 
 /* Floating Hover & Focus Policy Tooltip */
@@ -245,15 +252,15 @@
   position: fixed;
   width: 290px;
   max-width: calc(100vw - 32px);
-  background: #ffffff;
+  background: var(--vdp-color-surface);
   border-radius: 12px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: var(--vdp-shadow-panel);
+  border: 1px solid var(--vdp-color-border);
   padding: 12px;
   z-index: 2147483640;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--vdp-font-family);
   font-size: 12px;
-  color: #1a1a1a;
+  color: var(--vdp-color-text);
   pointer-events: auto;
   opacity: 0;
   transform: translateY(4px);
@@ -271,9 +278,10 @@
   justify-content: space-between;
   padding-bottom: 8px;
   margin-bottom: 8px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--vdp-color-border-subtle);
   font-weight: 700;
   font-size: 13px;
+  color: var(--vdp-color-text);
 }
 
 .vdp-tooltip-close {
@@ -281,13 +289,18 @@
   border: none;
   font-size: 14px;
   cursor: pointer;
-  color: #666;
+  color: var(--vdp-color-text-secondary);
   padding: 2px 4px;
   border-radius: 4px;
 }
 
 .vdp-tooltip-close:hover {
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--vdp-color-surface-hover);
+}
+
+.vdp-tooltip-close:focus-visible {
+  outline: 2px solid var(--vdp-color-focus-ring);
+  outline-offset: 2px;
 }
 
 .vdp-tooltip-row {
@@ -295,7 +308,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 4px 0;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--vdp-color-border-subtle);
 }
 
 .vdp-tooltip-row:last-child {
@@ -303,44 +316,55 @@
 }
 
 .vdp-tooltip-label {
-  color: #666;
+  color: var(--vdp-color-text-secondary);
   font-weight: 500;
 }
 
 .vdp-tooltip-val {
   font-weight: 600;
   text-align: right;
+  color: var(--vdp-color-text);
 }
 
 .vdp-tooltip-notes {
   margin-top: 8px;
   padding: 6px 8px;
-  background: #f8f9fa;
+  background: var(--vdp-color-surface-subtle);
   border-radius: 6px;
   font-size: 11px;
-  color: #444;
+  color: var(--vdp-color-text-secondary);
   line-height: 1.4;
   max-height: 80px;
   overflow-y: auto;
 }
 
+.vdp-tooltip-notes.vdp-tone-warn {
+  background: var(--vdp-policy-warning-surface);
+  color: var(--vdp-policy-warning-text);
+}
+
 .vdp-tooltip-footer {
   margin-top: 8px;
   padding-top: 6px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid var(--vdp-color-border-subtle);
   font-size: 10.5px;
-  color: #777;
+  color: var(--vdp-color-text-muted);
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
 .vdp-tooltip-footer a {
-  color: #0d6efd;
+  color: var(--vdp-color-link);
   text-decoration: none;
   font-weight: 600;
 }
 
 .vdp-tooltip-footer a:hover {
   text-decoration: underline;
+}
+
+.vdp-tooltip-footer a:focus-visible {
+  outline: 2px solid var(--vdp-color-focus-ring);
+  outline-offset: 2px;
 }

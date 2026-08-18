@@ -65,5 +65,49 @@
       </div>
     </section>
     <div class="vdp-highlight" data-theme-role="highlight">Highlighted source text</div>
+
+    <section id="search-results-mock" aria-label="Search results">
+      <div class="search-card">
+        <span id="badge-allowed" class="vdp-search-badge vdp-badge-allowed" tabindex="0" data-theme-role="badge-allowed">🐾 Dogs allowed</span>
+        <span id="badge-banned" class="vdp-search-badge vdp-badge-banned" tabindex="0" data-theme-role="badge-banned">🚫 Pets not allowed</span>
+        <span id="badge-loading" class="vdp-search-badge vdp-badge-loading" tabindex="0" data-theme-role="badge-loading">⏳ Checking pet policy...</span>
+        <span id="badge-unknown" class="vdp-search-badge vdp-badge-unknown" tabindex="0" data-theme-role="badge-unknown">🐾 Check pet rules on listing</span>
+        <span id="badge-capped" class="vdp-search-badge vdp-badge-capped" tabindex="0" data-theme-role="badge-capped">🐾 Open listing</span>
+        <span id="badge-restrictions" class="vdp-search-badge vdp-badge-restrictions" tabindex="0" data-theme-role="badge-restrictions">🐾 Pet restrictions found</span>
+      </div>
+    </section>
+
+    <div id="vdp-search-tooltip" class="vdp-search-tooltip vdp-tooltip-visible" role="dialog" aria-modal="true" aria-label="Pet Policy Summary">
+      <div class="vdp-tooltip-header">
+        <span>🐾 Pet Policy Summary</span>
+        <button class="vdp-tooltip-close" aria-label="Close">✕</button>
+      </div>
+      <div class="vdp-tooltip-row">
+        <span class="vdp-tooltip-label">Dogs allowed</span>
+        <span class="vdp-tooltip-val vdp-tone-good">Yes</span>
+      </div>
+      <div class="vdp-tooltip-row">
+        <span class="vdp-tooltip-label">Max dogs</span>
+        <span class="vdp-tooltip-val">2</span>
+      </div>
+      <div class="vdp-tooltip-row">
+        <span class="vdp-tooltip-label">Weight limit</span>
+        <span class="vdp-tooltip-val">50 lbs</span>
+      </div>
+      <div class="vdp-tooltip-row">
+        <span class="vdp-tooltip-label">Policy</span>
+        <span class="vdp-tooltip-val vdp-tone-bad">No</span>
+      </div>
+      <div class="vdp-tooltip-notes vdp-tone-warn">
+        ⚠️ <strong>Some pet-policy details conflict.</strong><br>Open the listing to verify the complete rules.
+      </div>
+      <div class="vdp-tooltip-notes">
+        Dogs must be pre-registered.
+      </div>
+      <div class="vdp-tooltip-footer">
+        <span>Source: search policy</span>
+        <a href="https://www.vrbo.com/123456" target="_blank" rel="noopener noreferrer">Open listing for complete rules ↗</a>
+      </div>
+    </div>
   </body>
 </html>
