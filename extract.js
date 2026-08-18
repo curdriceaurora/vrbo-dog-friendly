@@ -494,7 +494,7 @@
 
     const policy = canonical.policy || canonical;
 
-    if (!policy || (policy.petsAllowed === null && !policy.restrictionsFound && !policy.weightLimit && !policy.fee && !policy.maxDogs && !policy.approvalRequired)) {
+    if (!policy || (policy.petsAllowed === null && !policy.restrictionsFound && !policy.weightLimit && !policy.fee && !policy.maxDogs && !policy.approvalRequired && !policy.restrictionNoteCount)) {
       return {
         statusKey: "unknown",
         icon: "🐾",

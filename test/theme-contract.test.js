@@ -151,6 +151,30 @@ test("controls, focus rings, and highlights meet WCAG non-text contrast", () => 
   }
 });
 
+test("badge boundaries and focus rings satisfy WCAG non-text and component identification standards", () => {
+  // WCAG 2.1 SC 1.4.11 (Non-text Contrast):
+  // 1. Search badges are pill-style chips identified by their filled background surface,
+  //    emoji icons, and high-contrast text rather than an isolated standalone border line.
+  // 2. Focused badges receive a prominent 2px outline using --vdp-color-focus-ring,
+  //    which provides >= 3:1 non-text contrast against host cards and page surfaces.
+  for (const theme of ["light", "dark"]) {
+    const focusPair = THEME_NON_TEXT_PAIRS[theme].focusRing;
+    assert.ok(
+      contrastRatio(focusPair[0], focusPair[1]) >= 3,
+      `${theme} badge focus ring must satisfy >= 3:1 non-text contrast`
+    );
+
+    // All badge text-on-surface pairs meet AA text contrast (>= 4.5:1)
+    for (const state of ["allowed", "warning", "prohibited", "unknown", "loading", "capped"]) {
+      const pair = THEME_COLOR_PAIRS[theme][state];
+      assert.ok(
+        contrastRatio(pair[0], pair[1]) >= 4.5,
+        `${theme} ${state} badge text/surface pair must satisfy >= 4.5:1 text contrast`
+      );
+    }
+  }
+});
+
 test("component styles contain no independent color literals", () => {
   for (const file of ["content.css", "popup.css", "content.js", "popup.js"]) {
     assert.doesNotMatch(read(file), /#[0-9a-f]{3,8}\b|rgba?\s*\(/i, `${file} must consume tokens instead of defining colors`);

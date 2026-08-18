@@ -124,6 +124,15 @@ for (const scheme of ["light", "dark"]) {
       });
       expect(searchCardStyle).toEqual({ color: "rgb(0, 0, 0)", background: "rgba(0, 0, 0, 0)" });
 
+      const docRootVar = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--vdp-color-surface"));
+      expect(docRootVar.trim()).toBe("");
+
+      const cardVar = await page.locator(".search-card").evaluate((el) => getComputedStyle(el).getPropertyValue("--vdp-color-surface"));
+      expect(cardVar.trim()).toBe("");
+
+      const hostContentVar = await page.locator("#host-content").evaluate((el) => getComputedStyle(el).getPropertyValue("--vdp-color-surface"));
+      expect(hostContentVar.trim()).toBe("");
+
       const highlightedHostStyle = await page.locator(".vdp-highlight").evaluate((element) => {
         const style = getComputedStyle(element);
         return { color: style.color, colorScheme: style.colorScheme };
@@ -137,6 +146,10 @@ for (const scheme of ["light", "dark"]) {
       const tooltipClose = tooltip.locator(".vdp-tooltip-close");
       await tooltipClose.focus();
       await expect(tooltipClose).toHaveCSS("outline-color", colors.focus);
+
+      const tooltipLink = tooltip.locator(".vdp-tooltip-footer a");
+      await tooltipLink.focus();
+      await expect(tooltipLink).toHaveCSS("outline-color", colors.focus);
 
       const badge = page.locator("#badge-allowed");
       await badge.focus();

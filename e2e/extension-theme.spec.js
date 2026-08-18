@@ -103,7 +103,7 @@ for (const scheme of ["light", "dark"]) {
       await expect(panel).toHaveCSS("color", EXPECTED[scheme].text);
       await expect(panel.locator(".vdp-tone-good").first()).toHaveCSS("color", EXPECTED[scheme].allowed);
 
-      // Search page verification
+      // Search page verification & content-script discovery
       await page.goto(SEARCH_URL);
       const badge = page.locator(".vdp-search-badge").first();
       await expect(badge).toBeVisible({ timeout: 8_000 });
@@ -111,11 +111,32 @@ for (const scheme of ["light", "dark"]) {
       await expect(badge).toHaveCSS("color", EXPECTED[scheme].allowed);
       await expect(badge).toHaveCSS("background-color", EXPECTED[scheme].allowedSurface);
 
-      await badge.hover();
-      const tooltip = page.locator(".vdp-search-tooltip.vdp-tooltip-visible");
+      const tooltip = page.locator(".vdp-search-tooltip");
+      const tooltipClose = tooltip.locator(".vdp-tooltip-close");
+      const tooltipLink = tooltip.locator(".vdp-tooltip-footer a");
+
+      // Keyboard Flow: Open on Enter
+      await badge.focus();
+      await expect(badge).toBeFocused();
+      await page.keyboard.press("Enter");
       await expect(tooltip).toBeVisible();
       await expect(tooltip).toHaveCSS("background-color", EXPECTED[scheme].surface);
       await expect(tooltip).toHaveCSS("color", EXPECTED[scheme].text);
+
+      // Keyboard Flow: Focus wrapping inside dialog
+      await tooltipClose.focus();
+      await expect(tooltipClose).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(tooltipLink).toBeFocused();
+      await page.keyboard.press("Tab");
+      await expect(tooltipClose).toBeFocused();
+      await page.keyboard.press("Shift+Tab");
+      await expect(tooltipLink).toBeFocused();
+
+      // Keyboard Flow: Dismiss on Escape & Focus Restoration
+      await page.keyboard.press("Escape");
+      await expect(tooltip).not.toBeVisible();
+      await expect(badge).toBeFocused();
 
       expect(pageErrors).toEqual([]);
 
