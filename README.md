@@ -80,7 +80,10 @@ When you browse search results on `vrbo.com`:
 
 ![Search results showing pet policy badges](docs/search-badge.gif)
 
-- **Inline Badges**: The extension shows a compact badge on each search card (such as `🐾 Max 2 dogs allowed · 50 lbs · $150/stay`, `🐾 Dogs allowed · 1st free · $25/add'l/stay`, or `🚫 Pets not allowed`).
+- **Inline Badges**: The extension shows a compact badge on each search card:
+  - <img src="docs/badge-max-2-dogs.png" alt="Max 2 dogs allowed · 50 lbs · $150/stay" height="24">
+  - <img src="docs/badge-dogs-allowed-tiered.png" alt="Dogs allowed · 1st free · $25/add'l/stay" height="24">
+  - <img src="docs/badge-pets-not-allowed.png" alt="Pets not allowed" height="24">
 - **Controlled Retrieval**: The extension fetches listing details with a controlled queue (maximum 2 requests, 400 ms safety delay) to prevent rate limits.
 - **Fast Path & 24-Hour Cache**: Reads search-page data immediately when available and saves extracted policies in browser storage for 24 hours.
 
