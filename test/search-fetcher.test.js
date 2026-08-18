@@ -150,7 +150,7 @@ test("search-fetcher queue and caching", async (t) => {
           propertyId: "old",
           storedAt: Date.now() - (48 * 60 * 60 * 1000),
           expiresAt: Date.now() - (24 * 60 * 60 * 1000),
-          data: { status: "ok", policy: { schemaVersion: 2, petsAllowed: true } },
+          data: { status: "ok", policy: { schemaVersion: 1, petsAllowed: true } },
         },
       },
       get(keys, cb) {
@@ -253,7 +253,7 @@ test("search-fetcher queue and caching", async (t) => {
           data: {
             status: "ok",
             policy: {
-              schemaVersion: 2,
+              schemaVersion: 1,
               petsAllowed: true,
             },
           },
@@ -266,7 +266,7 @@ test("search-fetcher queue and caching", async (t) => {
           data: {
             status: "ok",
             policy: {
-              schemaVersion: 1, // Obsolete
+              schemaVersion: 99, // Incompatible/obsolete
               petsAllowed: true,
             },
           },
@@ -293,12 +293,56 @@ test("search-fetcher queue and caching", async (t) => {
     });
 
     const validHit = await queue.getCached("valid");
-    assert.ok(validHit !== null, "Valid schemaVersion: 2 should hit cache");
+    assert.ok(validHit !== null, "Valid schemaVersion: 1 should hit cache");
     assert.equal(validHit.policy.petsAllowed, true);
 
     const obsoleteHit = await queue.getCached("obsolete_schema");
     assert.equal(obsoleteHit, null, "Obsolete policy schema should be treated as cache miss");
     assert.ok(removedKeys.includes("vrbow_cache_obsolete_schema"), "Obsolete entry must be pruned");
+
+    queue.dispose();
+  });
+
+  await t.test("explicit high-priority hover request bypasses background sessionCap", async () => {
+    let fetchCount = 0;
+    const mockFetch = async () => {
+      fetchCount++;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>Pets welcome</section>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+      sessionCap: 1, // session cap of 1
+    });
+
+    const notifications = [];
+    queue.subscribe("p1", (res) => notifications.push({ id: "p1", res }));
+    queue.subscribe("p2_bg", (res) => notifications.push({ id: "p2_bg", res }));
+    queue.subscribe("p3_hover", (res) => notifications.push({ id: "p3_hover", res }));
+
+    // Request 1: uses the 1 session cap slot
+    queue.enqueue("p1", "https://www.vrbo.com/1", "normal");
+    await new Promise((r) => setTimeout(r, 25));
+
+    // Request 2 (normal priority): gets capped
+    queue.enqueue("p2_bg", "https://www.vrbo.com/2", "normal");
+    await new Promise((r) => setTimeout(r, 25));
+
+    // Request 3 (high priority / explicit hover): bypasses background cap
+    queue.enqueue("p3_hover", "https://www.vrbo.com/3", "high");
+    await new Promise((r) => setTimeout(r, 40));
+
+    assert.equal(fetchCount, 2, "2 fetches should have run (p1 background + p3_hover explicit)");
+    const p2Res = notifications.find((n) => n.id === "p2_bg");
+    assert.equal(p2Res?.res?.status, "capped", "p2_bg should be capped");
+    const p3Res = notifications.find((n) => n.id === "p3_hover");
+    assert.equal(p3Res?.res?.status, "ok", "p3_hover should successfully fetch");
 
     queue.dispose();
   });

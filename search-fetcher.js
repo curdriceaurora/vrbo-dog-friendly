@@ -12,7 +12,7 @@
 
   const CACHE_PREFIX = "vrbow_cache_";
   const CACHE_RECORD_VERSION = 1;
-  const POLICY_SCHEMA_VERSION = 2;
+  const POLICY_SCHEMA_VERSION = 1;
   const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   const DEFAULT_CONCURRENCY = 2;
   const DEFAULT_MIN_DELAY_MS = 400;
@@ -288,10 +288,11 @@
           let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
           if (nextIndex === -1) nextIndex = 0;
           const [nextItem] = queue.splice(nextIndex, 1);
+          const isHighPriority = nextItem.priority === "high" || highPriorityIds.has(nextItem.propertyId);
           highPriorityIds.delete(nextItem.propertyId);
 
-          // Check session cap
-          if (sessionRequestsCount >= sessionCap) {
+          // Check session cap: background requests are capped; explicit user hover (priority: "high") bypasses the background cap
+          if (!isHighPriority && sessionRequestsCount >= sessionCap) {
             enqueuedOrActive.delete(nextItem.propertyId);
             const result = { status: "capped", propertyId: nextItem.propertyId };
             notify(nextItem.propertyId, result);

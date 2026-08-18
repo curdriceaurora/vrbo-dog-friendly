@@ -414,7 +414,7 @@
       );
       rowsHtml += row(
         "Weight limit",
-        policy.weightLimit ? `${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified"),
+        policy.weightLimit ? `${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified"),
         policy.weightLimit || raw.weightPerDog ? "good" : "unknown",
         raw.weightSnippet,
         raw.weightSource,
@@ -456,8 +456,10 @@
       }
     }
 
-    const usedApollo = policy.entries && policy.entries.some((e) => e.priority > 1);
-    const sourceBadge = policy.found
+    const entries = raw.entries || policy.entries;
+    const found = raw.found ?? policy.found ?? policy.restrictionsFound;
+    const usedApollo = entries && entries.some((e) => e.priority > 1);
+    const sourceBadge = found
       ? usedApollo
         ? "Source: listing data (incl. collapsed/lazy sections)"
         : "Source: visible page text only"

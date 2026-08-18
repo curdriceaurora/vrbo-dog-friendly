@@ -344,12 +344,19 @@
 
   const CURRENCY_MAP = {
     "$": "USD",
+    "US$": "USD",
+    "USD": "USD",
     "€": "EUR",
+    "EUR": "EUR",
     "£": "GBP",
+    "GBP": "GBP",
     "¥": "JPY",
+    "JPY": "JPY",
     "A$": "AUD",
+    "AU$": "AUD",
     "AUD": "AUD",
     "CA$": "CAD",
+    "C$": "CAD",
     "CAD": "CAD",
     "NZ$": "NZD",
     "NZD": "NZD",
@@ -448,9 +455,12 @@
     }
 
     return {
-      propertyId: propertyId ? String(propertyId) : null,
-      petsAllowed: extracted.petsAllowed !== undefined ? extracted.petsAllowed : null,
-      maxDogs: typeof extracted.maxDogs === "number" ? extracted.maxDogs : null,
+      schemaVersion: 1,
+      propertyId,
+      source,
+      extractedAt: new Date().toISOString(),
+      petsAllowed: extracted.petsAllowed,
+      maxDogs: extracted.maxDogs,
       weightLimit,
       fee,
       deposit,
@@ -459,15 +469,32 @@
       restrictionNoteCount,
       contradictions,
       confidence,
-      source: source || "search-response",
-      parsedAt: Date.now(),
-      schemaVersion: 2,
       _raw: extracted,
     };
   }
 
-  function deriveSearchBadge(policy) {
-    if (!policy) {
+  function deriveSearchBadge(canonical) {
+    if (!canonical) {
+      return {
+        statusKey: "loading",
+        icon: "⏳",
+        text: "Checking pet policy...",
+        className: "vdp-search-badge vdp-badge-loading",
+      };
+    }
+
+    if (canonical.status && canonical.status !== "ok") {
+      return {
+        statusKey: "unknown",
+        icon: "🐾",
+        text: "Check pet rules on listing",
+        className: "vdp-search-badge vdp-badge-unknown",
+      };
+    }
+
+    const policy = canonical.policy || canonical;
+
+    if (!policy || (policy.petsAllowed === null && !policy.restrictionsFound && !policy.weightLimit && !policy.fee && !policy.maxDogs && !policy.approvalRequired)) {
       return {
         statusKey: "unknown",
         icon: "🐾",
@@ -488,7 +515,13 @@
     if (policy.petsAllowed === true) {
       const details = [];
       if (policy.maxDogs) details.push(`Max ${policy.maxDogs}`);
-      if (policy.weightLimit) details.push(`${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}`);
+      if (policy.weightLimit) {
+        const valStr = Number.isInteger(policy.weightLimit.value)
+          ? String(policy.weightLimit.value)
+          : String(policy.weightLimit.value);
+        const unitStr = policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit;
+        details.push(`${valStr} ${unitStr}`);
+      }
       if (policy.fee && policy.fee.amount > 0) details.push(`${formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)} pet fee`);
       if (policy.approvalRequired && details.length < 2) details.push("Approval required");
 

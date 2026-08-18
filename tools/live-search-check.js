@@ -17,21 +17,31 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 
 const ROOT = path.join(__dirname, "..");
 const DEFAULT_SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Perdido+Key+Beach%2C+Pensacola%2C+Florida%2C+United+States+of+America&startDate=2026-09-04&endDate=2026-09-07&adults=6&children=3_1&house_rules_group=pets_allowed";
 
-const CHROME_CANDIDATES = [
-  path.join(os.homedir(), ".cache/puppeteer/chrome/mac_arm-137.0.7151.0/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
-  path.join(os.homedir(), ".cache/puppeteer/chrome/mac_arm-136.0.7082.0/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"),
-  "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-];
-
 function findChrome() {
-  for (const c of CHROME_CANDIDATES) {
+  // 1. Search dynamically in ~/.cache/puppeteer for any Chrome for Testing builds
+  const puppeteerDir = path.join(os.homedir(), ".cache/puppeteer/chrome");
+  if (fs.existsSync(puppeteerDir)) {
+    try {
+      const output = execSync(`find "${puppeteerDir}" -type f -name "Google Chrome for Testing" 2>/dev/null`, { encoding: "utf8" });
+      const lines = output.trim().split("\n").filter(Boolean);
+      if (lines.length > 0) {
+        return lines[0];
+      }
+    } catch {}
+  }
+
+  const staticCandidates = [
+    "/Applications/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  ];
+
+  for (const c of staticCandidates) {
     if (fs.existsSync(c)) return c;
   }
   throw new Error("No Chrome binary found. Install Google Chrome or Chrome for Testing.");
@@ -45,10 +55,15 @@ function readScript(rel) {
   return fs.readFileSync(path.join(ROOT, rel), "utf8");
 }
 
-async function startChrome(port, extensionDir, startUrl) {
+async function startChrome(port, extensionDir, startUrl, allowEmulated = false) {
   const binary = findChrome();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "vrbow-search-"));
   const isTesting = /testing|chromium/i.test(binary);
+  const mode = isTesting ? "extension" : "emulated";
+
+  if (mode !== "extension" && !allowEmulated) {
+    throw new Error(`Release verification requires Chrome for Testing in mode: extension. Found: ${binary}. Use --allow-emulated for diagnostic runs.`);
+  }
 
   const args = [
     `--remote-debugging-port=${port}`,
@@ -72,7 +87,7 @@ async function startChrome(port, extensionDir, startUrl) {
     await sleep(200);
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (res.ok) return { proc, userDataDir, mode: isTesting ? "extension" : "emulated" };
+      if (res.ok) return { proc, userDataDir, mode, binary };
     } catch {}
   }
   throw new Error("Chrome did not start debugging port in time");
@@ -336,6 +351,12 @@ async function run() {
         const tooltipLink = tooltip.querySelector('a[href*="/"]');
         const linkMatchesProp = tooltipLink && expectedPropId && tooltipLink.href.includes(expectedPropId);
 
+        const rows = Array.from(tooltip.querySelectorAll('.vdp-tooltip-row'));
+        const parsedFields = rows.map(r => ({
+          label: r.querySelector('.vdp-tooltip-label')?.textContent?.trim() || '',
+          value: r.querySelector('.vdp-tooltip-val')?.textContent?.trim() || ''
+        })).filter(r => r.label && r.value);
+
         // Step D: Dismiss via Close Button click
         const closeBtn = tooltip.querySelector('.vdp-tooltip-close');
         if (closeBtn) closeBtn.click();
@@ -358,6 +379,7 @@ async function run() {
           badgeFound: true,
           initialVisible,
           hasHeader,
+          parsedFields,
           preservedAcrossGap,
           linkMatchesProp,
           dismissedViaClose,
@@ -372,6 +394,7 @@ async function run() {
 
     // 5. Verification Assertions
     const totalBadges = badgeRes.result.value?.totalBadges || 0;
+    const sampleBadges = badgeRes.result.value?.sampleBadges || [];
     const inter = interactionTestRes.result.value;
     const allInteractionsPassed = inter?.initialVisible &&
       inter?.hasHeader &&
@@ -380,6 +403,9 @@ async function run() {
       inter?.dismissedViaClose &&
       inter?.openedViaKeyboard &&
       inter?.dismissedViaEscape;
+
+    const hasResolvedBadge = sampleBadges.some(b => b.status === "allowed" || b.status === "banned" || b.status === "restrictions");
+    const hasParsedFields = inter?.parsedFields && inter.parsedFields.length > 0;
 
     console.log("\n══════════════════════════════════════════════════════");
     if (totalBadges === 0) {
@@ -390,8 +416,16 @@ async function run() {
       console.error("❌ ASSERTION FAILED: Live tooltip interaction checks did not all pass:", inter);
       process.exit(1);
     }
+    if (!hasResolvedBadge) {
+      console.error("❌ ASSERTION FAILED: No search badge reached a parsed terminal policy state (allowed/banned/restrictions):", sampleBadges);
+      process.exit(1);
+    }
+    if (!hasParsedFields) {
+      console.error("❌ ASSERTION FAILED: Live tooltip does not contain any parsed policy fields (dogs allowed/max/weight/fee):", inter?.parsedFields);
+      process.exit(1);
+    }
 
-    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, interactive mouse gap transit, close button, link matching, and keyboard flows verified.`);
+    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, mode: ${mode}, parsed policy fields verified (${inter.parsedFields.map(f => f.label + ': ' + f.value).join(', ')}), interactive mouse gap transit, close button, link matching, and keyboard flows verified.`);
     console.log("══════════════════════════════════════════════════════\n");
   } finally {
     if (targetCdp) targetCdp.close();

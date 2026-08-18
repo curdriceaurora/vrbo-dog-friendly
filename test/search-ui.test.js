@@ -173,7 +173,7 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     queue.dispose();
   });
 
-  await t.test("canonical policy model normalizes weights, fees, deposits, and schemaVersion 2", () => {
+  await t.test("canonical policy model normalizes weights, fees, deposits, and schemaVersion 1", () => {
     const extract = require("../extract.js");
     const sampleRawPolicy = {
       found: true,
@@ -201,7 +201,7 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     assert.deepEqual(canonical.contradictions, { maxDogs: false, weightLimit: true, fee: false });
     assert.equal(canonical.confidence, "high");
     assert.equal(canonical.source, "search-response");
-    assert.equal(canonical.schemaVersion, 2);
+    assert.equal(canonical.schemaVersion, 1);
 
     // Test badge derivation
     const badge = extract.deriveSearchBadge(canonical);

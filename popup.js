@@ -12,6 +12,23 @@ function renderNotVrbo() {
   );
 }
 
+const CURRENCY_SYMBOLS = {
+  USD: "$",
+  EUR: "€",
+  GBP: "£",
+  JPY: "¥",
+  AUD: "A$",
+  CAD: "CA$",
+  NZD: "NZ$",
+};
+
+function formatMoney(amount, currency = "USD") {
+  if (typeof amount !== "number") return "";
+  const code = String(currency || "USD").trim().toUpperCase();
+  const sym = CURRENCY_SYMBOLS[code] || `${code} `;
+  return `${sym}${amount}`;
+}
+
 function renderPolicy(policy) {
   const c = document.getElementById("content");
   c.innerHTML = "";
@@ -37,10 +54,10 @@ function renderPolicy(policy) {
   }
 
   const maxDogsVal = policy.maxDogs !== null ? String(policy.maxDogs) : (raw.maxDogs !== null ? String(raw.maxDogs) : "Not specified");
-  const weightVal = policy.weightLimit ? `${Math.round(policy.weightLimit.value)} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified");
+  const weightVal = policy.weightLimit ? `${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified");
   const preRegVal = (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned";
   const feeVal = policy.fee && policy.fee.amount !== null
-    ? `$${policy.fee.amount}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}`
+    ? `${formatMoney(policy.fee.amount, policy.fee.currency)}${policy.fee.period && policy.fee.period !== "unknown" ? ` per ${policy.fee.period}` : ""}`
     : (raw.fee || "Not specified");
 
   const rows = [
@@ -51,7 +68,7 @@ function renderPolicy(policy) {
   ];
 
   if (policy.deposit || raw.deposit) {
-    const depVal = policy.deposit && policy.deposit.amount !== null ? `$${policy.deposit.amount}` : raw.deposit;
+    const depVal = policy.deposit && policy.deposit.amount !== null ? formatMoney(policy.deposit.amount, policy.deposit.currency) : raw.deposit;
     rows.push(["Refundable deposit", depVal, "warn"]);
   }
 

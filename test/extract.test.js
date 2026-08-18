@@ -9,7 +9,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { extractPolicy, buildCorpus } = require("../extract.js");
+const { extractPolicy, buildCorpus, normalizePolicy, deriveSearchBadge } = require("../extract.js");
 
 // Runs one sentence through the extractor as if it came from a
 // dedicated "Pets" row in the listing data.
@@ -153,6 +153,25 @@ test("fees and deposits", async (t) => {
     assert.strictEqual(policyFor("A £30 dog fee applies.").fee, "£30");
     assert.strictEqual(policyFor("AU$40 pet fee.").fee, "AU$40");
     assert.strictEqual(policyFor("Dog fee: 60,00 EUR").fee, "€60.00");
+
+    // Test canonical normalization
+    const canonicalAud = normalizePolicy(policyFor("AU$40 pet fee."));
+    assert.equal(canonicalAud.fee.currency, "AUD");
+    assert.equal(canonicalAud.fee.amount, 40);
+
+    const canonicalUsd = normalizePolicy(policyFor("US$25 pet fee."));
+    assert.equal(canonicalUsd.fee.currency, "USD");
+    assert.equal(canonicalUsd.fee.amount, 25);
+  });
+
+  await t.test("fractional weight preservation and badge derivation", () => {
+    const raw = { petsAllowed: true, weightPerDog: "22.5 kg" };
+    const canonical = normalizePolicy(raw);
+    assert.equal(canonical.weightLimit.value, 22.5);
+    assert.equal(canonical.weightLimit.unit, "kg");
+
+    const badge = deriveSearchBadge(canonical);
+    assert.equal(badge.text, "Dogs allowed · 22.5 kg", "Must not round 22.5 kg up to 23 kg");
   });
 
   await t.test("deposit is separate from fee", () => {
