@@ -9,9 +9,11 @@
 </p>
 
 <p align="center">
-  <video src="docs/vrbow-demo.mp4" controls autoplay loop muted playsinline width="100%" poster="docs/panel-dog-friendly.png">
-    <a href="docs/vrbow-demo.mp4">Watch demo video</a>
-  </video>
+  <a href="docs/vrbow-demo.mp4">
+    <img src="docs/vrbow-demo.gif" alt="Vrbow Demo Video (2X Speed)" width="100%">
+  </a>
+  <br>
+  <em>Vrbow in action: Search page badging and listing card extraction (2X playback speed). Click image for full MP4.</em>
 </p>
 
 ---
