@@ -2,7 +2,7 @@
 
 This document records all changes to **Vrbow**.
 
-## [v1.2.0] - 2026-08-18
+## [v1.1.0] - 2026-08-18
 
 ### Search Page Badges and Tooltips
 - **Search Card Badges**: Shows pet policy badges on Vrbo search result cards. Examples: `Max 1 dog allowed`, `Max 2 dogs allowed`, `Dogs allowed`, `Pets not allowed`, and `Pet restrictions`.

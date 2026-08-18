@@ -57,7 +57,7 @@ It shows a single summary card with all extracted pet policy details.
 
 ## Installation
 
-1. Download **`vrbow-v1.2.0.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
+1. Download **`vrbow-v1.1.0.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Turn on **Developer mode** in the top-right corner.
