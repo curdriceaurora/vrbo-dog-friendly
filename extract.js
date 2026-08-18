@@ -216,7 +216,7 @@
     // "pre-registered" is the most common phrasing of this rule, so the
     // inflections have to be part of the alternative itself — a bare
     // "pre-?register" can't match it, since the \b lands on the "ed".
-    const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
+    const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const FEE_RE = [
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
@@ -229,7 +229,7 @@
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
     ];
-    const UNPRICED_FEE_RE = /\b(pet\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged)|the\s+pet\s+fee\s+paid|subject\s+to\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?pet\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
+    const UNPRICED_FEE_RE = /\b(there\s+is\s+(?:a\s+)?(?:one[-\s]?time\s+|non[-\s]?refundable\s+)?(?:pet|dog)\s+fee|(?:pet|dog)\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged|due|applicable|assessed)|(?:pet|dog)\s+fees?\s+apply|the\s+(?:pet|dog)\s+fee\s+paid|(?:subject\s+to|requires?|incurs?)\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?(?:pet|dog)\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
     const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
     const DEPOSIT_RE = [
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),

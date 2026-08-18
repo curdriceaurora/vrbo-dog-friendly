@@ -331,6 +331,8 @@ test("pre-registration", () => {
   assert.strictEqual(policyFor("Prior approval required for pets.").preReg, true);
   assert.strictEqual(policyFor("Pets must be declared and the pet fee paid.").preReg, true);
   assert.strictEqual(policyFor("Pets must be declared and the pet fee paid.").fee, "Pet fee applies");
+  assert.strictEqual(policyFor("There is a one time pet fee.").fee, "Pet fee applies");
+  assert.strictEqual(policyFor("Just include pets when telling us how many family members or friends.").preReg, true);
   assert.strictEqual(policyFor("Dogs up to 50 lbs.").preReg, null);
 });
 
