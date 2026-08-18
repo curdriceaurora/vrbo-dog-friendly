@@ -23,8 +23,8 @@ node --check content.js && node --check search-fetcher.js && node --check extrac
 ### Details
 - Requires no external dependencies or network connection.
 - Validates JavaScript syntax for all extension files (`content.js`, `search-fetcher.js`, `extract.js`, `page-bridge.js`, and `popup.js`).
-- Executes 48 unit tests against `extract.js`, `search-fetcher.js`, and request lifecycle managers using Node's test runner.
-- Verifies rule extraction, weight limits, fees, deposits, Apollo GraphQL schema parsing, request throttling, concurrency caps, abort signals, and local cache eviction.
+- Executes 57 unit and integration tests against `extract.js`, `search-fetcher.js`, state-transition lifecycles, and request managers using Node's test runner.
+- Verifies rule extraction, weight limits, fees, deposits, Apollo GraphQL schema parsing, request throttling, concurrency caps, abort signals, card virtualization, focus trapping, and local cache eviction.
 
 ## 2. Automated Theme Tests
 
