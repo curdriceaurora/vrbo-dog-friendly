@@ -22,6 +22,14 @@
       // "<br><br>" into the panel.
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<\/?[a-z][^>]*>/gi, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;|&#x27;/gi, "'")
+      .replace(/&le;|&#8804;/gi, "≤")
+      .replace(/&ge;|&#8805;/gi, "≥")
       .split(/(?<=[.!?])\s+(?=[A-Z0-9])|\n+/)
       .map((s) => s.replace(/\s+/g, " ").trim())
       .filter((s) => s.length > 0 && s.length < 400);
@@ -160,10 +168,30 @@
     return Math.abs(la - lb) <= 2;
   }
 
+  function cleanEntryText(text) {
+    if (!text || typeof text !== "string") return "";
+    return text
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;|&#x27;/gi, "'")
+      .replace(/&le;|&#8804;/gi, "≤")
+      .replace(/&ge;|&#8805;/gi, "≥")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   // ---------- extraction ----------
 
-  function extractPolicy(entries) {
+  function extractPolicy(rawEntries) {
     // entries: [{ text, source, priority }, ...] already sorted by priority
+    const entries = (rawEntries || []).map((e) => ({
+      ...e,
+      text: cleanEntryText(e?.text),
+    })).filter((e) => Boolean(e.text));
+
     const result = {
       found: entries.length > 0,
       petsAllowed: null,
@@ -222,8 +250,8 @@
 
     const WEIGHT_RE = [
       new RegExp(`\\b(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\s*(?:per (?:dog|pet)|each|max(?:imum)?|or (?:less|under)|weight limit)\\b`, "i"),
-      new RegExp(`\\bweight limit\\s*(?:of|is|:)?\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
-      new RegExp(`\\b(?:up to|under|less than|max(?:imum)?(?:\\s+of)?)\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
+      new RegExp(`\\bweight(?:\\s+limit)?\\s*(?:of|is|:|<|<=|≤)?\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
+      new RegExp(`\\b(?:up to|under|less than|max(?:imum)?(?:\\s+of)?|<|<=|≤)\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
       new RegExp(`\\bcombined weight of\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
     ];
 

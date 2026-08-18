@@ -448,4 +448,15 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(canonical.fee.period, "night");
     assert.strictEqual(canonical.fee.tiered, true);
   });
+
+  await t.test("decodes HTML entities (&nbsp;, &le;, &amp;) in raw text", () => {
+    const raw = policyFor("Max&nbsp;2&nbsp;dogs allowed, weight&nbsp;&le;&nbsp;50&nbsp;lbs &amp; $150&nbsp;pet&nbsp;fee.");
+    assert.strictEqual(raw.petsAllowed, true);
+    assert.strictEqual(raw.maxDogs, 2);
+    assert.strictEqual(raw.weightPerDog, "50 lbs");
+    assert.strictEqual(raw.fee, "$150");
+  });
 });
+
+
+
