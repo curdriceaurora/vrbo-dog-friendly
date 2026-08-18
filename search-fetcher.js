@@ -290,7 +290,11 @@
       } : null,
       approvalRequired: policy.approvalRequired !== undefined ? policy.approvalRequired : null,
       restrictionsFound: Boolean(policy.restrictionsFound),
-      contradictions: Array.isArray(policy.contradictions) ? policy.contradictions.slice(0, 5) : [],
+      contradictions: policy.contradictions && typeof policy.contradictions === "object" ? {
+        maxDogs: Boolean(policy.contradictions.maxDogs),
+        weightLimit: Boolean(policy.contradictions.weightLimit),
+        fee: Boolean(policy.contradictions.fee),
+      } : { maxDogs: false, weightLimit: false, fee: false },
       restrictionNoteCount: typeof policy.restrictionNoteCount === "number" ? policy.restrictionNoteCount : 0,
       confidence: policy.confidence || "low",
     };
@@ -435,6 +439,8 @@
 
       // Check precedence against existing cache to prevent downgrading richer data
       const existing = await getCached(propertyId);
+      if (isDisposed) return { accepted: false, data: null, policy: null };
+
       if (existing && existing.policy && data.policy) {
         if (!canPolicyUpgrade(existing.policy, data.policy, data.source || data.policy.source)) {
           return {

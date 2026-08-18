@@ -691,7 +691,9 @@
   }
 
   function enqueueSearch(propId, url, priority = "normal") {
-    if (!searchQueue) return;
+    const activeQueue = searchQueue;
+    if (!activeQueue) return;
+
     try {
       const fast = trySearchApolloFastPath(propId);
       if (fast && globalThis.VdpSearchFetcher?.hasConcretePolicy?.(fast.policy)) {
@@ -702,8 +704,10 @@
           fast.policy.deposit !== null;
 
         if (isRichOrDefinitive) {
-          searchQueue.setCached(propId, fast).finally(() => {
-            searchQueue.enqueue(propId, url, priority);
+          activeQueue.setCached(propId, fast).finally(() => {
+            if (searchQueue && searchQueue === activeQueue && document.querySelector(`[data-vdp-prop-id="${propId}"]`)) {
+              activeQueue.enqueue(propId, url, priority);
+            }
           });
           return;
         } else {
@@ -718,7 +722,9 @@
     } catch (e) {
       // Fall through to the normal queue path on any unexpected failure.
     }
-    searchQueue.enqueue(propId, url, priority);
+    if (searchQueue && searchQueue === activeQueue) {
+      activeQueue.enqueue(propId, url, priority);
+    }
   }
 
   function clearTooltipLeaveTimer() {
@@ -1204,12 +1210,17 @@
         addRow("Pet fee", `${curSym}${p.fee.amount}${perStr}`);
         rowsAdded++;
       } else if (p.fee) {
-        addRow("Pet fee", String(p.fee));
+        const feeText = typeof p.fee === "string" ? p.fee : (p.fee.text || "Pet fee applies");
+        addRow("Pet fee", feeText, "vdp-tone-warn");
         rowsAdded++;
       }
       if (p.deposit && p.deposit.amount !== null) {
         const curSym = p.deposit.currency === "USD" ? "$" : `${p.deposit.currency} `;
         addRow("Pet deposit", `${curSym}${p.deposit.amount}`);
+        rowsAdded++;
+      } else if (p.deposit) {
+        const depText = typeof p.deposit === "string" ? p.deposit : (p.deposit.text || "Deposit applies");
+        addRow("Pet deposit", depText, "vdp-tone-warn");
         rowsAdded++;
       }
       if (p.approvalRequired === true || p.preReg === true) {

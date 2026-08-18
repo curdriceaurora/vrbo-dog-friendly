@@ -997,7 +997,7 @@ test("search-fetcher queue and caching", async (t) => {
       deposit: { amount: 100, text: "$100 deposit", currency: "USD" },
       approvalRequired: false,
       restrictionsFound: true,
-      contradictions: ["Host notes contradict amenities"],
+      contradictions: { maxDogs: true, weightLimit: false, fee: false },
       restrictionNoteCount: 3,
       confidence: "high",
       _raw: { domText: "secret excerpt" },
@@ -1006,21 +1006,21 @@ test("search-fetcher queue and caching", async (t) => {
     const serialized = serializeSearchPolicyForCache(richPolicy);
     assert.equal(serialized.fee.text, "Pet fee applies", "fee.text must be preserved");
     assert.equal(serialized.deposit.text, "$100 deposit", "deposit.text must be preserved");
-    assert.deepEqual(serialized.contradictions, ["Host notes contradict amenities"], "contradictions must be preserved");
+    assert.deepEqual(serialized.contradictions, { maxDogs: true, weightLimit: false, fee: false }, "contradictions object must be preserved");
     assert.equal(serialized.restrictionNoteCount, 3, "restrictionNoteCount must be preserved");
     assert.equal(serialized._raw, undefined, "_raw must be stripped");
   });
 
   await t.test("subscriber notification delivers winning cache record when candidate is rejected", async () => {
     let fetchCount = 0;
+    let resolveFetch;
+    const fetchPromise = new Promise((resolve) => {
+      resolveFetch = resolve;
+    });
+
     const mockFetch = async () => {
       fetchCount++;
-      // Return shallow policy
-      return {
-        ok: true,
-        status: 200,
-        text: async () => "<section>Dogs allowed</section>",
-      };
+      return fetchPromise;
     };
 
     const queue = createSearchFetchQueue({
@@ -1029,7 +1029,17 @@ test("search-fetcher queue and caching", async (t) => {
       minDelayMs: 10,
     });
 
-    // 1. Prime cache with rich policy
+    let notifiedResult = null;
+    queue.subscribe("p_win", (result) => {
+      notifiedResult = result;
+    });
+
+    // 1. Start in-flight fetch
+    queue.enqueue("p_win", "https://www.vrbo.com/p_win", "normal");
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(fetchCount, 1, "Fetch must be in flight");
+
+    // 2. Insert rich policy into cache while fetch is still running
     const richPolicy = {
       schemaVersion: 1,
       propertyId: "p_win",
@@ -1041,16 +1051,19 @@ test("search-fetcher queue and caching", async (t) => {
     };
     await queue.setCached("p_win", { status: "ok", propertyId: "p_win", policy: richPolicy });
 
-    // 2. Subscribe and enqueue fetch
-    let notifiedResult = null;
-    queue.subscribe("p_win", (result) => {
-      notifiedResult = result;
+    // 3. Complete the in-flight fetch with a shallow candidate
+    resolveFetch({
+      ok: true,
+      status: 200,
+      text: async () => "<section>Dogs allowed</section>",
     });
 
-    queue.enqueue("p_win", "https://www.vrbo.com/p_win", "high");
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 80));
 
-    // 3. Assert notified result is the rich winning policy, not downgraded shallow candidate
+    // 4. Assert fetch ran, cache retained rich policy, and subscriber received rich policy
+    assert.equal(fetchCount, 1, "Fetch must have run");
+    const cached = await queue.getCached("p_win");
+    assert.equal(cached.policy.maxDogs, 2, "Cache must retain rich policy maxDogs");
     assert.ok(notifiedResult, "Subscriber must be notified");
     assert.equal(notifiedResult.policy.maxDogs, 2, "Subscriber must receive winning rich policy maxDogs");
     assert.equal(notifiedResult.policy.fee.amount, 150, "Subscriber must receive winning rich fee");

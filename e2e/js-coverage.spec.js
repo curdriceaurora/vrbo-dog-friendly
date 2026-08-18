@@ -5,8 +5,8 @@ const { expect, test } = require("@playwright/test");
 const ROOT = path.join(__dirname, "..");
 const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js"]);
 
-function calculateV8Coverage(text, functionEntries) {
-  if (!text || text.length === 0) return 100;
+function calculateExecutionMask(text, functionEntries) {
+  if (!text || text.length === 0) return new Uint8Array(0);
   const bytes = new Uint8Array(text.length);
 
   for (const fn of functionEntries) {
@@ -20,12 +20,7 @@ function calculateV8Coverage(text, functionEntries) {
     }
   }
 
-  let covered = 0;
-  for (let i = 0; i < bytes.length; i++) {
-    if (bytes[i] === 1) covered++;
-  }
-
-  return (covered / bytes.length) * 100;
+  return bytes;
 }
 
 test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, and page-bridge.js", async ({ browser }) => {
@@ -265,12 +260,18 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
       const filename = path.basename(new URL(entry.url, "https://www.vrbo.com/").pathname);
       if (!TARGET_SCRIPTS.has(filename)) continue;
 
-      const current = aggregate.get(filename) || { text: entry.source || entry.text || "", functions: [] };
-      if (!current.text && (entry.source || entry.text)) {
-        current.text = entry.source || entry.text;
+      const srcText = entry.source || entry.text || "";
+      let current = aggregate.get(filename);
+      if (!current) {
+        current = { text: srcText, mask: new Uint8Array(srcText.length) };
+        aggregate.set(filename, current);
       }
-      current.functions.push(...entry.functions);
-      aggregate.set(filename, current);
+      const executionMask = calculateExecutionMask(current.text || srcText, entry.functions);
+      for (let i = 0; i < current.mask.length; i++) {
+        if (executionMask[i] === 1) {
+          current.mask[i] = 1;
+        }
+      }
     }
   }
 
@@ -425,7 +426,13 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   for (const script of ["content.js", "popup.js", "page-bridge.js"]) {
     const cov = aggregate.get(script);
-    const percent = cov ? calculateV8Coverage(cov.text, cov.functions) : 0;
+    let covered = 0;
+    if (cov && cov.mask) {
+      for (let i = 0; i < cov.mask.length; i++) {
+        if (cov.mask[i] === 1) covered++;
+      }
+    }
+    const percent = (cov && cov.mask && cov.mask.length > 0) ? (covered / cov.mask.length) * 100 : 0;
     console.log(`ℹ [Browser] ${script.padEnd(20)} | Executed Path: ${percent.toFixed(2)}%`);
     expect(percent, `${script} browser-path coverage must be > 0`).toBeGreaterThan(0);
   }
