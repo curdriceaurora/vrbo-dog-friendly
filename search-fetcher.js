@@ -424,20 +424,21 @@
           (typeof document === "undefined" || document.visibilityState !== "hidden") &&
           Date.now() >= pausedUntil
         ) {
-          // Check pacing delay
+          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
+          let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
+          const isHighPriority = nextIndex !== -1;
+          if (nextIndex === -1) nextIndex = 0;
+
+          // Check pacing delay for background items (user hover bypasses delay)
           const now = Date.now();
           const elapsed = now - lastRequestStartTime;
-          if (elapsed < minDelayMs) {
+          if (!isHighPriority && elapsed < minDelayMs) {
             const waitTime = minDelayMs - elapsed;
             scheduleTimer(processQueue, waitTime);
             break;
           }
 
-          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
-          let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
-          if (nextIndex === -1) nextIndex = 0;
           const [nextItem] = queue.splice(nextIndex, 1);
-          const isHighPriority = nextItem.priority === "high" || highPriorityIds.has(nextItem.propertyId);
           highPriorityIds.delete(nextItem.propertyId);
 
           // Check session cap: background requests are capped; explicit user hover (priority: "high") bypasses the background cap
