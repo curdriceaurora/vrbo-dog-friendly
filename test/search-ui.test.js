@@ -203,10 +203,10 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
     assert.equal(canonical.source, "search-response");
     assert.equal(canonical.schemaVersion, 1);
 
-    // Test badge derivation: enforces compact budget (Status + max 2 secondary constraints)
+    // Test badge derivation: enforces 4-item budget (Status + max 3 secondary constraints)
     const badge = extract.deriveSearchBadge(canonical);
     assert.equal(badge.statusKey, "allowed");
-    assert.equal(badge.text, "Dogs allowed · Max 2 · 50 lbs");
+    assert.equal(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay");
   });
 
   await t.test("future filtering readiness: conservative missing-value semantics", () => {

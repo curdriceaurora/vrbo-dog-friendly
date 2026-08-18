@@ -545,16 +545,16 @@
     }
 
     const feeStr = formatFeeShort(policy.fee);
-    if (feeStr && details.length < 2) {
+    if (feeStr) {
       details.push(feeStr);
     }
 
-    if (policy.approvalRequired && details.length < 2) {
+    if (policy.approvalRequired) {
       details.push("Approval required");
     }
 
-    // Return at most 2 secondary constraints for compact search badge
-    return details.slice(0, 2);
+    // Return at most 3 secondary constraints for 4 items total (Status + 3 secondary constraints)
+    return details.slice(0, 3);
   }
 
   function deriveSearchBadge(canonical) {

@@ -311,8 +311,8 @@ test("fees and deposits", async (t) => {
 
     const badge = deriveSearchBadge(canonical);
     assert.strictEqual(badge.statusKey, "allowed");
-    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs");
-    assert.ok(badge.text.length < 50, `Badge text "${badge.text}" exceeds compact length budget of 50 chars`);
+    assert.strictEqual(badge.text, "Dogs allowed · Max 2 · 50 lbs · $150/stay");
+    assert.ok(badge.text.length < 60, `Badge text "${badge.text}" exceeds compact length budget`);
   });
 
   await t.test("conflicting fees are flagged", () => {
