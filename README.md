@@ -14,46 +14,37 @@
 
 ---
 
-## Problem
+## Why?
 
-Vrbo property listings do not show dog rules in one standard location.
-Hosts write pet rules across different sections:
-- House Rules
-- Amenities
-- Property description ("About this property")
+Vrbo does not present pet policies in a consistent place. Hosts may put restrictions in House Rules, Amenities, or About this property, sometimes behind collapsed sections. Rules can also conflict within the same listing.
 
-Important pet rules are often hidden behind collapsed menus or "See more" buttons.
-Hosts can also write conflicting pet rules in different sections of the same listing.
+A property marked Pets allowed may still have limits on dog count, weight, fees, breeds, or require prior host approval. Checking all of this manually across several listings gets tedious quickly.
 
-## Need
+## What
 
-Travelers with dogs must verify pet rules before they book a property.
-Users need to quickly find:
-- If pets are allowed
-- Maximum number of allowed dogs
-- Weight limits per dog
-- Required pet fees and deposits
-- Pre-registration or prior approval requirements
+The extension reads the pet policy information available on a listing and consolidates it into a summary showing:
 
-Reading every section on multiple listings takes time and causes missed restrictions.
+* Whether dogs are allowed
+* Maximum number of dogs and weight limits
+* Pet fees or deposits
+* Registration or prior approval requirements
+* Other restrictions, such as breed or leash rules
 
-## Solution
+Where possible, extracted rules link back to the source text on the listing, with the relevant text highlighted. If two sections contain conflicting rules, the extension flags the discrepancy rather than attempting to decide which one is authoritative.
 
-This extension automatically reads listing data when the page loads.
-It shows a single summary card with all extracted pet policy details.
+## Search Result Badges
 
-- **Immediate Visibility**: Shows the pet policy without manual scrolling or menu clicks.
-- **Structured Fields**: Converts text into clear fields for dog count, weight limit, fees, and approval rules.
-- **Source Verification**: Provides a clickable **source** link that jumps to and highlights the text on the page.
-- **Contradiction Alerts**: Alerts you when rules in one section disagree with rules in another section.
-- **Extra Notes**: Collects all other pet sentences (such as leash rules or breed limits) in an expandable drawer.
-- **Automatic Theme**: Uses a light or dark theme that follows your operating system preference.
-- **Local Operation**: Runs directly inside your browser. The extension does not send personal data or telemetry to external services.
-- **Search Badges**: Shows pet policy badges directly on search result cards.
+The extension can also add pet policy badges directly to Vrbo search results, making it easier to compare properties without opening each listing.
 
-<p align="center">
-  <img src="docs/panel-not-allowed.png" alt="Callout showing pets not allowed policy" width="420">
-</p>
+Search enrichment is disabled by default because it requires additional requests to retrieve policy details for individual properties. Enable it when useful and disable it when you no longer need it.
+
+When enabled, the extension uses caching, request throttling, deduplication, and bounded concurrency to reduce redundant requests and avoid placing unnecessary load on Vrbo.
+
+## Privacy
+
+Processing and storage remain local to your browser. No personal data, browsing activity, or telemetry is sent to an external service.
+
+The interface automatically follows your system light or dark theme.
 
 ---
 
@@ -71,7 +62,7 @@ It shows a single summary card with all extracted pet policy details.
 ## How to Use
 
 ### 1. Automatic On-Page Card
-When you visit a listing on `vrbo.com`, the policy card opens in the bottom-right corner:
+When you visit a listing on `vrbo.com`, the policy card opens in the top-right corner:
 
 - **Source verification**: Click the **source** link next to any value to highlight the original text on the page.
 - **Other pet notes**: Click **Other pet notes** to read extra guidelines (such as leash rules or crate requirements).
