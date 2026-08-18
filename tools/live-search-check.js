@@ -220,7 +220,7 @@ async function run() {
     }
 
     if (!cardsMounted) {
-      const diagVal = await evalCdp(targetCdp, `({ title: document.title, bodySnippet: document.body?.innerText?.slice(0, 400) })`);
+      const diagVal = await evalCdp(targetCdp, `({ title: document.title, bodySnippet: (document.body && document.body.innerText ? document.body.innerText.slice(0, 400) : '') })`);
       console.warn("⚠️ Property cards were slow or not found:", JSON.stringify(diagVal, null, 2));
     }
 
@@ -239,7 +239,7 @@ async function run() {
       return { clicked: false, totalCheckboxes: checkboxes.length };
     })()`);
     console.log("Filter interaction result:", JSON.stringify(filterAppliedVal, null, 2));
-    if (filterAppliedVal?.clicked) {
+    if (filterAppliedVal && filterAppliedVal.clicked) {
       console.log("Waiting 6s for filtered search results to settle...");
       await sleep(6000);
     }
@@ -292,15 +292,16 @@ async function run() {
           const u = new URL(a.href);
           cleanHref = u.origin + u.pathname;
         } catch {}
+        const closestStid = a.closest('[data-stid]');
         return {
           href: cleanHref,
           text: a.textContent.trim().slice(0, 50),
           className: a.className,
-          dataStid: a.getAttribute('data-stid') || a.closest('[data-stid]')?.getAttribute('data-stid')
+          dataStid: a.getAttribute('data-stid') || (closestStid ? closestStid.getAttribute('data-stid') : null)
         };
       });
 
-      const listingLinks = allLinks.filter(l => /vrbo\.com\/(?:\d+|pdp|vacation-rental|hotel)/i.test(l.href) || /\/\d{5,}/.test(l.href));
+      const listingLinks = allLinks.filter(l => /vrbo\\.com\\/(?:\\d+|pdp|vacation-rental|hotel)/i.test(l.href) || /\\/\\d{5,}/.test(l.href));
 
       const uitkCards = Array.from(document.querySelectorAll('.uitk-card, [class*="card"], [class*="listing"], [class*="property"]')).slice(0, 5).map(el => ({
         tag: el.tagName,
@@ -426,12 +427,15 @@ async function run() {
         }
       }
       const linkMatchesProp = tooltipLink && expectedPropId && tooltipLink.href.includes(expectedPropId);
-
       const rows = tooltip ? Array.from(tooltip.querySelectorAll('.vdp-tooltip-row')) : [];
-      const parsedFields = rows.map(r => ({
-        label: r.querySelector('.vdp-tooltip-label')?.textContent?.trim() || '',
-        value: r.querySelector('.vdp-tooltip-val')?.textContent?.trim() || ''
-      })).filter(r => r.label && r.value);
+      const parsedFields = rows.map(r => {
+        const lblEl = r.querySelector('.vdp-tooltip-label');
+        const valEl = r.querySelector('.vdp-tooltip-val');
+        return {
+          label: lblEl && lblEl.textContent ? lblEl.textContent.trim() : '',
+          value: valEl && valEl.textContent ? valEl.textContent.trim() : ''
+        };
+      }).filter(r => r.label && r.value);
 
       // Step D: Dismiss via Close Button click
       const closeBtn = tooltip ? tooltip.querySelector('.vdp-tooltip-close') : null;

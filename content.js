@@ -1047,6 +1047,8 @@
       searchTooltipEl.appendChild(row);
     };
 
+    const p = (data && data.policy) ? data.policy : data;
+
     if (!data || data.status === "loading") {
       const row = document.createElement("div");
       row.className = "vdp-tooltip-row";
@@ -1055,22 +1057,30 @@
       val.textContent = "Checking the listing summary for pet rules...";
       row.appendChild(val);
       searchTooltipEl.appendChild(row);
-    } else if (data.status === "ok" && data.policy) {
-      const p = data.policy;
+    } else if (p && (data.status === "ok" || p.petsAllowed !== undefined || p.restrictionsFound !== undefined || p.maxDogs !== undefined || p.fee !== undefined)) {
+
+      let rowsAdded = 0;
 
       if (p.petsAllowed !== null) {
         const statusText = p.petsAllowed === true ? "Yes" : "No";
         const statusTone = p.petsAllowed === true ? "vdp-tone-good" : "vdp-tone-bad";
         addRow("Dogs allowed", statusText, statusTone);
+        rowsAdded++;
+      } else if (p.approvalRequired || p.restrictionsFound || (p.restrictionNoteCount && p.restrictionNoteCount > 0)) {
+        addRow("Pet policy", "Pet restrictions apply", "vdp-tone-warn");
+        rowsAdded++;
       }
       if (p.maxDogs !== null) {
         addRow("Maximum dogs", String(p.maxDogs));
+        rowsAdded++;
       }
       if (p.weightLimit) {
         const unitStr = p.weightLimit.unit === "lb" ? "lbs" : p.weightLimit.unit;
         addRow("Weight limit", `${p.weightLimit.value} ${unitStr}`);
+        rowsAdded++;
       } else if (p.weightPerDog) {
         addRow("Weight limit", String(p.weightPerDog));
+        rowsAdded++;
       }
       if (p.fee && p.fee.amount !== null) {
         const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
@@ -1081,15 +1091,23 @@
           perStr = ` per ${p.fee.period}`;
         }
         addRow("Pet fee", `${curSym}${p.fee.amount}${perStr}`);
+        rowsAdded++;
       } else if (p.fee) {
         addRow("Pet fee", String(p.fee));
+        rowsAdded++;
       }
       if (p.deposit && p.deposit.amount !== null) {
         const curSym = p.deposit.currency === "USD" ? "$" : `${p.deposit.currency} `;
         addRow("Pet deposit", `${curSym}${p.deposit.amount}`);
+        rowsAdded++;
       }
       if (p.approvalRequired === true || p.preReg === true) {
-        addRow("Prior approval", "Required");
+        addRow("Prior approval", "Required", "vdp-tone-warn");
+        rowsAdded++;
+      }
+
+      if (rowsAdded === 0) {
+        addRow("Pet policy", "Check listing for complete rules");
       }
 
       // Contradiction summary
