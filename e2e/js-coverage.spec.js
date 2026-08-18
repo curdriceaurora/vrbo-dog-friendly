@@ -265,8 +265,14 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
       if (!current) {
         current = { text: srcText, mask: new Uint8Array(srcText.length) };
         aggregate.set(filename, current);
+      } else if ((!current.text || current.text.length === 0) && srcText.length > 0) {
+        current.text = srcText;
+        current.mask = new Uint8Array(srcText.length);
       }
       const executionMask = calculateExecutionMask(current.text || srcText, entry.functions);
+      if (current.mask.length === 0 && executionMask.length > 0) {
+        current.mask = new Uint8Array(executionMask.length);
+      }
       for (let i = 0; i < current.mask.length; i++) {
         if (executionMask[i] === 1) {
           current.mask[i] = 1;

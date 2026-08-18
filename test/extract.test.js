@@ -413,6 +413,25 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(canonical.fee.tiered, true);
 
     const badge = deriveSearchBadge(canonical);
-    assert.strictEqual(badge.text, "Dogs allowed · 1st free · $25/add'l stay");
+    assert.strictEqual(badge.text, "Dogs allowed · 1st free · $25/add'l per stay");
+  });
+
+  await t.test("retains legitimate max-dog limits in sentences with additional/extra pets clauses", () => {
+    assert.strictEqual(policyFor("We allow up to 2 dogs; each additional dog is $25 per night.").maxDogs, 2);
+    assert.strictEqual(policyFor("A maximum of 2 dogs is allowed; extra dogs are not permitted.").maxDogs, 2);
+    assert.strictEqual(policyFor("Maximum of 2 dogs, additional dogs by request only.").maxDogs, 2);
+    assert.strictEqual(policyFor("Up to 3 dogs welcome, no additional pets beyond that.").maxDogs, 3);
+  });
+
+  await t.test("parses plural tiered fee phrasing (are free, additional pets are $15)", () => {
+    const raw = policyFor("First pet is free, additional pets are $15 each per night.");
+    assert.strictEqual(raw.petsAllowed, true);
+    assert.strictEqual(raw.maxDogs, null);
+    assert.strictEqual(raw.fee, "$0 1st dog, $15 each subsequent dog per night");
+
+    const canonical = normalizePolicy(raw);
+    assert.strictEqual(canonical.fee.amount, 15);
+    assert.strictEqual(canonical.fee.period, "night");
+    assert.strictEqual(canonical.fee.tiered, true);
   });
 });

@@ -233,8 +233,8 @@
     const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
 
     const TIERED_FEE_RE = new RegExp(
-      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:is\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:is\\s+)?free))` +
-      `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:is\\s+)?` +
+      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:(?:is|are)\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:is|are\\s+)?free))` +
+      `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:(?:is|are)\\s+)?` +
       `${CUR}?\\s?${AMT}\\s*(?:each)?(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`,
       "i"
     );
@@ -296,12 +296,25 @@
         }
       }
 
-      // Do not mistake tiered pricing phrases like "one dog free, subsequent dogs $25" for a maxDogs limit of 1
-      const hasSubsequentDogs = /\b(?:subsequent|additional|extra|further|other|2nd|second)\s+(?:pets?|dogs?)\b/i.test(s);
-      const dogsMatch = !hasSubsequentDogs ? firstMatch(MAX_DOGS_RE, s) : null;
+      function normalizeFeePhrasing(text) {
+        if (!text || typeof text !== "string") return text;
+        return text
+          .replace(/\bper\s+each\s+(pet|dog)s?\b/gi, "per $1")
+          .replace(/\beach\s+(pet|dog)s?\b/gi, "per $1");
+      }
+
+      const feeNormalized = normalizeFeePhrasing(s);
+      const tieredMatch = feeNormalized.match(TIERED_FEE_RE);
+
+      const dogsMatch = firstMatch(MAX_DOGS_RE, s);
       if (dogsMatch) {
-        record("maxDogs", "maxDogsSnippet", "maxDogsSource", "maxDogsAlternates", toNumber(dogsMatch.groups.num), entry);
-        usedForField = true;
+        const matchedNum = toNumber(dogsMatch.groups.num);
+        // Suppress maxDogs only when TIERED_FEE_RE matched, the matched number is 1, and there is no explicit limit phrasing
+        const isTieredOneDogFree = tieredMatch && matchedNum === 1 && !/\b(?:up to|maximum|max|limit(?:ed)?|no more than)\b/i.test(dogsMatch[0]);
+        if (!isTieredOneDogFree) {
+          record("maxDogs", "maxDogsSnippet", "maxDogsSource", "maxDogsAlternates", matchedNum, entry);
+          usedForField = true;
+        }
       }
 
       const weightMatch = firstMatch(WEIGHT_RE, s);
@@ -320,16 +333,12 @@
         usedForField = true;
       }
 
-      function normalizeFeePhrasing(text) {
-        if (!text || typeof text !== "string") return text;
-        return text
-          .replace(/\bper\s+each\s+(pet|dog)s?\b/gi, "per $1")
-          .replace(/\beach\s+(pet|dog)s?\b/gi, "per $1");
-      }
-
-      const feeNormalized = normalizeFeePhrasing(s);
-      const tieredMatch = feeNormalized.match(TIERED_FEE_RE);
       if (tieredMatch) {
+        if (result.petsAllowed === null) {
+          result.petsAllowed = true;
+          result.petsAllowedSnippet = s;
+          result.petsAllowedSource = entry.source;
+        }
         const amtStr = formatMoney(tieredMatch.groups.cur || "$", tieredMatch.groups.amt);
         const time = tieredMatch.groups.time ? tieredMatch.groups.time.toLowerCase() : "stay";
         const feeStr = `$0 1st dog, ${amtStr} each subsequent dog per ${time}`;
@@ -400,40 +409,24 @@
     return result;
   }
 
-  const CURRENCY_MAP = {
-    "$": "USD",
-    "US$": "USD",
-    "USD": "USD",
-    "€": "EUR",
-    "EUR": "EUR",
-    "£": "GBP",
-    "GBP": "GBP",
-    "¥": "JPY",
-    "JPY": "JPY",
-    "A$": "AUD",
-    "AU$": "AUD",
-    "AUD": "AUD",
-    "CA$": "CAD",
-    "C$": "CAD",
-    "CAD": "CAD",
-    "NZ$": "NZD",
-    "NZD": "NZD",
-  };
-
-  function normalizeCurrencyCode(symbolOrCode) {
-    if (!symbolOrCode) return "USD";
-    const clean = String(symbolOrCode).trim().toUpperCase();
-    return CURRENCY_MAP[symbolOrCode] || CURRENCY_MAP[clean] || clean;
+  function normalizeCurrencyCode(code) {
+    if (!code) return "USD";
+    const clean = String(code).trim().toUpperCase();
+    if (clean === "$" || clean === "US$") return "USD";
+    if (clean === "€") return "EUR";
+    if (clean === "£") return "GBP";
+    if (clean === "A$" || clean === "AU$") return "AUD";
+    if (clean === "CA$") return "CAD";
+    if (clean === "NZ$" || clean === "NZD") return "NZD";
+    return clean;
   }
 
   function formatCurrencyDisplay(amount, currency = "USD") {
-    if (typeof amount !== "number") return "";
     const code = normalizeCurrencyCode(currency);
     const symbolMap = {
       USD: "$",
       EUR: "€",
       GBP: "£",
-      JPY: "¥",
       AUD: "A$",
       CAD: "CA$",
       NZD: "NZ$",
@@ -566,8 +559,9 @@
   function formatFeeShort(fee) {
     if (!fee) return null;
     if (fee.tiered || (fee.text && /\$0\s+(?:1st|first)\s+(?:dog|pet)/i.test(fee.text))) {
-      const curSym = formatCurrencyDisplay(fee.amount, fee.currency);
-      return `1st free · ${curSym}/add'l${fee.period && fee.period !== 'unknown' ? ' ' + fee.period : ''}`;
+      const amountStr = formatCurrencyDisplay(fee.amount, fee.currency);
+      const perPeriodStr = fee.period && fee.period !== "unknown" ? ` per ${fee.period}` : "";
+      return `1st free · ${amountStr}/add'l${perPeriodStr}`;
     }
     if (fee.amount === 0) return "No pet fee";
     if (fee.amount === null && fee.text) return fee.text;
@@ -615,8 +609,7 @@
       details.push("Approval required");
     }
 
-    // Return at most 3 secondary constraints for 4 items total (Status + 3 secondary constraints)
-    return details.slice(0, 3);
+    return details;
   }
 
   function deriveSearchBadge(canonical) {
@@ -659,7 +652,9 @@
     }
 
     if (policy.petsAllowed === true) {
-      const details = collectPolicyBadgeDetails(policy, false);
+      // If maxDogs prefix is used, limit secondary details to 2 items (3 items total) to stay within compact length budget
+      const maxSecondary = policy.maxDogs ? 2 : 3;
+      const details = collectPolicyBadgeDetails(policy, false).slice(0, maxSecondary);
       const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       const prefix = policy.maxDogs
         ? `Max ${policy.maxDogs} ${policy.maxDogs === 1 ? "dog" : "dogs"} allowed`
@@ -673,7 +668,7 @@
     }
 
     if (policy.approvalRequired || policy.restrictionsFound || policy.weightLimit || policy.fee || policy.maxDogs || policy.restrictionNoteCount > 0) {
-      const details = collectPolicyBadgeDetails(policy);
+      const details = collectPolicyBadgeDetails(policy, true).slice(0, 3);
       const detailStr = details.length ? ` · ${details.join(" · ")}` : "";
       return {
         statusKey: "restrictions",

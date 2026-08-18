@@ -176,6 +176,7 @@
       policy.fee !== null ||
       policy.deposit !== null ||
       policy.approvalRequired !== null ||
+      (policy.restrictionNoteCount && policy.restrictionNoteCount > 0) ||
       (policy._raw?.otherNotes && policy._raw.otherNotes.length > 0)
     ));
   }
@@ -194,7 +195,7 @@
     if (policy.fee && policy.fee.amount !== null) return false;
     if (policy.deposit && policy.deposit.amount !== null) return false;
     if (policy.approvalRequired !== null && policy.approvalRequired !== undefined) return false;
-    if (policy._raw?.otherNotes && policy._raw.otherNotes.length > 0) return false;
+    if ((policy.restrictionNoteCount && policy.restrictionNoteCount > 0) || (policy._raw?.otherNotes && policy._raw.otherNotes.length > 0)) return false;
 
     // Shallow boolean flag from search results state
     return policy.source === "search-page-state" || policy._source === "search-page-state";
@@ -282,6 +283,7 @@
         period: policy.fee.period,
         ...(policy.fee.text !== undefined ? { text: policy.fee.text } : {}),
         ...(policy.fee.perPet ? { perPet: true } : {}),
+        ...(policy.fee.tiered ? { tiered: true } : {}),
       } : null,
       deposit: policy.deposit ? {
         amount: policy.deposit.amount,
@@ -445,7 +447,7 @@
         if (!canPolicyUpgrade(existing.policy, data.policy, data.source || data.policy.source)) {
           return {
             accepted: false,
-            data: existing.data || { status: "ok", propertyId, policy: existing.policy },
+            data: existing,
             policy: existing.policy,
           };
         }

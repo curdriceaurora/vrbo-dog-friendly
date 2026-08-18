@@ -142,7 +142,7 @@
           // skips [role="dialog"] subtrees, so this is the only way the
           // text reaches the corpus.
           const text = dialog.innerText || "";
-          if (text.trim()) harvestedDialogText.push(text);
+          if (text.trim()) harvestedDialogText.push({ text, source: "Property amenities" });
         }
         // Retried on later polls if the close didn't take.
         closeDialog(dialog);
@@ -294,7 +294,7 @@
   function findSectionHeadingForElement(element) {
     if (!element) return "Listing details";
 
-    if (element.closest('[data-stid*="review" i], [class*="review" i], [id*="review" i], [data-section-type*="review" i], [data-stid*="ratings-and-reviews"]')) {
+    if (element.closest('#reviews, [id*="reviews" i], [data-stid*="reviews" i], [data-stid*="ratings-and-reviews"], [class*="reviews-" i], [class*="reviews " i], [class$="reviews" i], [data-section-type*="review" i]')) {
       return "Guest reviews";
     }
     if (element.closest('[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]')) {
@@ -351,9 +351,13 @@
       if (!rawText) continue;
       const parent = node.parentElement;
       if (parent && parent.closest(DOM_EXCLUDE)) continue;
-      const section = findSectionHeadingForElement(parent);
+      
+      let section = null;
       for (const sentence of getSentences(rawText)) {
         if (isPetRelated(sentence)) {
+          if (!section) {
+            section = findSectionHeadingForElement(parent);
+          }
           results.push({ text: sentence, source: section });
         }
       }
@@ -364,7 +368,7 @@
     if (harvestedForUrl === location.href) {
       for (const item of harvestedDialogText) {
         const text = typeof item === "string" ? item : item?.text;
-        const source = (typeof item === "object" && item?.source) ? item.source : "Amenities dialog";
+        const source = (typeof item === "object" && item?.source) ? item.source : "Property amenities";
         for (const sentence of getSentences(text)) {
           if (isPetRelated(sentence)) {
             results.push({ text: sentence, source });
@@ -503,9 +507,18 @@
           feePerStr = ` per ${policy.fee.period}`;
         }
       }
-      const feeDisplay = policy.fee && policy.fee.amount !== null
-        ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${feePerStr}` : `$${policy.fee.amount}${feePerStr}`)
-        : (raw.fee || "Not specified");
+      const isTieredFee = policy.fee?.tiered || (policy.fee?.text && /\$0\s+(?:1st|first)/i.test(policy.fee.text));
+      let feeDisplay;
+      if (isTieredFee) {
+        feeDisplay = policy.fee.text || "1st dog free, subsequent fee applies";
+      } else if (policy.fee && policy.fee.amount !== null) {
+        feeDisplay = typeof VDPExtract?.formatCurrencyDisplay === "function"
+          ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${feePerStr}`
+          : `$${policy.fee.amount}${feePerStr}`;
+      } else {
+        feeDisplay = raw.fee || "Not specified";
+      }
+
       rowsHtml += row(
         "Fee",
         feeDisplay,
@@ -546,14 +559,22 @@
     ].filter(Boolean);
 
     const hasReviewCallout = calloutSources.some((s) => /review|rating/i.test(s));
+    const hasNonReviewCallout = calloutSources.some((s) => !/review|rating/i.test(s));
 
-    const sourceBadge = found
-      ? hasReviewCallout
-        ? "Source: review"
-        : usedApollo
-          ? "Source: listing data (incl. collapsed/lazy sections)"
-          : "Source: visible page text only"
-      : "";
+    let sourceBadge = "";
+    if (found) {
+      if (hasReviewCallout && (usedApollo || hasNonReviewCallout)) {
+        sourceBadge = usedApollo
+          ? "Source: listing data + review"
+          : "Source: visible page text + review";
+      } else if (hasReviewCallout) {
+        sourceBadge = "Source: review";
+      } else if (usedApollo) {
+        sourceBadge = "Source: listing data (incl. collapsed/lazy sections)";
+      } else {
+        sourceBadge = "Source: visible page text only";
+      }
+    }
 
     panel.innerHTML = `
       <div class="vdp-header vdp-tone-${headlineTone}">
@@ -1213,7 +1234,11 @@
         addRow("Weight limit", String(p.weightPerDog));
         rowsAdded++;
       }
-      if (p.fee && p.fee.amount !== null) {
+      const isTieredFee = p.fee?.tiered || (p.fee?.text && /\$0\s+(?:1st|first)/i.test(p.fee.text));
+      if (isTieredFee) {
+        addRow("Pet fee", p.fee.text || "1st dog free, subsequent fee applies", "vdp-tone-warn");
+        rowsAdded++;
+      } else if (p.fee && p.fee.amount !== null) {
         const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
         let perStr = "";
         if (p.fee.perPet && p.fee.period && p.fee.period !== "unknown" && p.fee.period !== "pet") {
