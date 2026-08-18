@@ -11,12 +11,11 @@ function calculateV8Coverage(text, functionEntries) {
 
   for (const fn of functionEntries) {
     for (const range of fn.ranges) {
-      if (range.count > 0) {
-        const start = Math.max(0, Math.min(range.startOffset, text.length));
-        const end = Math.max(0, Math.min(range.endOffset, text.length));
-        for (let i = start; i < end; i++) {
-          bytes[i] = 1;
-        }
+      const start = Math.max(0, Math.min(range.startOffset, text.length));
+      const end = Math.max(0, Math.min(range.endOffset, text.length));
+      const val = range.count > 0 ? 1 : 0;
+      for (let i = start; i < end; i++) {
+        bytes[i] = val;
       }
     }
   }

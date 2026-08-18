@@ -702,8 +702,9 @@
           fast.policy.deposit !== null;
 
         if (isRichOrDefinitive) {
-          searchQueue.setCached(propId, fast);
-          searchQueue.enqueue(propId, url, priority);
+          searchQueue.setCached(propId, fast).finally(() => {
+            searchQueue.enqueue(propId, url, priority);
+          });
           return;
         } else {
           // Preliminary instant render: paint preliminary badge immediately without blocking rich listing fetch

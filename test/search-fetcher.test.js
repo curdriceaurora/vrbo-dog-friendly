@@ -74,6 +74,30 @@ test("search-fetcher HTML parsing", async (t) => {
     assert.deepEqual(res.policy.fee, { amount: 75, currency: "USD", period: "stay" });
   });
 
+  await t.test("strictly matches propertyId in Apollo state and does not fall back to other properties", () => {
+    const apolloState = {
+      "PropertyInfo:OTHER_PROPERTY": {
+        header: { text: "House Rules" },
+        petsAllowed: false,
+        ruleList: [{ __ref: "RuleItem:OTHER" }],
+      },
+      "RuleItem:OTHER": {
+        header: "House Rules",
+        section: "Rules",
+        text: "No pets allowed under any circumstances.",
+      },
+    };
+    const htmlWithOtherApolloAndNoVisibleRules = `<html><script>window.__APOLLO_STATE__ = ${JSON.stringify(apolloState)};</script><body><div>Welcome to lovely home</div></body></html>`;
+    const resMissing = parseListingHtml(htmlWithOtherApolloAndNoVisibleRules, "MISSING_PROPERTY");
+    assert.equal(resMissing, null, "Should not return OTHER_PROPERTY's policy for MISSING_PROPERTY");
+
+    const htmlWithOtherApolloAndVisibleRules = `<html><script>window.__APOLLO_STATE__ = ${JSON.stringify(apolloState)};</script><body><section><h2>House Rules</h2><p>Dogs allowed up to 40 lbs.</p></section></body></html>`;
+    const resVisible = parseListingHtml(htmlWithOtherApolloAndVisibleRules, "MISSING_PROPERTY");
+    assert.equal(resVisible.ok, true);
+    assert.equal(resVisible.policy.petsAllowed, true, "Should fall back to visible HTML rules, not other property Apollo record");
+    assert.deepEqual(resVisible.policy.weightLimit, { value: 40, unit: "lb", pounds: 40 });
+  });
+
   await t.test("returns null for empty or irrelevant HTML", () => {
     const html = "<html><body><h1>Page Not Found</h1></body></html>";
     const res = parseListingHtml(html, "00000");
@@ -958,6 +982,129 @@ test("search-fetcher queue and caching", async (t) => {
     assert.equal(upgraded.policy.fee.amount, 50, "Richer policy must upgrade partial fee");
 
     queue.dispose();
+  });
+
+  await t.test("persistence boundary: preserves fee.text, contradictions, and restrictionNoteCount", () => {
+    const richPolicy = {
+      schemaVersion: 1,
+      propertyId: "12345",
+      source: "listing-page",
+      extractedAt: new Date().toISOString(),
+      petsAllowed: true,
+      maxDogs: 2,
+      weightLimit: { value: 50, unit: "lb", pounds: 50 },
+      fee: { amount: null, text: "Pet fee applies", currency: "USD", period: "unknown" },
+      deposit: { amount: 100, text: "$100 deposit", currency: "USD" },
+      approvalRequired: false,
+      restrictionsFound: true,
+      contradictions: ["Host notes contradict amenities"],
+      restrictionNoteCount: 3,
+      confidence: "high",
+      _raw: { domText: "secret excerpt" },
+    };
+
+    const serialized = serializeSearchPolicyForCache(richPolicy);
+    assert.equal(serialized.fee.text, "Pet fee applies", "fee.text must be preserved");
+    assert.equal(serialized.deposit.text, "$100 deposit", "deposit.text must be preserved");
+    assert.deepEqual(serialized.contradictions, ["Host notes contradict amenities"], "contradictions must be preserved");
+    assert.equal(serialized.restrictionNoteCount, 3, "restrictionNoteCount must be preserved");
+    assert.equal(serialized._raw, undefined, "_raw must be stripped");
+  });
+
+  await t.test("subscriber notification delivers winning cache record when candidate is rejected", async () => {
+    let fetchCount = 0;
+    const mockFetch = async () => {
+      fetchCount++;
+      // Return shallow policy
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>Dogs allowed</section>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 1,
+      minDelayMs: 10,
+    });
+
+    // 1. Prime cache with rich policy
+    const richPolicy = {
+      schemaVersion: 1,
+      propertyId: "p_win",
+      source: "listing-page",
+      petsAllowed: true,
+      maxDogs: 2,
+      weightLimit: { value: 50, unit: "lb", pounds: 50 },
+      fee: { amount: 150, currency: "USD", period: "stay" },
+    };
+    await queue.setCached("p_win", { status: "ok", propertyId: "p_win", policy: richPolicy });
+
+    // 2. Subscribe and enqueue fetch
+    let notifiedResult = null;
+    queue.subscribe("p_win", (result) => {
+      notifiedResult = result;
+    });
+
+    queue.enqueue("p_win", "https://www.vrbo.com/p_win", "high");
+    await new Promise((r) => setTimeout(r, 100));
+
+    // 3. Assert notified result is the rich winning policy, not downgraded shallow candidate
+    assert.ok(notifiedResult, "Subscriber must be notified");
+    assert.equal(notifiedResult.policy.maxDogs, 2, "Subscriber must receive winning rich policy maxDogs");
+    assert.equal(notifiedResult.policy.fee.amount, 150, "Subscriber must receive winning rich fee");
+
+    queue.dispose();
+  });
+
+  await t.test("hover requests respect global minDelayMs request-start pacing", async () => {
+    const startTimes = [];
+    const mockFetch = async () => {
+      startTimes.push(Date.now());
+      await new Promise((r) => setTimeout(r, 20));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<section>Dogs allowed</section>",
+      };
+    };
+
+    const minDelayMs = 80;
+    const queue = createSearchFetchQueue({
+      fetchFn: mockFetch,
+      maxConcurrent: 2,
+      minDelayMs,
+    });
+
+    // Fire two high-priority hover requests consecutively
+    queue.enqueue("hover_1", "https://www.vrbo.com/h1", "high");
+    queue.enqueue("hover_2", "https://www.vrbo.com/h2", "high");
+
+    await new Promise((r) => setTimeout(r, 250));
+    assert.equal(startTimes.length, 2, "Both hover requests must be fetched");
+    const gap = startTimes[1] - startTimes[0];
+    assert.ok(gap >= minDelayMs - 15, `Expected gap >= ${minDelayMs - 15}ms, got ${gap}ms`);
+
+    queue.dispose();
+  });
+});
+
+test("page-bridge and extract currency exports", async (t) => {
+  await t.test("extract.js exports formatCurrencyDisplay supporting non-USD currencies", () => {
+    const extract = require("../extract.js");
+    assert.equal(typeof extract.formatCurrencyDisplay, "function", "formatCurrencyDisplay must be exported");
+    assert.equal(extract.formatCurrencyDisplay(100, "USD"), "$100");
+    assert.equal(extract.formatCurrencyDisplay(75, "EUR"), "€75");
+    assert.equal(extract.formatCurrencyDisplay(50, "GBP"), "£50");
+    assert.equal(extract.formatCurrencyDisplay(120, "AUD"), "A$120");
+    assert.equal(extract.formatCurrencyDisplay(80, "CAD"), "CA$80");
+  });
+
+  await t.test("page-bridge walkCollect extracts policy from body and description leaves", () => {
+    const pageBridgeCode = require("fs").readFileSync(require("path").join(__dirname, "../page-bridge.js"), "utf8");
+    assert.ok(pageBridgeCode.includes('k === "body"'), "page-bridge.js must check body leaf");
+    assert.ok(pageBridgeCode.includes('k === "description"'), "page-bridge.js must check description leaf");
   });
 });
 

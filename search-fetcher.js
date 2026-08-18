@@ -119,10 +119,16 @@
 
     if (state && typeof state === "object") {
       try {
-        const targetKey = (propertyId && state[`PropertyInfo:${propertyId}`])
-          ? `PropertyInfo:${propertyId}`
-          : Object.keys(state).find((k) => k.startsWith("PropertyInfo:")) ||
-            Object.keys(state).find((k) => k.startsWith("Property:"));
+        let targetKey = null;
+        if (propertyId) {
+          const propLower = String(propertyId).toLowerCase();
+          targetKey = Object.keys(state).find(
+            (k) => k.toLowerCase() === `propertyinfo:${propLower}` || k.toLowerCase() === `property:${propLower}`
+          );
+        } else {
+          targetKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:")) ||
+                      Object.keys(state).find((k) => k.startsWith("Property:"));
+        }
         const root = targetKey ? state[targetKey] : null;
         if (root) {
           walkApolloNode(state, root, null, null, items);
@@ -274,14 +280,18 @@
         amount: policy.fee.amount,
         currency: policy.fee.currency,
         period: policy.fee.period,
+        ...(policy.fee.text !== undefined ? { text: policy.fee.text } : {}),
         ...(policy.fee.perPet ? { perPet: true } : {}),
       } : null,
       deposit: policy.deposit ? {
         amount: policy.deposit.amount,
         currency: policy.deposit.currency,
+        ...(policy.deposit.text !== undefined ? { text: policy.deposit.text } : {}),
       } : null,
       approvalRequired: policy.approvalRequired !== undefined ? policy.approvalRequired : null,
       restrictionsFound: Boolean(policy.restrictionsFound),
+      contradictions: Array.isArray(policy.contradictions) ? policy.contradictions.slice(0, 5) : [],
+      restrictionNoteCount: typeof policy.restrictionNoteCount === "number" ? policy.restrictionNoteCount : 0,
       confidence: policy.confidence || "low",
     };
   }
@@ -421,13 +431,17 @@
     }
 
     async function setCached(propertyId, data) {
-      if (!propertyId || isDisposed || !data) return;
+      if (!propertyId || isDisposed || !data) return { accepted: false, data: null, policy: null };
 
       // Check precedence against existing cache to prevent downgrading richer data
       const existing = await getCached(propertyId);
       if (existing && existing.policy && data.policy) {
         if (!canPolicyUpgrade(existing.policy, data.policy, data.source || data.policy.source)) {
-          return;
+          return {
+            accepted: false,
+            data: existing.data || { status: "ok", propertyId, policy: existing.policy },
+            policy: existing.policy,
+          };
         }
       }
 
@@ -456,6 +470,8 @@
           console.warn("Vrbow failed to write cache:", e);
         }
       }
+
+      return { accepted: true, data: persistentData, policy: persistentData.policy };
     }
 
     async function processQueue() {
@@ -478,19 +494,19 @@
           (typeof document === "undefined" || document.visibilityState !== "hidden") &&
           Date.now() >= pausedUntil
         ) {
-          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
-          let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
-          const isHighPriority = nextIndex !== -1;
-          if (nextIndex === -1) nextIndex = 0;
-
-          // Check pacing delay for background items (user hover bypasses delay)
+          // Check global pacing delay between network request starts
           const now = Date.now();
           const elapsed = now - lastRequestStartTime;
-          if (!isHighPriority && elapsed < minDelayMs) {
+          if (elapsed < minDelayMs) {
             const waitTime = minDelayMs - elapsed;
             scheduleTimer(processQueue, waitTime);
             break;
           }
+
+          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
+          let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
+          const isHighPriority = nextIndex !== -1;
+          if (nextIndex === -1) nextIndex = 0;
 
           const [nextItem] = queue.splice(nextIndex, 1);
           highPriorityIds.delete(nextItem.propertyId);
@@ -590,8 +606,9 @@
             ts: Date.now(),
           };
           terminalCooldowns.delete(propertyId);
-          await setCached(propertyId, data);
-          notify(propertyId, data);
+          const cachedResult = await setCached(propertyId, data);
+          const winner = (cachedResult && cachedResult.data) ? cachedResult.data : data;
+          notify(propertyId, winner);
         } else {
           const result = {
             status: "unknown",

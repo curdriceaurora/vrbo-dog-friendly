@@ -659,5 +659,7 @@
     toNumber,
     formatMoney,
     formatWeight,
+    formatCurrencyDisplay,
+    normalizeCurrencyCode,
   };
 });

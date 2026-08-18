@@ -75,7 +75,7 @@
     }
 
     for (const [k, v] of Object.entries(node)) {
-      if ((k === "value" || k === "text") && typeof v === "string" && v.trim() && v.trim().length > 1) {
+      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim() && v.trim().length > 1) {
         out.push({ header: nextHeader, section: nextSection || nextHeader, text: v.trim() });
       } else if (v && typeof v === "object") {
         walkCollect(state, v, nextHeader, nextSection, out, visited, depth + 1);
