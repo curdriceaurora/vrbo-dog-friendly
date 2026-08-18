@@ -59,7 +59,8 @@
       // mixed-topic blob, so it still needs the keyword filter to avoid
       // pulling in unrelated sentences.
       const isDedicatedPetsHeader = (it) => /^pets?$/i.test(it.header || "");
-      const petItems = apolloPayload.items.filter((it) => isDedicatedPetsHeader(it) || /\b(pets?|dogs?)\b/i.test(it.text));
+      const isReview = (it) => /review|rating|feedback|guest\s+comment/i.test((it.header || "") + " " + (it.section || ""));
+      const petItems = apolloPayload.items.filter((it) => !isReview(it) && (isDedicatedPetsHeader(it) || /\b(pets?|dogs?)\b/i.test(it.text)));
       for (const it of petItems) {
         const priority = priorityForItem(it);
         const trustWholesale = isDedicatedPetsHeader(it);

@@ -380,4 +380,17 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(matches.length, 1);
     assert.strictEqual(matches[0].source, "House Rules / Policies");
   });
+
+  await t.test("drops guest reviews and ratings from corpus", () => {
+    const reviewPayload = {
+      items: [
+        { header: "Guest reviews", section: "Reviews", text: "Only downside, we brought our 30 pound dog, but policy was 20 pounds." },
+        { header: "Recent reviews", section: "PropertyReviews", text: "Great dog friendly stay." },
+        { header: "Pets", section: "House Rules / Policies", text: "Pets allowed." },
+      ],
+    };
+    const entries = buildCorpus(reviewPayload, []);
+    assert.strictEqual(entries.length, 1);
+    assert.strictEqual(entries[0].text, "Pets allowed.");
+  });
 });
