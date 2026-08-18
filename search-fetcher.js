@@ -136,32 +136,39 @@
       } catch {}
     }
 
-    // 2. Extract visible text sections from raw HTML (strip markup)
-    if (items.length === 0) {
-      const sectionRegex = /<(section|div|article)[^>]*>(.*?)<\/\1>/gis;
-      let match;
-      while ((match = sectionRegex.exec(html)) !== null) {
-        const content = match[2];
-        if (/pet|dog|house rules|policies|amenities/i.test(content)) {
-          const cleanText = content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-          if (cleanText.length > 10 && cleanText.length < 5000) {
-            items.push({ header: "House Rules / Policies", section: "Rules", text: cleanText });
-          }
-        }
+    // 2. Extract visible text sentences from raw HTML (description, house rules, amenities)
+    const domSentences = [];
+    const cleanHtml = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, " ")
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, " ")
+      .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, " ")
+      .replace(/<noscript\b[^<]*(?:(?!<\/noscript>)<[^<]*)*<\/noscript>/gi, " ")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|li|h[1-6]|tr|td|blockquote)>/gi, "\n");
+
+    const rawText = cleanHtml.replace(/<[^>]+>/g, " ");
+    const sentences = typeof extract.getSentences === "function"
+      ? extract.getSentences(rawText)
+      : [];
+    const seenSentences = new Set();
+    for (const s of sentences) {
+      if (typeof extract.isPetRelated === "function" && extract.isPetRelated(s) && !seenSentences.has(s)) {
+        seenSentences.add(s);
+        domSentences.push({ text: s, source: "About this property" });
       }
     }
 
-    if (items.length === 0) return null;
+    if (items.length === 0 && domSentences.length === 0) return null;
 
-    // Build corpus and extract policy
-    const corpus = extract.buildCorpus({ items }, []);
+    // Build corpus combining Apollo items and visible HTML sentences
+    const corpus = extract.buildCorpus({ items }, domSentences);
     if (!corpus || corpus.length === 0) return null;
     const rawPolicy = extract.extractPolicy(corpus);
     if (!rawPolicy || !rawPolicy.found) return null;
     const policy = typeof extract.normalizePolicy === "function"
       ? extract.normalizePolicy(rawPolicy, propertyId, "search-response")
       : rawPolicy;
-    return { ok: true, propertyId, policy, rawItemsCount: items.length };
+    return { ok: true, propertyId, policy, rawItemsCount: items.length + domSentences.length };
   }
 
   /**

@@ -1148,11 +1148,47 @@ test("page-bridge and extract currency exports", async (t) => {
     assert.equal(extract.formatCurrencyDisplay(80, "CAD"), "CA$80");
   });
 
-  await t.test("page-bridge walkCollect extracts policy from body and description leaves", () => {
-    const pageBridgeCode = require("fs").readFileSync(require("path").join(__dirname, "../page-bridge.js"), "utf8");
-    assert.ok(pageBridgeCode.includes('k === "body"'), "page-bridge.js must check body leaf");
-    assert.ok(pageBridgeCode.includes('k === "description"'), "page-bridge.js must check description leaf");
+  await t.test("parseListingHtml extracts detailed pet constraints from HTML body when Apollo has only shallow policy", () => {
+    const fetcher = require("../search-fetcher.js");
+    const extract = require("../extract.js");
+    const html = `
+      <html>
+        <head>
+          <script id="__APOLLO_STATE__">
+            {
+              "PropertyInfo:3880854": {
+                "amenities": [{ "__ref": "Amenity:1" }]
+              },
+              "Amenity:1": {
+                "header": "Pets",
+                "section": "House Rules",
+                "text": "Pets allowed"
+              }
+            }
+          </script>
+        </head>
+        <body>
+          <div class="about-property">
+            <h2>About this property</h2>
+            <p>• This home is pet-friendly.</p>
+            <p>Up to 2 dogs allowed, max 50 lbs, $150 per pet fee.</p>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const parsed = fetcher.parseListingHtml(html, "3880854");
+    assert.ok(parsed, "Parsed result must exist");
+    assert.equal(parsed.propertyId, "3880854");
+    assert.equal(parsed.policy.petsAllowed, true);
+    assert.equal(parsed.policy.maxDogs, 2, "maxDogs must be extracted from HTML body");
+    assert.equal(parsed.policy.weightLimit?.pounds, 50, "weightLimit must be extracted from HTML body");
+    assert.equal(parsed.policy.fee?.amount, 150, "fee amount must be extracted from HTML body");
+
+    const badge = extract.deriveSearchBadge(parsed.policy);
+    assert.equal(badge.text, "Max 2 dogs allowed · 50 lbs · $150/pet");
   });
 });
+
 
 
