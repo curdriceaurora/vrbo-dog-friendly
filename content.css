@@ -199,8 +199,9 @@
   border: 1px solid var(--vdp-color-border-subtle);
   transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
   user-select: none;
-  z-index: 10;
-  position: relative;
+  z-index: 100 !important;
+  position: relative !important;
+  pointer-events: auto !important;
 }
 
 .vdp-search-badge:hover,

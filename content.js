@@ -1009,6 +1009,16 @@
       targetContainer.appendChild(badge);
 
       // Dynamic handlers read card data attributes at event time
+      badge.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentId = card.getAttribute("data-vdp-prop-id");
+        const currentFetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
+        const currentNavUrl = card.getAttribute("data-vdp-nav-url") || currentFetchUrl;
+        if (currentId && currentFetchUrl) {
+          showTooltipForBadge(badge, currentId, currentNavUrl, false);
+        }
+      });
       badge.addEventListener("mouseenter", () => {
         const currentId = card.getAttribute("data-vdp-prop-id");
         const currentFetchUrl = card.getAttribute("data-vdp-fetch-url") || card.getAttribute("data-vdp-url");
