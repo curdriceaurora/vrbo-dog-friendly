@@ -152,19 +152,17 @@ async function run() {
     console.log("Ensuring 'Pets allowed' filter is applied in search results...");
     const filterApplied = await targetCdp.send("Runtime.evaluate", {
       expression: `(() => {
-        // Look for pet-related filter checkboxes or buttons in the sidebar / filter modal
-        const filters = Array.from(document.querySelectorAll('input[type="checkbox"], button, label, [data-stid*="filter"]'));
-        const petFilter = filters.find(el => /pets? allowed|pet friendly|traveling with pets/i.test(el.textContent || el.getAttribute('aria-label') || el.name || ''));
-        if (petFilter) {
-          if (petFilter.tagName === 'INPUT' && !petFilter.checked) {
-            petFilter.click();
-            return { clicked: true, tag: petFilter.tagName, text: petFilter.name };
-          } else {
-            petFilter.click();
-            return { clicked: true, tag: petFilter.tagName, text: petFilter.textContent.trim().slice(0, 40) };
+        // Look for pet-related filter checkboxes in sidebar
+        const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+        const petCheckbox = checkboxes.find(el => /pets?|dogs?/i.test(el.name || el.value || el.id || ''));
+        if (petCheckbox) {
+          if (!petCheckbox.checked) {
+            petCheckbox.click();
+            return { clicked: true, tag: "INPUT", text: petCheckbox.name };
           }
+          return { clicked: false, alreadyChecked: true, text: petCheckbox.name };
         }
-        return { clicked: false, totalElements: filters.length };
+        return { clicked: false, totalCheckboxes: checkboxes.length };
       })()`,
       returnByValue: true,
     });
@@ -274,34 +272,45 @@ async function run() {
       })()`,
       returnByValue: true,
     });
-    console.log("\n3. Vrbow Search Badges:", JSON.stringify(badgeRes.result.value, null, 2));
-
-    // 2. Direct fetch test to a listing from within page context
-    const fetchTestRes = await targetCdp.send("Runtime.evaluate", {
+    // 4. Assertive Hover / Tooltip Interaction Test
+    const tooltipTestRes = await targetCdp.send("Runtime.evaluate", {
       contextId,
       expression: `(async () => {
-        const sampleUrl = "https://www.vrbo.com/3173015";
-        try {
-          const res = await fetch(sampleUrl, {
-            headers: { "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" }
-          });
-          const text = await res.text();
-          const parsed = globalThis.VdpSearchFetcher.parseListingHtml(text, "3173015");
-          return {
-            status: res.status,
-            parsed
-          };
-        } catch (err) {
-          return { errorName: err.name, errorMessage: err.message, stack: err.stack };
-        }
+        const firstBadge = document.querySelector('.vdp-search-badge');
+        if (!firstBadge) return { error: 'No badge found to hover' };
+        firstBadge.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        await new Promise(r => setTimeout(r, 400));
+        const tooltip = document.querySelector('.vdp-search-tooltip');
+        const isVisible = tooltip && tooltip.classList.contains('vdp-tooltip-visible') && tooltip.style.display !== 'none';
+        const hasText = tooltip && tooltip.textContent.includes('Dog Policy Details');
+        return {
+          badgeFound: true,
+          tooltipExists: !!tooltip,
+          tooltipVisible: isVisible,
+          hasExpectedHeader: hasText,
+          tooltipText: tooltip ? tooltip.textContent.trim().slice(0, 80) : null
+        };
       })()`,
       awaitPromise: true,
       returnByValue: true,
     });
-    console.log("\n2. Direct Policy Extraction from Live Listing HTML:", JSON.stringify(fetchTestRes.result.value, null, 2));
+    console.log("\n4. Assertive Tooltip Hover Verification:", JSON.stringify(tooltipTestRes.result.value, null, 2));
+
+    // 5. Verification Assertions
+    const totalBadges = badgeRes.result.value?.totalBadges || 0;
+    const tooltipOk = tooltipTestRes.result.value?.tooltipVisible && tooltipTestRes.result.value?.hasExpectedHeader;
 
     console.log("\n══════════════════════════════════════════════════════");
-    console.log("LIVE INVESTIGATION COMPLETE");
+    if (totalBadges === 0) {
+      console.error("❌ ASSERTION FAILED: Zero search badges were injected on live page.");
+      process.exit(1);
+    }
+    if (!tooltipOk) {
+      console.error("❌ ASSERTION FAILED: Hover tooltip failed to display on live badge.");
+      process.exit(1);
+    }
+
+    console.log(`✅ LIVE VERIFICATION PASSED: ${totalBadges} badges injected, interactive tooltip verified.`);
     console.log("══════════════════════════════════════════════════════\n");
   } finally {
     if (targetCdp) targetCdp.close();

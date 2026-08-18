@@ -338,7 +338,15 @@
           return;
         }
 
-        if (parsed && parsed.policy) {
+        const hasConcretePolicy = parsed && parsed.policy && (
+          parsed.policy.petsAllowed !== null ||
+          parsed.policy.maxDogs !== null ||
+          parsed.policy.weightPerDog !== null ||
+          parsed.policy.fee !== null ||
+          parsed.policy.deposit !== null
+        );
+
+        if (hasConcretePolicy) {
           const data = {
             status: "ok",
             propertyId,
@@ -358,7 +366,13 @@
           notify(propertyId, data);
         }
       } catch (err) {
-        if (err.name === "AbortError" || isDisposed) return;
+        if (isDisposed) return;
+        if (err.name === "AbortError") {
+          // Stalled request timed out: clear loading badge with unknown status
+          const result = { status: "unknown", propertyId, error: "timeout" };
+          notify(propertyId, result);
+          return;
+        }
         const result = { status: "error", error: err.message, propertyId };
         notify(propertyId, result);
       } finally {

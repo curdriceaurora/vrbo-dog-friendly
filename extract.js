@@ -28,6 +28,7 @@
   }
 
   function isPetRelated(s) {
+    if (/traveling with pets|only properties that allow pets/i.test(s)) return false;
     return /\b(pets?|dogs?|canines?)\b/i.test(s);
   }
 

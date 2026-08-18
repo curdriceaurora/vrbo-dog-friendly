@@ -558,6 +558,21 @@
   let searchTooltipEl = null;
   let activeTooltipTarget = null;
   let activeTooltipPropId = null;
+  let tooltipLeaveTimer = null;
+
+  function clearTooltipLeaveTimer() {
+    if (tooltipLeaveTimer) {
+      clearTimeout(tooltipLeaveTimer);
+      tooltipLeaveTimer = null;
+    }
+  }
+
+  function scheduleTooltipHide(delayMs = 200) {
+    clearTooltipLeaveTimer();
+    tooltipLeaveTimer = setTimeout(() => {
+      hideTooltip();
+    }, delayMs);
+  }
 
   function initSearchManager() {
     if (!globalThis.VdpSearchFetcher) return;
@@ -571,6 +586,14 @@
       searchTooltipEl.setAttribute("aria-label", "Dog policy details");
       searchTooltipEl.setAttribute("aria-hidden", "true");
       searchTooltipEl.style.display = "none";
+
+      searchTooltipEl.addEventListener("mouseenter", () => {
+        clearTooltipLeaveTimer();
+      });
+      searchTooltipEl.addEventListener("mouseleave", (e) => {
+        if (e.relatedTarget && activeTooltipTarget?.contains(e.relatedTarget)) return;
+        scheduleTooltipHide(200);
+      });
 
       // Focus trap and Escape key listener inside dialog
       searchTooltipEl.addEventListener("keydown", (e) => {
@@ -712,7 +735,7 @@
       });
       badge.addEventListener("blur", (e) => {
         if (e.relatedTarget && searchTooltipEl?.contains(e.relatedTarget)) return;
-        hideTooltip();
+        scheduleTooltipHide(150);
       });
       badge.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -727,7 +750,10 @@
         }
       });
     } else if (prevId && prevId !== propId) {
-      // Recycled node: immediately reset old display
+      // Recycled node: dismiss open dialog if it was for previous entity, and reset old display
+      if (activeTooltipTarget === badge || activeTooltipPropId === prevId) {
+        hideTooltip();
+      }
       badge.dataset.vdpStatus = "loading";
       badge.dataset.vdpText = "Checking pet policy...";
       badge.className = "vdp-search-badge vdp-badge-loading";
@@ -818,6 +844,7 @@
   }
 
   function onBadgeHover(badge, propId, url, isHighPriority) {
+    clearTooltipLeaveTimer();
     if (isHighPriority && searchQueue) {
       searchQueue.enqueue(propId, url, "high");
     }
@@ -826,11 +853,12 @@
 
   function onBadgeLeave(e) {
     if (e.relatedTarget && searchTooltipEl?.contains(e.relatedTarget)) return;
-    hideTooltip();
+    scheduleTooltipHide(200);
   }
 
   function showTooltipForBadge(badge, propId, url, isKeyboard = false) {
     if (!searchTooltipEl) return;
+    clearTooltipLeaveTimer();
     activeTooltipTarget = badge;
     activeTooltipPropId = propId;
     badge.setAttribute("aria-expanded", "true");
@@ -853,6 +881,7 @@
 
   function renderTooltipContent(data, url, propId, isKeyboard = false) {
     if (!searchTooltipEl) return;
+    const hadFocusInside = document.activeElement && searchTooltipEl.contains(document.activeElement);
     searchTooltipEl.textContent = "";
 
     const header = document.createElement("div");
@@ -952,7 +981,7 @@
     footer.appendChild(link);
     searchTooltipEl.appendChild(footer);
 
-    if (isKeyboard) {
+    if (isKeyboard || hadFocusInside) {
       setTimeout(() => closeBtn.focus(), 10);
     }
   }
@@ -964,9 +993,9 @@
     const tooltipHeight = searchTooltipEl.offsetHeight || 180;
     const tooltipWidth = 290;
 
-    let top = rect.bottom + 8;
+    let top = rect.bottom + 4;
     if (top + tooltipHeight > window.innerHeight - 10) {
-      top = Math.max(10, rect.top - tooltipHeight - 8);
+      top = Math.max(10, rect.top - tooltipHeight - 4);
     }
 
     let left = rect.left;
@@ -981,6 +1010,7 @@
   }
 
   function hideTooltip() {
+    clearTooltipLeaveTimer();
     if (searchTooltipEl) {
       searchTooltipEl.classList.remove("vdp-tooltip-visible");
       searchTooltipEl.setAttribute("aria-hidden", "true");

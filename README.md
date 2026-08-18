@@ -46,7 +46,8 @@ It shows a single summary card with all extracted pet policy details.
 - **Contradiction Alerts**: Flags conflicts when rules in one section disagree with rules in another section.
 - **Extra Notes**: Collects all other pet sentences (such as leash rules or breed limits) in an expandable drawer.
 - **Automatic Theme**: Uses a consistent light or dark theme that follows your operating-system preference.
-- **Local Operation**: Runs locally in your browser with zero network requests.
+- **Local Operation**: Runs directly inside your browser. Search prefetches request Vrbo listing pages, but no telemetry or data is sent to external services.
+- **Search Badges & Tooltips**: Automatically displays dog policies directly on search result cards with hover popovers.
 
 <p align="center">
   <img src="docs/panel-not-allowed.png" alt="Callout showing pets not allowed policy" width="420">
@@ -56,7 +57,7 @@ It shows a single summary card with all extracted pet policy details.
 
 ## Installation
 
-1. Download **`vrbow-v1.0.1.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
+1. Download **`vrbow-v1.2.0.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Turn on **Developer mode** in the top-right corner.
