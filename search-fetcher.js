@@ -11,6 +11,7 @@
   "use strict";
 
   const CACHE_PREFIX = "vrbow_cache_";
+  const ALIAS_PREFIX = "vrbow_alias_";
   const CACHE_RECORD_VERSION = 1;
   const POLICY_SCHEMA_VERSION = 1;
   const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -23,26 +24,38 @@
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
    */
-  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited = new Set(), depth = 0) {
+  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited = new Set(), depth = 0, isExplicitPetContext = false) {
     if (node == null || depth > 35) return;
 
     if (node && typeof node === "object" && typeof node.__ref === "string") {
       if (visited.has(node.__ref)) return;
       visited.add(node.__ref);
       const target = state[node.__ref];
-      if (target) walkApolloNode(state, target, headerCtx, sectionCtx, out, visited, depth + 1);
+      if (target) walkApolloNode(state, target, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
       return;
     }
 
     if (Array.isArray(node)) {
-      for (const el of node) walkApolloNode(state, el, headerCtx, sectionCtx, out, visited, depth + 1);
+      for (const el of node) walkApolloNode(state, el, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
       return;
     }
 
     if (typeof node !== "object") return;
 
+    // Multi-Unit Hierarchy Pruning (Class 11):
+    // Do not follow unit/room-level branches when inspecting top-level property
+    if (node.__typename && /^(?:Unit|RentalUnit|Room|LodgingUnit|RatePlan|RoomType)$/i.test(node.__typename)) {
+      return;
+    }
+
     let nextHeader = headerCtx;
     let nextSection = sectionCtx;
+    let explicitPet = isExplicitPetContext || Boolean(node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename));
+
+    if (node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename)) {
+      if (!nextHeader || nextHeader === "Listing Data") nextHeader = "Pets";
+      if (!nextSection || nextSection === "Rules") nextSection = "House Rules / Policies";
+    }
 
     const headerText = typeof node.header === "object" ? node.header?.text : (typeof node.header === "string" ? node.header : "");
     if (typeof headerText === "string" && headerText.trim()) {
@@ -50,17 +63,25 @@
       if (/house rules|polic|important information/i.test(nextHeader)) nextSection = "House Rules / Policies";
       else if (/about this property|about this space|about this listing/i.test(nextHeader)) nextSection = "About this property";
       else if (!nextSection) nextSection = nextHeader;
+      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
     }
     if (typeof node.sectionName === "string" && node.sectionName.trim()) {
       nextHeader = node.sectionName.trim();
       if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
+      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
     }
 
     for (const [k, v] of Object.entries(node)) {
-      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim() && v.trim().length > 1) {
-        out.push({ header: nextHeader || "Listing Data", section: nextSection || nextHeader || "Rules", text: v.trim() });
+      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim().length > 0) {
+        out.push({
+          header: nextHeader || "Listing Data",
+          section: nextSection || nextHeader || "Rules",
+          text: v.trim(),
+          isDedicatedPetsHeader: explicitPet,
+          explicitPetContext: explicitPet,
+        });
       } else if (v && typeof v === "object") {
-        walkApolloNode(state, v, nextHeader, nextSection, out, visited, depth + 1);
+        walkApolloNode(state, v, nextHeader, nextSection, out, visited, depth + 1, explicitPet);
       }
     }
   }
@@ -69,7 +90,7 @@
    * Parse raw listing HTML into an extract.js-compatible corpus.
    * Resolves Apollo state JSON with __ref references or extracts from HTML sections.
    */
-  function parseListingHtml(html, propertyId) {
+  function parseListingHtml(html, propertyId, canonicalId) {
     if (!html || typeof html !== "string") return null;
 
     // Check for bot challenges or error pages
@@ -78,6 +99,7 @@
     }
 
     const items = [];
+    let detectedAliases = [];
 
     // 1. Check for embedded Apollo state in <script> tags
     let state = null;
@@ -120,17 +142,26 @@
     if (state && typeof state === "object") {
       try {
         let targetKey = null;
-        if (propertyId) {
-          const propLower = String(propertyId).toLowerCase();
+        const candidateIds = [propertyId, canonicalId].filter(Boolean).map((id) => String(id).toLowerCase());
+
+        for (const cid of candidateIds) {
           targetKey = Object.keys(state).find(
-            (k) => k.toLowerCase() === `propertyinfo:${propLower}` || k.toLowerCase() === `property:${propLower}`
+            (k) => k.toLowerCase() === `propertyinfo:${cid}` || k.toLowerCase() === `property:${cid}`
           );
-        } else {
+          if (targetKey) break;
+        }
+
+        if (!targetKey && candidateIds.length === 0) {
           targetKey = Object.keys(state).find((k) => k.startsWith("PropertyInfo:")) ||
                       Object.keys(state).find((k) => k.startsWith("Property:"));
         }
+
         const root = targetKey ? state[targetKey] : null;
         if (root) {
+          if (root.expediaPropertyId) detectedAliases.push(String(root.expediaPropertyId));
+          if (root.propertyId) detectedAliases.push(String(root.propertyId));
+          if (root.id) detectedAliases.push(String(root.id));
+
           walkApolloNode(state, root, null, null, items);
         }
       } catch {}
@@ -165,10 +196,19 @@
     if (!corpus || corpus.length === 0) return null;
     const rawPolicy = extract.extractPolicy(corpus);
     if (!rawPolicy || !rawPolicy.found) return null;
+    const effectivePropId = canonicalId || propertyId;
     const policy = typeof extract.normalizePolicy === "function"
-      ? extract.normalizePolicy(rawPolicy, propertyId, "search-response")
+      ? extract.normalizePolicy(rawPolicy, effectivePropId, "search-response")
       : rawPolicy;
-    return { ok: true, propertyId, policy, rawItemsCount: items.length + domSentences.length };
+    return {
+      ok: true,
+      propertyId: effectivePropId,
+      requestedId: propertyId,
+      canonicalId,
+      aliases: Array.from(new Set(detectedAliases)),
+      policy,
+      rawItemsCount: items.length + domSentences.length,
+    };
   }
 
   /**
@@ -391,6 +431,8 @@
       }
     }
 
+    const aliasMap = new Map();
+
     function recordTerminalState(propertyId, data, allowBypass = false) {
       if (!propertyId || isDisposed) return;
       terminalCooldowns.set(propertyId, {
@@ -402,19 +444,21 @@
 
     async function getCached(propertyId) {
       if (!propertyId || isDisposed) return null;
+      const targetId = aliasMap.get(String(propertyId).toLowerCase()) || propertyId;
 
       // Check in-memory ok cache first
-      const mem = memoryCache.get(propertyId);
+      const mem = memoryCache.get(targetId) || memoryCache.get(propertyId);
       if (mem && Date.now() - mem.ts < ttlMs) {
         return mem.data;
       }
 
       // Check terminal-state cooldown cache in memory
-      const terminal = terminalCooldowns.get(propertyId);
+      const terminal = terminalCooldowns.get(targetId) || terminalCooldowns.get(propertyId);
       if (terminal) {
         if (Date.now() < terminal.expiresAt) {
           return terminal.data;
         }
+        terminalCooldowns.delete(targetId);
         terminalCooldowns.delete(propertyId);
       }
 
@@ -422,26 +466,35 @@
       if (storage) {
         return new Promise((resolve) => {
           try {
-            storage.get([CACHE_PREFIX + propertyId], (items) => {
+            storage.get([
+              CACHE_PREFIX + targetId,
+              CACHE_PREFIX + propertyId,
+              ALIAS_PREFIX + propertyId,
+            ], (items) => {
               if (isDisposed) {
                 resolve(null);
                 return;
               }
-              const entry = items ? items[CACHE_PREFIX + propertyId] : null;
+              const alias = items ? items[ALIAS_PREFIX + propertyId] : null;
+              if (alias && typeof alias === "string") {
+                aliasMap.set(String(propertyId).toLowerCase(), alias);
+              }
+              const effectiveId = alias || targetId;
+              const entry = items ? (items[CACHE_PREFIX + effectiveId] || items[CACHE_PREFIX + propertyId]) : null;
               if (
                 entry &&
                 entry.cacheVersion === CACHE_RECORD_VERSION &&
-                entry.propertyId === propertyId &&
                 entry.expiresAt &&
                 Date.now() < entry.expiresAt &&
                 entry.data?.policy?.schemaVersion === POLICY_SCHEMA_VERSION
               ) {
+                memoryCache.set(effectiveId, { data: entry.data, ts: entry.storedAt || Date.now() });
                 memoryCache.set(propertyId, { data: entry.data, ts: entry.storedAt || Date.now() });
                 resolve(entry.data);
               } else {
                 if (entry) {
                   // Incompatible or expired: prune asynchronously
-                  try { storage.remove([CACHE_PREFIX + propertyId], () => {}); } catch {}
+                  try { storage.remove([CACHE_PREFIX + effectiveId, CACHE_PREFIX + propertyId], () => {}); } catch {}
                 }
                 resolve(null);
               }
@@ -547,7 +600,8 @@
           }
 
           // Check memory cache once more before firing network
-          const cached = memoryCache.get(nextItem.propertyId);
+          const targetId = aliasMap.get(String(nextItem.propertyId).toLowerCase()) || nextItem.propertyId;
+          const cached = memoryCache.get(targetId) || memoryCache.get(nextItem.propertyId);
           if (cached && Date.now() - cached.ts < ttlMs) {
             if (!isShallowPreliminaryPolicy(cached.data?.policy)) {
               enqueuedOrActive.delete(nextItem.propertyId);
@@ -587,9 +641,25 @@
         if (!fetchFn) throw new Error("No fetch implementation available");
 
         const validated = validateListingUrl(url);
-        const targetUrl = validated ? validated.fetchUrl : url;
+        let targetUrl = validated ? validated.fetchUrl : url;
+
+        // Class 14: Force English locale query parameters on Vrbo listing URLs
+        try {
+          if (typeof targetUrl === "string" && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://") || targetUrl.startsWith("/"))) {
+            const parsedUrl = new URL(targetUrl, "https://www.vrbo.com");
+            if (/^(?:www\.)?vrbo\.com$/i.test(parsedUrl.hostname)) {
+              parsedUrl.searchParams.set("locale", "en_US");
+              parsedUrl.searchParams.set("siteid", "1");
+              targetUrl = parsedUrl.toString();
+            }
+          }
+        } catch {}
+
         const res = await fetchFn(targetUrl, {
           signal: controller.signal,
+          headers: {
+            "Accept-Language": "en-US,en;q=0.9",
+          },
         });
 
         if (isDisposed) return;
@@ -609,10 +679,21 @@
           return;
         }
 
+        // Class 12: Detect redirects & extract canonical ID from res.url
+        let canonicalId = null;
+        if (res.url && typeof res.url === "string") {
+          try {
+            const resValidated = validateListingUrl(res.url);
+            if (resValidated && resValidated.propertyId && resValidated.propertyId.toLowerCase() !== propertyId.toLowerCase()) {
+              canonicalId = resValidated.propertyId;
+            }
+          } catch {}
+        }
+
         const html = await res.text();
         if (isDisposed) return;
 
-        const parsed = parseListingHtml(html, propertyId);
+        const parsed = parseListingHtml(html, propertyId, canonicalId);
 
         if (parsed && parsed.isChallenge) {
           pausedUntil = Date.now() + pauseOnChallengeMs;
@@ -622,19 +703,46 @@
           return;
         }
 
+        const effectiveCanonicalId = canonicalId || parsed?.canonicalId;
         const hasConcrete = hasConcretePolicy(parsed && parsed.policy);
 
         if (hasConcrete) {
           const data = {
             status: "ok",
             propertyId,
+            canonicalId: effectiveCanonicalId || propertyId,
             policy: parsed.policy,
             ts: Date.now(),
           };
           terminalCooldowns.delete(propertyId);
+          if (effectiveCanonicalId) terminalCooldowns.delete(effectiveCanonicalId);
+
           const cachedResult = await setCached(propertyId, data);
+
+          // Class 12 & Class 10: Cache under canonical ID and update alias map
+          if (effectiveCanonicalId && effectiveCanonicalId.toLowerCase() !== propertyId.toLowerCase()) {
+            await setCached(effectiveCanonicalId, { ...data, propertyId: effectiveCanonicalId });
+            aliasMap.set(propertyId.toLowerCase(), effectiveCanonicalId);
+            if (storage && typeof storage.set === "function") {
+              try {
+                storage.set({ [`${ALIAS_PREFIX}${propertyId}`]: effectiveCanonicalId }, () => {});
+              } catch {}
+            }
+          }
+
+          if (parsed?.aliases && Array.isArray(parsed.aliases)) {
+            for (const alias of parsed.aliases) {
+              if (alias && alias.toLowerCase() !== propertyId.toLowerCase()) {
+                aliasMap.set(alias.toLowerCase(), effectiveCanonicalId || propertyId);
+              }
+            }
+          }
+
           const winner = (cachedResult && cachedResult.data) ? cachedResult.data : data;
           notify(propertyId, winner);
+          if (effectiveCanonicalId && effectiveCanonicalId !== propertyId) {
+            notify(effectiveCanonicalId, winner);
+          }
         } else {
           const result = {
             status: "unknown",
@@ -665,10 +773,12 @@
     function enqueue(propertyId, url, priority = "normal") {
       if (!propertyId || !url || isDisposed) return;
 
-      // 1. Check memory cache synchronously
-      const mem = memoryCache.get(propertyId);
+      // 1. Check memory cache synchronously (with alias lookup)
+      const targetId = aliasMap.get(String(propertyId).toLowerCase()) || propertyId;
+      const mem = memoryCache.get(targetId) || memoryCache.get(propertyId);
       if (mem && Date.now() - mem.ts < ttlMs) {
         notify(propertyId, mem.data);
+        if (targetId !== propertyId) notify(targetId, mem.data);
         if (!isShallowPreliminaryPolicy(mem.data?.policy)) {
           return;
         }
@@ -852,6 +962,23 @@
   }
 
   /**
+   * Extract numeric/alphanumeric property ID from a Vrbo listing URL or path.
+   */
+  function extractPropertyIdFromUrl(urlStr, baseUrl = "https://www.vrbo.com") {
+    if (!urlStr || typeof urlStr !== "string") return null;
+    try {
+      const u = new URL(urlStr, baseUrl);
+      const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);
+      if (!m) return null;
+      let propId = m[1];
+      if (/^p\d+/i.test(propId)) propId = propId.slice(1);
+      return propId || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Validate and separate a Vrbo listing URL into a clean canonical fetch URL
    * (HTTPS, www.vrbo.com or vrbo.com, pathname only, no query or fragment)
    * and the original navigation URL.
@@ -863,11 +990,7 @@
       if (u.protocol !== "https:") return null;
       if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
 
-      // Extract property ID from pathname
-      const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);
-      if (!m) return null;
-      let propId = m[1];
-      if (/^p\d+/i.test(propId)) propId = propId.slice(1);
+      const propId = extractPropertyIdFromUrl(urlStr, baseUrl);
       if (!propId) return null;
 
       // Make sure the path matches a listing format
@@ -894,11 +1017,13 @@
 
   return {
     CACHE_PREFIX,
+    ALIAS_PREFIX,
     walkApolloNode,
     parseListingHtml,
     hasConcretePolicy,
     resolveSearchApolloRecord,
     createSearchFetchQueue,
+    extractPropertyIdFromUrl,
     validateListingUrl,
     performStorageMaintenance,
     calculatePolicyCompleteness,

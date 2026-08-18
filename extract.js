@@ -75,7 +75,7 @@
       // else (About-property prose, freeform notes, DOM fallback) is a
       // mixed-topic blob, so it still needs the keyword filter to avoid
       // pulling in unrelated sentences.
-      const isDedicatedPetsHeader = (it) => /^pets?$/i.test(it.header || "");
+      const isDedicatedPetsHeader = (it) => /^pets?$/i.test(it.header || "") || Boolean(it.isDedicatedPetsHeader || it.explicitPetContext);
       const petItems = apolloPayload.items.filter((it) => isDedicatedPetsHeader(it) || /\b(pets?|dogs?)\b/i.test(it.text));
       for (const it of petItems) {
         const priority = priorityForItem(it);
@@ -88,7 +88,13 @@
         const source = formatSourceLabel(it.section, it.header);
         for (const sentence of getSentences(it.text)) {
           if (trustWholesale || isPetRelated(sentence)) {
-            bucket.push({ text: sentence, source, priority });
+            bucket.push({
+              text: sentence,
+              source,
+              priority,
+              isDedicatedPetsHeader: trustWholesale,
+              explicitPetContext: trustWholesale,
+            });
           }
         }
       }
@@ -96,8 +102,15 @@
     for (const item of domSentences || []) {
       const sentence = typeof item === "string" ? item : item?.text;
       const source = (typeof item === "object" && item?.source) ? item.source : "Visible page text";
+      const isExplicit = Boolean(item && typeof item === "object" && (item.isDedicatedPetsHeader || item.explicitPetContext));
       if (sentence && !/^(?:pets?|dogs?)$/i.test(sentence.trim())) {
-        bucket.push({ text: sentence, source, priority: 1 });
+        bucket.push({
+          text: sentence,
+          source,
+          priority: isExplicit ? 4 : 1,
+          isDedicatedPetsHeader: isExplicit,
+          explicitPetContext: isExplicit,
+        });
       }
     }
 
@@ -278,6 +291,21 @@
       new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
       new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
     ];
+    const RELAXED_MAX_DOGS_RE = [
+      new RegExp(`^(?:max(?:imum)?|limit)?:?\\s*${NUM}(?:\\s*(?:pets?|dogs?))?$`, "i"),
+    ];
+
+    const RELAXED_WEIGHT_RE = [
+      new RegExp(`^(?:weight(?:\\s+limit)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
+      new RegExp(`^(?:max(?:imum)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
+    ];
+
+    const RELAXED_FEE_RE = [
+      new RegExp(`^(?:fee:?\\s*)?${CUR}\\s?${AMT}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
+      new RegExp(`^${AMT}\\s?${CUR}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
+      new RegExp(`^(?:pet|dog)?\\s*fee:?\\s*${CUR}\\s?${AMT}`, "i"),
+    ];
+
     const UNPRICED_FEE_RE = /\b(there\s+is\s+(?:a\s+)?(?:one[-\s]?time\s+|non[-\s]?refundable\s+)?(?:pet|dog)\s+fee|(?:pet|dog)\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged|due|applicable|assessed)|(?:pet|dog)\s+fees?\s+apply|the\s+(?:pet|dog)\s+fee\s+paid|(?:subject\s+to|requires?|incurs?)\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?(?:pet|dog)\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
     const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
     const DEPOSIT_RE = [
@@ -334,7 +362,12 @@
       const feeNormalized = normalizeFeePhrasing(s);
       const tieredMatch = feeNormalized.match(TIERED_FEE_RE);
 
-      const dogsMatch = firstMatch(MAX_DOGS_RE, s);
+      const isExplicitContext = Boolean(entry.isDedicatedPetsHeader || entry.explicitPetContext || entry.priority >= 4);
+
+      let dogsMatch = firstMatch(MAX_DOGS_RE, s);
+      if (!dogsMatch && isExplicitContext) {
+        dogsMatch = firstMatch(RELAXED_MAX_DOGS_RE, s);
+      }
       if (dogsMatch) {
         const matchedNum = toNumber(dogsMatch.groups.num);
         // Suppress maxDogs only when TIERED_FEE_RE matched, the matched number is 1, and there is no explicit limit phrasing
@@ -345,7 +378,10 @@
         }
       }
 
-      const weightMatch = firstMatch(WEIGHT_RE, s);
+      let weightMatch = firstMatch(WEIGHT_RE, s);
+      if (!weightMatch && isExplicitContext) {
+        weightMatch = firstMatch(RELAXED_WEIGHT_RE, s);
+      }
       if (weightMatch) {
         const value = formatWeight(weightMatch.groups.amt, weightMatch.groups.unit);
         record("weightPerDog", "weightSnippet", "weightSource", "weightAlternates", value, entry, sameWeight);
@@ -373,7 +409,10 @@
         record("fee", "feeSnippet", "feeSource", "feeAlternates", feeStr, entry);
         usedForField = true;
       } else {
-        const feeMatch = firstMatch(FEE_RE, feeNormalized);
+        let feeMatch = firstMatch(FEE_RE, feeNormalized);
+        if (!feeMatch && isExplicitContext) {
+          feeMatch = firstMatch(RELAXED_FEE_RE, feeNormalized);
+        }
         if (feeMatch) {
           const target = feeMatch.groups.target ? (feeMatch.groups.target.toLowerCase() === "dog" ? "pet" : feeMatch.groups.target.toLowerCase()) : null;
           const time = feeMatch.groups.time ? feeMatch.groups.time.toLowerCase() : null;
@@ -387,7 +426,7 @@
           } else if (/per\s+stay/i.test(s)) {
             suffix = ` per stay`;
           }
-          record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur, feeMatch.groups.amt)}${suffix}`, entry);
+          record("fee", "feeSnippet", "feeSource", "feeAlternates", `${formatMoney(feeMatch.groups.cur || "$", feeMatch.groups.amt)}${suffix}`, entry);
           usedForField = true;
         } else if (!result.fee && UNPRICED_FEE_RE.test(s)) {
           record("fee", "feeSnippet", "feeSource", "feeAlternates", "Pet fee applies", entry);
@@ -421,6 +460,10 @@
 
     if (result.fee === null && result.noFeeMentioned) {
       result.fee = "No fee mentioned";
+    }
+
+    if (result.petsAllowed === null && (result.maxDogs !== null || result.weightPerDog !== null || (result.fee !== null && result.fee !== "No pets allowed") || result.preReg !== null)) {
+      result.petsAllowed = true;
     }
 
     // Cap and de-dupe other notes.

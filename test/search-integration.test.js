@@ -738,7 +738,7 @@ test("Consolidated State-Transition Suite", async (t) => {
     await new Promise((r) => setTimeout(r, 40));
 
     assert.equal(fetchedUrls.length, 1);
-    assert.equal(fetchedUrls[0], "https://www.vrbo.com/777888", "Network fetch must receive clean canonical URL without query string");
+    assert.equal(fetchedUrls[0], "https://www.vrbo.com/777888?locale=en_US&siteid=1", "Network fetch must receive canonical URL with English locale params");
 
     // Card 2: Non-Vrbo or non-HTTPS card must be rejected
     const card2 = new MockElement("div");

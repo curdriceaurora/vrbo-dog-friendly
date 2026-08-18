@@ -13,7 +13,7 @@ const THRESHOLDS = {
 function runNodeCoverage() {
   return new Promise((resolve, reject) => {
     const proc = spawn(process.execPath, ["--test", "--experimental-test-coverage"], {
-      stdio: ["inherit", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
 

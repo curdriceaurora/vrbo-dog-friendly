@@ -40,6 +40,9 @@
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
 
   function getListingIdFromUrl(urlStr) {
+    if (globalThis.VdpSearchFetcher?.extractPropertyIdFromUrl) {
+      return globalThis.VdpSearchFetcher.extractPropertyIdFromUrl(urlStr || location.href);
+    }
     try {
       const u = new URL(urlStr || location.href);
       const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);

@@ -456,7 +456,20 @@ test("buildCorpus", async (t) => {
     assert.strictEqual(raw.weightPerDog, "50 lbs");
     assert.strictEqual(raw.fee, "$150");
   });
+
+  await t.test("extracts bare fee, weight, and count under explicit pet context", () => {
+    const raw = extractPolicy([
+      { text: "$150", source: "House Rules / Pets", priority: 5, isDedicatedPetsHeader: true },
+      { text: "50 lbs", source: "House Rules / Pets", priority: 5, isDedicatedPetsHeader: true },
+      { text: "2", source: "House Rules / Pets", priority: 5, isDedicatedPetsHeader: true },
+    ]);
+    assert.strictEqual(raw.fee, "$150");
+    assert.strictEqual(raw.weightPerDog, "50 lbs");
+    assert.strictEqual(raw.maxDogs, 2);
+  });
 });
+
+
 
 
 

@@ -234,7 +234,7 @@ test("search-fetcher queue and caching", async (t) => {
   await t.test("prioritizes high-priority items and promotes existing queued items on hover", async () => {
     const executionOrder = [];
     const mockFetch = async (url) => {
-      const id = url.split("/").pop();
+      const id = url.split("/").pop().split("?")[0];
       executionOrder.push(id);
       await new Promise((r) => setTimeout(r, 20));
       return {
@@ -1188,7 +1188,149 @@ test("page-bridge and extract currency exports", async (t) => {
     const badge = extract.deriveSearchBadge(parsed.policy);
     assert.equal(badge.text, "Max 2 dogs allowed · 50 lbs · $150/pet");
   });
+
+  await t.test("Class 12: Redirects and Canonicalization - resolves redirected canonical property ID and dual caches", async () => {
+    const fetcher = require("../search-fetcher.js");
+    const fakeStorage = new Map();
+    const mockStorage = {
+      get: (keys, cb) => {
+        const res = {};
+        for (const k of keys) if (fakeStorage.has(k)) res[k] = fakeStorage.get(k);
+        cb(res);
+      },
+      set: (obj, cb) => {
+        for (const [k, v] of Object.entries(obj)) fakeStorage.set(k, v);
+        if (cb) cb();
+      },
+      remove: (keys, cb) => {
+        for (const k of keys) fakeStorage.delete(k);
+        if (cb) cb();
+      },
+    };
+
+    let requestedFetchUrl = null;
+    let requestedHeaders = null;
+    const fetchFn = async (url, opts) => {
+      requestedFetchUrl = url;
+      requestedHeaders = opts.headers;
+      return {
+        ok: true,
+        status: 200,
+        url: "https://www.vrbo.com/9999999", // Redirected to canonical ID 9999999
+        text: async () => `
+          <html>
+            <script id="__APOLLO_STATE__">
+              {
+                "PropertyInfo:9999999": {
+                  "amenities": [{ "__ref": "Amenity:1" }]
+                },
+                "Amenity:1": {
+                  "header": "Pets",
+                  "text": "Up to 2 dogs allowed, max 50 lbs"
+                }
+              }
+            </script>
+          </html>
+        `,
+      };
+    };
+
+    const queue = fetcher.createSearchFetchQueue({
+      fetchFn,
+      storage: mockStorage,
+      minDelayMs: 0,
+      pacingDelayMs: 0,
+    });
+
+    const receivedNotifications = [];
+    queue.subscribe("1111111", (data) => receivedNotifications.push(data));
+
+    queue.enqueue("1111111", "https://www.vrbo.com/1111111", "high");
+    await new Promise((r) => setTimeout(r, 60));
+
+    assert.ok(requestedFetchUrl.includes("locale=en_US&siteid=1"), "Class 14: Must inject English locale params");
+    assert.equal(requestedHeaders["Accept-Language"], "en-US,en;q=0.9", "Class 14: Must inject English Accept-Language header");
+
+    assert.ok(receivedNotifications.length > 0, "Subscriber must receive policy notification");
+    const result = receivedNotifications[0];
+    assert.equal(result.status, "ok");
+    assert.equal(result.policy.petsAllowed, true);
+    assert.equal(result.policy.maxDogs, 2);
+
+    // Verify alias cache (Class 10 & 12)
+    const cachedCanonical = await queue.getCached("9999999");
+    assert.ok(cachedCanonical, "Canonical ID must be cached directly");
+    assert.equal(cachedCanonical.policy.maxDogs, 2);
+
+    const cachedLegacy = await queue.getCached("1111111");
+    assert.ok(cachedLegacy, "Legacy ID must be cached/aliased directly");
+    assert.equal(cachedLegacy.policy.maxDogs, 2);
+
+    queue.dispose();
+  });
+
+  await t.test("Class 11: Multi-Unit Hierarchy Pruning - ignores child unit rules when inspecting property level", () => {
+    const fetcher = require("../search-fetcher.js");
+    const html = `
+      <html>
+        <script id="__APOLLO_STATE__">
+          {
+            "PropertyInfo:100": {
+              "amenities": [{ "__ref": "Amenity:1" }],
+              "units": [{ "__ref": "Unit:200" }]
+            },
+            "Amenity:1": {
+              "header": "Pets",
+              "text": "Dogs allowed, max 2 dogs"
+            },
+            "Unit:200": {
+              "__typename": "Unit",
+              "amenities": [{ "__ref": "Amenity:2" }]
+            },
+            "Amenity:2": {
+              "header": "Pets",
+              "text": "No pets allowed in this unit"
+            }
+          }
+        </script>
+      </html>
+    `;
+
+    const parsed = fetcher.parseListingHtml(html, "100");
+    assert.ok(parsed);
+    assert.equal(parsed.policy.petsAllowed, true, "Property level rule (dogs allowed) must take precedence over pruned Unit child");
+    assert.equal(parsed.policy.maxDogs, 2);
+  });
+
+  await t.test("Class 15: Split Apollo Entities - extracts bare fee and bare weight under explicit PetPolicy nodes", () => {
+    const fetcher = require("../search-fetcher.js");
+    const html = `
+      <html>
+        <script id="__APOLLO_STATE__">
+          {
+            "PropertyInfo:500": {
+              "petPolicy": { "__ref": "PetPolicy:1" }
+            },
+            "PetPolicy:1": {
+              "__typename": "PetPolicy",
+              "fee": { "value": "$150" },
+              "weight": { "value": "50 lbs" },
+              "maxPets": { "value": "2" }
+            }
+          }
+        </script>
+      </html>
+    `;
+
+    const parsed = fetcher.parseListingHtml(html, "500");
+    assert.ok(parsed);
+    assert.equal(parsed.policy.petsAllowed, true);
+    assert.equal(parsed.policy.maxDogs, 2, "Bare count under PetPolicy must be extracted");
+    assert.equal(parsed.policy.weightLimit?.pounds, 50, "Bare weight under PetPolicy must be extracted");
+    assert.equal(parsed.policy.fee?.amount, 150, "Bare fee under PetPolicy must be extracted");
+  });
 });
+
 
 
 
