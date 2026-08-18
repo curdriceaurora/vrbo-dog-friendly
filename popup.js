@@ -183,3 +183,18 @@ document.getElementById("rescan").addEventListener("click", () => {
 });
 
 loadPolicy();
+
+
+// Settings Logic
+const toggleSearchBadging = document.getElementById("toggle-search-badging");
+if (toggleSearchBadging && chrome.storage && chrome.storage.local) {
+  // Load initial state (Default OFF/false)
+  chrome.storage.local.get(["vrbow_enable_search_badging"], (data) => {
+    toggleSearchBadging.checked = data.vrbow_enable_search_badging === true;
+  });
+
+  // Save state on change
+  toggleSearchBadging.addEventListener("change", (e) => {
+    chrome.storage.local.set({ vrbow_enable_search_badging: e.target.checked });
+  });
+}

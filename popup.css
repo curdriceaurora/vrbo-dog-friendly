@@ -112,3 +112,29 @@ body {
   }
 }
 
+
+
+.settings {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--vdp-color-border-subtle);
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--vdp-color-text-secondary);
+}
+
+.toggle-label input {
+  margin: 0;
+  cursor: pointer;
+}
+
+@media (forced-colors: active) {
+  .settings {
+    border-top: 1px solid CanvasText;
+  }
+}

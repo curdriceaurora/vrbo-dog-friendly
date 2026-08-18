@@ -1378,7 +1378,9 @@
 
       if (isSearchUrl(location.href)) {
         removePanel();
-        initSearchManager();
+        chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
+          if (data && data.vrbow_enable_search_badging === true) initSearchManager();
+        });
       } else if (isListingUrl(location.href)) {
         cleanupSearchManager();
         removePanel();
@@ -1441,7 +1443,9 @@
       const elapsed = now - mutationFirstSeenAt;
 
       if (isSearchUrl(location.href)) {
-        scanSearchCards();
+        if (typeof searchQueue !== "undefined" && searchQueue !== null) {
+          scanSearchCards();
+        }
       } else {
         if (elapsed > 4000) {
           mutationFirstSeenAt = 0;
@@ -1456,12 +1460,29 @@
   startObserver();
 
   // initial run
-  if (isSearchUrl(location.href)) {
-    initSearchManager();
-  } else {
-    scheduleRescan(1000);
-    setTimeout(() => scan(false), 3500);
-  }
+  chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
+    const searchBadgingEnabled = data && data.vrbow_enable_search_badging === true; // Default OFF
+    if (isSearchUrl(location.href)) {
+      if (searchBadgingEnabled) initSearchManager();
+    } else {
+      scheduleRescan(1000);
+      setTimeout(() => scan(false), 3500);
+    }
+  });
+
+  // Listen for settings toggle live
+  chrome.storage?.onChanged?.addListener?.((changes, area) => {
+    if (area === "local" && changes.vrbow_enable_search_badging) {
+      const enabled = changes.vrbow_enable_search_badging.newValue === true;
+      if (isSearchUrl(location.href)) {
+        if (enabled) {
+          initSearchManager();
+        } else {
+          cleanupSearchManager();
+        }
+      }
+    }
+  });
 
   // respond to popup requests
   chrome.runtime?.onMessage?.addListener?.((msg, _sender, sendResponse) => {
