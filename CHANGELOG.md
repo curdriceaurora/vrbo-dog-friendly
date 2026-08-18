@@ -26,7 +26,7 @@ This document records all changes to **Vrbow**.
 
 ### Search Page Badges and Tooltips
 - **Search Card Badges**: Shows pet policy badges on Vrbo search result cards. Examples: `Max 1 dog allowed`, `Max 2 dogs allowed`, `Dogs allowed`, `Pets not allowed`, and `Pet restrictions`.
-- **Accessible Tooltip Dialog**: Opens a floating summary dialog when you hover over or focus a badge. Follows WCAG 2.1 AA rules with a focus trap and `Escape` key close.
+- **Accessible Tooltip Dialog**: Opens a floating summary dialog when you focus a badge. Follows WCAG 2.1 AA rules with a focus trap and `Escape` key close.
 - **Fast Apollo Data Search**: Reads existing property data from the search page cache before starting network requests.
 - **Controlled Request Queue**: Limits background requests to 2 parallel tasks with a 400 ms delay. Starts requests only after a card stays visible for 400 ms.
 - **Rate-Limit Protection**: Pauses requests for 30 seconds if Vrbo returns a 429 status code or a bot challenge.
