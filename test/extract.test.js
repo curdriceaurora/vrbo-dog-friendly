@@ -378,7 +378,7 @@ test("buildCorpus", async (t) => {
     const entries = buildCorpus(payload, ["No aggressive breeds."]);
     const matches = entries.filter((e) => e.text === "No aggressive breeds.");
     assert.strictEqual(matches.length, 1);
-    assert.strictEqual(matches[0].source, "House Rules / Policies");
+    assert.strictEqual(matches[0].source, "House Rules / Policies > Pets");
   });
 
   await t.test("preserves specific section names for section-tagged DOM items", () => {

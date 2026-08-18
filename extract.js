@@ -47,6 +47,15 @@
 
   // domSentences: already-filtered pet-relevant sentences scraped from the
   // rendered page, passed in by the caller so this stays DOM-free.
+  function formatSourceLabel(section, header) {
+    const s = (section || "").trim();
+    const h = (header || "").trim();
+    if (s && h && s.toLowerCase() !== h.toLowerCase() && !s.toLowerCase().includes(h.toLowerCase())) {
+      return `${s} > ${h}`;
+    }
+    return s || h || "Listing data";
+  }
+
   function buildCorpus(apolloPayload, domSentences) {
     const bucket = []; // { text, source, priority }
     if (apolloPayload && Array.isArray(apolloPayload.items)) {
@@ -68,9 +77,10 @@
         // information and was showing up as an "Other pet note" on every
         // single listing.
         if ((it.text || "").trim().toLowerCase() === (it.header || "").trim().toLowerCase()) continue;
+        const source = formatSourceLabel(it.section, it.header);
         for (const sentence of getSentences(it.text)) {
           if (trustWholesale || isPetRelated(sentence)) {
-            bucket.push({ text: sentence, source: it.section || it.header || "Listing data", priority });
+            bucket.push({ text: sentence, source, priority });
           }
         }
       }
