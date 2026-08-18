@@ -22,74 +22,55 @@ A property marked Pets allowed may still have limits on dog count, weight, fees,
 
 ## What
 
-The extension reads the pet policy information available on a listing and consolidates it into a summary showing:
+When you open a Vrbo listing, the extension reads the available pet policy data and consolidates it into an on-page summary card in the top-right corner:
 
 - Whether dogs are allowed
 - Maximum number of dogs and weight limits
-- Pet fees or deposits
+- Pet fees or refundable deposits
 - Registration or prior approval requirements
-- Other restrictions, such as breed or leash rules
+- Other guidelines (such as leash rules or breed limits)
 
 ![Listing Pet Policy Summary Pop-up](docs/listing-summary-popup.png)
 
-Where possible, extracted rules link back to the source text on the listing, with the relevant text highlighted. If two sections contain conflicting rules, the extension flags the discrepancy rather than attempting to decide which one is authoritative.
+- **Source verification**: Click the **source** link next to any value to jump directly to and highlight the original text on the listing.
+- **Contradiction alerts (⚠️)**: If two sections contain conflicting rules, the card flags the discrepancy rather than attempting to decide which one is authoritative.
+- **Rescan (↻)**: Click the refresh icon to re-scan if a listing page loads slowly.
+- **Data source footer**: Indicates whether data was extracted from structured listing data or visible page text.
 
 ## Search Result Badges
 
-The extension can also add pet policy badges directly to Vrbo search results, making it easier to compare properties without opening each listing.
+The extension can also add pet policy badges directly to Vrbo search results, making it easier to compare properties without opening each listing. Hovering or focusing on any badge opens an interactive details tooltip.
 
-Search enrichment is disabled by default because it requires additional requests to retrieve policy details for individual properties. Enable it when useful and disable it when you no longer need it.
+![Search results showing pet policy badges](docs/search-badge.gif)
 
-When enabled, the extension uses caching, request throttling, deduplication, and bounded concurrency to reduce redundant requests and avoid placing unnecessary load on Vrbo.
+### Badge Statuses
 
-## Privacy
+- <img src="docs/badge-loading.png" alt="Checking pet policy..." height="24"> — Fetching policy data in the background
+- <img src="docs/badge-max-2-dogs.png" alt="Max 2 dogs allowed · 50 lbs · $150/stay" height="24"> — Dogs allowed with count, weight, and fee summary
+- <img src="docs/badge-dogs-allowed-tiered.png" alt="Dogs allowed · 1st free · $25/add'l/stay" height="24"> — Tiered or multi-part pet fee structure
+- <img src="docs/badge-restrictions.png" alt="Pet restrictions · Max 1 dog · $100/stay" height="24"> — Pet restrictions or approval required
+- <img src="docs/badge-pets-not-allowed.png" alt="Pets not allowed" height="24"> — Explicitly prohibited
+- <img src="docs/badge-check-rules.png" alt="Check pet rules on listing" height="24"> — Verification needed or details unavailable in search
 
-Processing and storage remain local to your browser. No personal data, browsing activity, or telemetry is sent to an external service.
+### Retrieval & Performance
+- **Disabled by default**: Search enrichment is off by default because it retrieves policy details for individual properties. Enable it in settings when useful.
+- **Controlled queue**: Uses request throttling (400 ms safety delay), bounded concurrency (max 2 active requests), deduplication, and a 24-hour cache to avoid placing unnecessary load on Vrbo.
 
-The interface automatically follows your system light or dark theme.
+## Privacy & Theming
+
+- **100% Local**: Processing and storage remain strictly inside your browser. No personal data, browsing activity, or telemetry is sent to any external service.
+- **Theme Matching**: The interface automatically follows your system light or dark mode preference.
 
 ---
 
-## Installation
+## Installation & Setup
 
 1. Download **`vrbow-v1.1.1.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Turn on **Developer mode** in the top-right corner.
-5. Click **Load unpacked** in the top-left corner.
-6. Select the unzipped folder.
-
----
-
-## How to Use
-
-### 1. Automatic On-Page Card
-When you visit a listing on `vrbo.com`, the policy card opens in the top-right corner:
-
-- **Source verification**: Click the **source** link next to any value to highlight the original text on the page.
-- **Other pet notes**: Click **Other pet notes** to read extra guidelines (such as leash rules or crate requirements).
-- **Contradiction alerts (⚠️)**: The card alerts you if the host wrote conflicting rules in different sections.
-- **Rescan (↻)**: Click the refresh icon to re-run extraction if a listing loads slowly.
-- **Data Source**: The footer shows if data came from structured listing data or visible page text.
-
-### 2. Browser Toolbar Popup
-- Pin the extension icon to your Chrome toolbar.
-- Click the extension icon on any active Vrbo listing to view the dog policy summary.
-
-### 3. Search Results Badging
-When you browse search results on `vrbo.com`:
-
-![Search results showing pet policy badges](docs/search-badge.gif)
-
-- **Inline Badges**: The extension shows a compact badge on each search card:
-  - <img src="docs/badge-loading.png" alt="Checking pet policy..." height="24">
-  - <img src="docs/badge-max-2-dogs.png" alt="Max 2 dogs allowed · 50 lbs · $150/stay" height="24">
-  - <img src="docs/badge-dogs-allowed-tiered.png" alt="Dogs allowed · 1st free · $25/add'l/stay" height="24">
-  - <img src="docs/badge-restrictions.png" alt="Pet restrictions · Max 1 dog · $100/stay" height="24">
-  - <img src="docs/badge-pets-not-allowed.png" alt="Pets not allowed" height="24">
-  - <img src="docs/badge-check-rules.png" alt="Check pet rules on listing" height="24">
-- **Controlled Retrieval**: The extension fetches listing details with a controlled queue (maximum 2 requests, 400 ms safety delay) to prevent rate limits.
-- **Fast Path & 24-Hour Cache**: Reads search-page data immediately when available and saves extracted policies in browser storage for 24 hours.
+5. Click **Load unpacked** in the top-left corner and select the unzipped folder.
+6. *(Optional)* Pin the extension icon to your Chrome toolbar to view summaries directly from the popup menu.
 
 ---
 
