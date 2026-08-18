@@ -330,10 +330,21 @@
     let lastRequestStartTime = 0;
     let maxObservedConcurrency = 0;
     let pauseTimer = null;
+    let maintenanceIntervalTimer = null;
     const scheduledTimers = new Set();
+    const maintenanceIntervalMs = typeof options.maintenanceIntervalMs === "number"
+      ? options.maintenanceIntervalMs
+      : 24 * 60 * 60 * 1000;
 
     if (storage && options.autoMaintenance !== false) {
       performStorageMaintenance(storage).catch(() => {});
+      if (maintenanceIntervalMs > 0) {
+        maintenanceIntervalTimer = setInterval(() => {
+          if (!isDisposed && storage) {
+            performStorageMaintenance(storage).catch(() => {});
+          }
+        }, maintenanceIntervalMs);
+      }
     }
 
     function scheduleTimer(fn, ms) {
@@ -733,6 +744,10 @@
       if (pauseTimer) {
         clearTimeout(pauseTimer);
         pauseTimer = null;
+      }
+      if (maintenanceIntervalTimer) {
+        clearInterval(maintenanceIntervalTimer);
+        maintenanceIntervalTimer = null;
       }
       if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
         document.removeEventListener("visibilitychange", onVisibilityChange);

@@ -827,6 +827,40 @@ test("search-fetcher queue and caching", async (t) => {
     queue.dispose();
   });
 
+  await t.test("createSearchFetchQueue executes recurring storage maintenance on interval and stops on dispose", async () => {
+    let maintenanceCount = 0;
+    const now = Date.now();
+    const mockStorage = {
+      store: {},
+      get(keys, cb) {
+        maintenanceCount++;
+        cb({ ...this.store });
+      },
+      remove(keys, cb) {
+        cb && cb();
+      },
+    };
+
+    const queue = createSearchFetchQueue({
+      storage: mockStorage,
+      maintenanceIntervalMs: 25,
+    });
+
+    // Startup sweep runs immediately
+    assert.equal(maintenanceCount, 1);
+
+    // Wait for 2 interval ticks (approx 60ms)
+    await new Promise((r) => setTimeout(r, 65));
+    assert.ok(maintenanceCount >= 3, `Expected at least 3 maintenance sweeps, got ${maintenanceCount}`);
+
+    const countBeforeDispose = maintenanceCount;
+    queue.dispose();
+
+    // After dispose, no further sweeps occur
+    await new Promise((r) => setTimeout(r, 65));
+    assert.equal(maintenanceCount, countBeforeDispose);
+  });
+
   await t.test("persistence boundary: serializeSearchPolicyForCache allowlists canonical fields and strips all raw DOM excerpts", () => {
     const rawPolicyWithSnippets = {
       schemaVersion: 1,
