@@ -19,36 +19,46 @@
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
 
   /**
-   * Walk Apollo graph with full __ref pointer resolution.
+   * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
    */
-  function walkApolloNode(state, node, out, seen = new Set(), depth = 0) {
-    if (!node || depth > 18) return;
-    if (typeof node === "object") {
-      if (seen.has(node)) return;
-      seen.add(node);
-    }
+  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited = new Set(), depth = 0) {
+    if (node == null || depth > 35) return;
 
     if (node && typeof node === "object" && typeof node.__ref === "string") {
+      if (visited.has(node.__ref)) return;
+      visited.add(node.__ref);
       const target = state[node.__ref];
-      if (target) walkApolloNode(state, target, out, seen, depth + 1);
+      if (target) walkApolloNode(state, target, headerCtx, sectionCtx, out, visited, depth + 1);
       return;
     }
 
     if (Array.isArray(node)) {
-      for (const el of node) walkApolloNode(state, el, out, seen, depth + 1);
+      for (const el of node) walkApolloNode(state, el, headerCtx, sectionCtx, out, visited, depth + 1);
       return;
     }
 
-    if (node && typeof node === "object") {
-      if (node.text && typeof node.text === "string") {
-        out.push({
-          header: node.header || "Listing Data",
-          section: node.section || "Rules",
-          text: node.text,
-        });
-      }
-      for (const k of Object.keys(node)) {
-        walkApolloNode(state, node[k], out, seen, depth + 1);
+    if (typeof node !== "object") return;
+
+    let nextHeader = headerCtx;
+    let nextSection = sectionCtx;
+
+    const headerText = typeof node.header === "object" ? node.header?.text : (typeof node.header === "string" ? node.header : "");
+    if (typeof headerText === "string" && headerText.trim()) {
+      nextHeader = headerText.trim();
+      if (/house rules|polic|important information/i.test(nextHeader)) nextSection = "House Rules / Policies";
+      else if (/about this property|about this space|about this listing/i.test(nextHeader)) nextSection = "About this property";
+      else if (!nextSection) nextSection = nextHeader;
+    }
+    if (typeof node.sectionName === "string" && node.sectionName.trim()) {
+      nextHeader = node.sectionName.trim();
+      if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
+    }
+
+    for (const [k, v] of Object.entries(node)) {
+      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim() && v.trim().length > 1) {
+        out.push({ header: nextHeader || "Listing Data", section: nextSection || nextHeader || "Rules", text: v.trim() });
+      } else if (v && typeof v === "object") {
+        walkApolloNode(state, v, nextHeader, nextSection, out, visited, depth + 1);
       }
     }
   }
@@ -77,7 +87,7 @@
         const targetKey = propertyId ? `PropertyInfo:${propertyId}` : Object.keys(state).find((k) => k.startsWith("PropertyInfo:"));
         const root = targetKey ? state[targetKey] : null;
         if (root) {
-          walkApolloNode(state, root, items);
+          walkApolloNode(state, root, null, null, items);
         }
       } catch {
         // Fall back to text parsing if JSON parse fails
@@ -117,6 +127,7 @@
     const minDelayMs = options.minDelayMs || DEFAULT_MIN_DELAY_MS;
     const sessionCap = options.sessionCap || DEFAULT_SESSION_CAP;
     const ttlMs = options.ttlMs || DEFAULT_TTL_MS;
+    const pauseOnChallengeMs = options.pauseOnChallengeMs || PAUSE_ON_CHALLENGE_MS;
 
     const memoryCache = new Map();
     const queue = []; // [{ propertyId, url, priority }]
@@ -129,13 +140,15 @@
     let sessionRequestsCount = 0;
     let pausedUntil = 0;
     let maxObservedConcurrency = 0;
+    let pauseTimer = null;
+    let isDisposed = false;
 
     function getCacheKey(propertyId) {
       return `${CACHE_PREFIX}${propertyId}`;
     }
 
     async function getCached(propertyId) {
-      if (!propertyId) return null;
+      if (!propertyId || isDisposed) return null;
 
       // 1. Check memory cache
       const mem = memoryCache.get(propertyId);
@@ -149,13 +162,16 @@
         return new Promise((resolve) => {
           const key = getCacheKey(propertyId);
           storage.get([key], (res) => {
+            if (isDisposed) {
+              resolve(null);
+              return;
+            }
             const entry = res ? res[key] : null;
             if (entry && entry.version === CACHE_VERSION && (Date.now() - entry.ts < ttlMs)) {
               memoryCache.set(propertyId, { data: entry.data, ts: entry.ts });
               resolve(entry.data);
             } else {
               if (entry) {
-                // Delete expired or version-mismatched data
                 storage.remove([key], () => {});
               }
               resolve(null);
@@ -167,7 +183,7 @@
     }
 
     async function setCached(propertyId, data) {
-      if (!propertyId) return;
+      if (!propertyId || isDisposed) return;
       const now = Date.now();
       memoryCache.set(propertyId, { data, ts: now });
       if (storage) {
@@ -198,6 +214,7 @@
     }
 
     function notify(propertyId, result) {
+      if (isDisposed) return;
       const set = listeners.get(propertyId);
       if (set) {
         for (const cb of set) {
@@ -211,19 +228,19 @@
     }
 
     async function processQueue() {
-      if (isProcessing) return;
+      if (isProcessing || isDisposed) return;
       isProcessing = true;
 
       try {
-        while (queue.length > 0 && activeRequests.size < maxConcurrent) {
-          // Check if paused due to 429 or challenge
+        while (queue.length > 0 && activeRequests.size < maxConcurrent && !isDisposed) {
           const now = Date.now();
           if (now < pausedUntil) {
-            setTimeout(processQueue, Math.max(50, pausedUntil - now));
+            if (pauseTimer) clearTimeout(pauseTimer);
+            pauseTimer = setTimeout(processQueue, Math.max(20, pausedUntil - now));
             break;
           }
 
-          // Check if tab is hidden (browser environment)
+          // Check if tab is hidden
           if (typeof document !== "undefined" && document.visibilityState === "hidden") {
             break;
           }
@@ -236,21 +253,23 @@
 
           const { propertyId, url, priority } = item;
 
-          // Check session budget cap unless it's a high priority hover
+          // Check session budget cap unless it's high priority (user hover)
           if (priority !== "high" && sessionRequestsCount >= sessionCap) {
             enqueuedOrActive.delete(propertyId);
             notify(propertyId, { status: "capped", propertyId });
             continue;
           }
 
-          // Respect minimum start delay between requests
+          // Respect minimum delay between requests
           const elapsed = Date.now() - lastRequestStartTime;
           if (elapsed < minDelayMs) {
             await new Promise((r) => setTimeout(r, minDelayMs - elapsed));
-            // Re-check pause state after waiting
+            if (isDisposed) break;
+            // Re-check pause condition after waiting
             if (Date.now() < pausedUntil) {
-              queue.unshift(item); // Put item back
-              setTimeout(processQueue, Math.max(50, pausedUntil - Date.now()));
+              queue.unshift(item);
+              if (pauseTimer) clearTimeout(pauseTimer);
+              pauseTimer = setTimeout(processQueue, Math.max(20, pausedUntil - Date.now()));
               break;
             }
           }
@@ -265,7 +284,7 @@
             .finally(() => {
               activeRequests.delete(propertyId);
               enqueuedOrActive.delete(propertyId);
-              processQueue();
+              if (!isDisposed) processQueue();
             });
         }
       } finally {
@@ -274,6 +293,7 @@
     }
 
     async function executeFetch(propertyId, url) {
+      if (isDisposed) return;
       try {
         if (!fetchFn) throw new Error("No fetch implementation available");
 
@@ -283,8 +303,10 @@
           },
         });
 
+        if (isDisposed) return;
+
         if (res.status === 429 || res.status === 403) {
-          pausedUntil = Date.now() + PAUSE_ON_CHALLENGE_MS;
+          pausedUntil = Date.now() + pauseOnChallengeMs;
           const result = { status: "rate_limited", propertyId };
           notify(propertyId, result);
           return;
@@ -297,10 +319,12 @@
         }
 
         const html = await res.text();
+        if (isDisposed) return;
+
         const parsed = parseListingHtml(html, propertyId);
 
         if (parsed && parsed.isChallenge) {
-          pausedUntil = Date.now() + PAUSE_ON_CHALLENGE_MS;
+          pausedUntil = Date.now() + pauseOnChallengeMs;
           const result = { status: "rate_limited", propertyId };
           notify(propertyId, result);
           return;
@@ -332,7 +356,7 @@
     }
 
     function enqueue(propertyId, url, priority = "normal") {
-      if (!propertyId || !url) return;
+      if (!propertyId || !url || isDisposed) return;
 
       // 1. Check memory cache synchronously
       const mem = memoryCache.get(propertyId);
@@ -353,6 +377,7 @@
 
       // 3. Check storage cache
       getCached(propertyId).then((cached) => {
+        if (isDisposed) return;
         if (cached) {
           enqueuedOrActive.delete(propertyId);
           notify(propertyId, cached);
@@ -367,6 +392,31 @@
     function clearQueue() {
       queue.length = 0;
       enqueuedOrActive.clear();
+      sessionRequestsCount = 0;
+    }
+
+    function onVisibilityChange() {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        processQueue();
+      }
+    }
+
+    if (typeof document !== "undefined" && typeof document.addEventListener === "function") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
+    function dispose() {
+      isDisposed = true;
+      clearQueue();
+      if (pauseTimer) {
+        clearTimeout(pauseTimer);
+        pauseTimer = null;
+      }
+      if (typeof document !== "undefined" && typeof document.removeEventListener === "function") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+      listeners.clear();
+      memoryCache.clear();
     }
 
     return {
@@ -374,6 +424,7 @@
       setCached,
       enqueue,
       clearQueue,
+      dispose,
       subscribe,
       getQueueLength: () => queue.length,
       getActiveCount: () => activeRequests.size,
@@ -384,6 +435,7 @@
   }
 
   return {
+    walkApolloNode,
     parseListingHtml,
     createSearchFetchQueue,
   };

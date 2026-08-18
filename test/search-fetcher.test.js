@@ -10,7 +10,28 @@ test("search-fetcher HTML parsing", async (t) => {
     assert.equal(res.isChallenge, true);
   });
 
-  await t.test("parses embedded Apollo state with __ref references in HTML", () => {
+  await t.test("parses live Apollo state with nested header.text and value leaves", () => {
+    const apolloState = {
+      "PropertyInfo:12345": {
+        rules: { __ref: "RulesBlock:789" },
+      },
+      "RulesBlock:789": {
+        ruleList: [
+          { __ref: "RuleItem:1" },
+        ],
+      },
+      "RuleItem:1": {
+        header: { text: "Pets" },
+        value: "No pets allowed.",
+      },
+    };
+    const html = `<html><script>window.__APOLLO_STATE__ = ${JSON.stringify(apolloState)};</script></html>`;
+    const res = parseListingHtml(html, "12345");
+    assert.equal(res.ok, true);
+    assert.equal(res.policy.petsAllowed, false);
+  });
+
+  await t.test("parses embedded Apollo state with __ref references and multiple attributes", () => {
     const apolloState = {
       "PropertyInfo:12345": {
         rules: { __ref: "RulesBlock:789" },
@@ -90,6 +111,7 @@ test("search-fetcher queue and caching", async (t) => {
     await new Promise((r) => setTimeout(r, 450));
     assert.ok(maxObserved <= 2, `Expected maxObserved <= 2, got ${maxObserved}`);
     assert.ok(queue.getMaxObservedConcurrency() <= 2);
+    queue.dispose();
   });
 
   await t.test("deduplicates concurrent duplicate enqueues", async () => {
@@ -110,13 +132,13 @@ test("search-fetcher queue and caching", async (t) => {
       minDelayMs: 10,
     });
 
-    // Enqueue identical ID three times concurrently
     queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
     queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
     queue.enqueue("prop_dup", "https://www.vrbo.com/dup");
 
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(callCount, 1, "Duplicate enqueues should only trigger 1 fetch");
+    queue.dispose();
   });
 
   await t.test("deletes expired cache entries from storage", async () => {
@@ -127,7 +149,7 @@ test("search-fetcher queue and caching", async (t) => {
           version: 1,
           propertyId: "old",
           data: { status: "ok", policy: { petsAllowed: true } },
-          ts: Date.now() - (48 * 60 * 60 * 1000), // 48h old
+          ts: Date.now() - (48 * 60 * 60 * 1000),
         },
       },
       get(keys, cb) {
@@ -154,6 +176,7 @@ test("search-fetcher queue and caching", async (t) => {
     const cached = await queue.getCached("old");
     assert.equal(cached, null, "Expired entry should return null");
     assert.ok(removedKeys.includes("vrbow_cache_old"), "Expired entry should be removed from storage");
+    queue.dispose();
   });
 
   await t.test("immediately pauses queue on 429 before starting queued requests", async () => {
@@ -170,6 +193,7 @@ test("search-fetcher queue and caching", async (t) => {
       fetchFn: mockFetch,
       maxConcurrent: 1,
       minDelayMs: 60,
+      pauseOnChallengeMs: 1000,
     });
 
     queue.enqueue("p1", "https://www.vrbo.com/1");
@@ -177,8 +201,8 @@ test("search-fetcher queue and caching", async (t) => {
 
     await new Promise((r) => setTimeout(r, 150));
 
-    // Only p1 should have started; p2 should be held because queue is paused
     assert.equal(startedCount, 1);
     assert.equal(queue.isPaused(), true);
+    queue.dispose();
   });
 });

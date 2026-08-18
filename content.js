@@ -557,6 +557,7 @@
   let searchCardObserver = null;
   let searchTooltipEl = null;
   let activeTooltipTarget = null;
+  let activeTooltipPropId = null;
 
   function initSearchManager() {
     if (!globalThis.VdpSearchFetcher) return;
@@ -570,6 +571,29 @@
       searchTooltipEl.setAttribute("aria-label", "Dog policy details");
       searchTooltipEl.setAttribute("aria-hidden", "true");
       searchTooltipEl.style.display = "none";
+
+      // Focus trap and Escape key listener inside dialog
+      searchTooltipEl.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          const toFocus = activeTooltipTarget;
+          hideTooltip();
+          toFocus?.focus();
+        } else if (e.key === "Tab") {
+          const focusables = searchTooltipEl.querySelectorAll('button, a[href], [tabindex="0"]');
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          if (e.shiftKey && document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      });
+
       document.body.appendChild(searchTooltipEl);
     }
 
@@ -589,6 +613,22 @@
     }
 
     scanSearchCards();
+  }
+
+  function cleanupSearchManager() {
+    hideTooltip();
+    if (searchQueue) {
+      searchQueue.dispose();
+      searchQueue = null;
+    }
+    if (searchCardObserver) {
+      searchCardObserver.disconnect();
+      searchCardObserver = null;
+    }
+    if (searchTooltipEl) {
+      searchTooltipEl.remove();
+      searchTooltipEl = null;
+    }
   }
 
   function scanSearchCards() {
@@ -614,7 +654,9 @@
     if (!propId) return;
 
     const prevId = card.getAttribute("data-vdp-prop-id");
-    if (prevId === propId && card.querySelector(".vdp-search-badge")) {
+    let badge = card.querySelector(".vdp-search-badge");
+
+    if (prevId === propId && badge) {
       return;
     }
 
@@ -630,7 +672,6 @@
     // Watch visibility for prefetching
     searchCardObserver?.observe(card);
 
-    let badge = card.querySelector(".vdp-search-badge");
     if (!badge) {
       badge = document.createElement("div");
       badge.className = "vdp-search-badge vdp-badge-loading";
@@ -668,13 +709,19 @@
           const currentId = card.getAttribute("data-vdp-prop-id");
           const currentUrl = card.getAttribute("data-vdp-url");
           if (currentId && currentUrl) {
-            showTooltipForBadge(badge, currentId, currentUrl);
-            searchTooltipEl?.querySelector(".vdp-tooltip-close")?.focus();
+            showTooltipForBadge(badge, currentId, currentUrl, true);
           }
         } else if (e.key === "Escape") {
           hideTooltip();
         }
       });
+    } else if (prevId && prevId !== propId) {
+      // Recycled node: immediately reset old display
+      badge.dataset.vdpStatus = "loading";
+      badge.dataset.vdpText = "Checking pet policy...";
+      badge.className = "vdp-search-badge vdp-badge-loading";
+      badge.textContent = "⏳ Checking pet policy...";
+      badge.setAttribute("aria-label", "Checking pet policy");
     }
 
     card._vdpUnsub = searchQueue?.subscribe(propId, (data) => {
@@ -753,7 +800,7 @@
     if (isHighPriority && searchQueue) {
       searchQueue.enqueue(propId, url, "high");
     }
-    showTooltipForBadge(badge, propId, url);
+    showTooltipForBadge(badge, propId, url, false);
   }
 
   function onBadgeLeave(e) {
@@ -761,18 +808,23 @@
     hideTooltip();
   }
 
-  function showTooltipForBadge(badge, propId, url) {
+  function showTooltipForBadge(badge, propId, url, isKeyboard = false) {
     if (!searchTooltipEl) return;
     activeTooltipTarget = badge;
+    activeTooltipPropId = propId;
     badge.setAttribute("aria-expanded", "true");
 
     searchQueue?.getCached(propId).then((cached) => {
-      renderTooltipContent(cached, url, propId);
+      // Async scope guard: only render and position if user is still targeting this badge and property
+      if (activeTooltipTarget !== badge || activeTooltipPropId !== propId) {
+        return;
+      }
+      renderTooltipContent(cached, url, propId, isKeyboard);
       positionTooltip(badge);
     });
   }
 
-  function renderTooltipContent(data, url, propId) {
+  function renderTooltipContent(data, url, propId, isKeyboard = false) {
     if (!searchTooltipEl) return;
     searchTooltipEl.textContent = "";
 
@@ -785,8 +837,9 @@
     closeBtn.setAttribute("aria-label", "Close details");
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
+      const toFocus = activeTooltipTarget;
       hideTooltip();
-      activeTooltipTarget?.focus();
+      toFocus?.focus();
     });
     header.appendChild(titleSpan);
     header.appendChild(closeBtn);
@@ -830,6 +883,16 @@
       if (p.deposit) addRow("Pet deposit", String(p.deposit));
       if (p.preReg) addRow("Approval / Register", "Required");
 
+      // Contradiction warnings
+      if (p.maxDogsAlternates?.length || p.weightAlternates?.length || p.feeAlternates?.length) {
+        const warnBox = document.createElement("div");
+        warnBox.className = "vdp-tooltip-notes vdp-tone-warn";
+        warnBox.style.background = "#fef7e0";
+        warnBox.style.color = "#b06000";
+        warnBox.textContent = "⚠️ Warning: Listing text contains conflicting rules";
+        searchTooltipEl.appendChild(warnBox);
+      }
+
       if (p.otherNotes && p.otherNotes.length) {
         const notesBox = document.createElement("div");
         notesBox.className = "vdp-tooltip-notes";
@@ -861,6 +924,10 @@
     footer.appendChild(srcSpan);
     footer.appendChild(link);
     searchTooltipEl.appendChild(footer);
+
+    if (isKeyboard) {
+      setTimeout(() => closeBtn.focus(), 10);
+    }
   }
 
   function positionTooltip(badge) {
@@ -894,6 +961,7 @@
       if (activeTooltipTarget) {
         activeTooltipTarget.setAttribute("aria-expanded", "false");
         activeTooltipTarget = null;
+        activeTooltipPropId = null;
       }
     }
   }
@@ -901,12 +969,12 @@
   function onUrlMaybeChanged() {
     if (location.href !== lastScannedUrl) {
       lastScannedUrl = location.href;
-      hideTooltip();
 
       if (isSearchUrl(location.href)) {
         removePanel();
         initSearchManager();
       } else if (isListingUrl(location.href)) {
+        cleanupSearchManager();
         removePanel();
         latestApolloPayload = null;
         harvestedDialogText = [];
@@ -915,6 +983,7 @@
         scheduleRescan(1200);
         setTimeout(() => scan(false), 3200);
       } else {
+        cleanupSearchManager();
         removePanel();
       }
     }
