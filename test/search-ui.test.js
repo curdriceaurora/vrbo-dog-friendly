@@ -1188,6 +1188,96 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
       assert.ok(s.depth >= s.staged, `sample depth ${s.depth} must include its ${s.staged} staged items`);
     }
   });
+
+  await t.test("Issue #31 sub-fix 1: a fast-path rich/definitive hit skips the storage write but stays servable", async () => {
+    freshSearchPage();
+    const propId = "9990001";
+    // Block the follow-up full listing fetch that the fast-path branch still
+    // schedules (by design, to let richer data supersede it later) so its
+    // *own* setCached({persist:true}) never fires and muddies this assertion.
+    hangingIds.add(propId);
+
+    const apolloResponder = (e) => {
+      const { requestId, propertyIds } = e.detail;
+      const results = {};
+      for (const id of propertyIds) {
+        results[id] = { items: [{ header: "Pets", text: "No pets allowed." }] };
+      }
+      globalThis.window.dispatchEvent(new CustomEvent("vdp-search-apollo-data", { detail: { requestId, results } }));
+    };
+    globalThis.window.addEventListener("vdp-search-apollo-request", apolloResponder);
+    t.after(() => {
+      globalThis.window.removeEventListener("vdp-search-apollo-request", apolloResponder);
+      hangingIds.delete(propId);
+    });
+
+    const queue = __test.getSearchQueue();
+    const setCachedCalls = [];
+    const originalSetCached = queue.setCached.bind(queue);
+    queue.setCached = (id, data, options) => {
+      setCachedCalls.push({ id, options });
+      return originalSetCached(id, data, options);
+    };
+
+    const card = makeCard("fastpath-card", listingUrlFor(propId));
+    __test.scanSearchCards();
+    fireIntersection([{ card, inView: true }]);
+    await sleep(700); // dwell floor + jitter -> enqueueSearch fires
+
+    const fastPathCall = setCachedCalls.find((c) => c.id === propId);
+    assert.ok(fastPathCall, "the fast path must call setCached for the definitive hit");
+    assert.equal(fastPathCall.options?.persist, false, "the fast-path call site must opt out of persistence");
+
+    assert.equal(
+      [...storageData.keys()].some((k) => k.includes(propId)),
+      false,
+      "a rich/definitive fast-path hit must not write to chrome.storage.local"
+    );
+
+    const cached = await queue.getCached(propId);
+    assert.ok(cached, "the fast-path result must still be servable from the in-memory cache");
+    assert.equal(cached.policy.petsAllowed, false);
+
+    assert.deepEqual(
+      spies.enqueue.map((e) => e.propId),
+      [propId],
+      "a rich/definitive hit still schedules the full listing fetch behind it"
+    );
+  });
+
+  await t.test("Issue #31 sub-fix 2: a badge-slot insertion buried in a container mutation stays internal", async () => {
+    freshSearchPage();
+    const card = makeCard("slot-mutation-card", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+
+    const before = __test.getSearchStats().scans;
+
+    // Real-world shape: the mutation record's target is the slot's new
+    // parent (the card's content column), not the slot itself, because
+    // childList mutations report the container as target. addedNodes still
+    // holds the freshly-inserted .vdp-badge-slot.
+    const container = card.querySelector(".uitk-card-content");
+    const slot = mockDocument.createElement("div");
+    slot.classList.add("vdp-badge-slot");
+    container.appendChild(slot);
+
+    mutationObservers[mutationObservers.length - 1].fire([{ target: container, addedNodes: [slot] }]);
+
+    assert.equal(
+      __test.getSearchStats().scans,
+      before,
+      "a badge-slot insertion trapped in a container mutation must not trigger a re-scan"
+    );
+
+    // Control: a genuinely external mutation on the same kind of node must
+    // still trigger a re-scan — the hardening must not swallow real changes.
+    fireMutation();
+    assert.equal(
+      __test.getSearchStats().scans,
+      before + 1,
+      "a real external mutation must still trigger a re-scan"
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

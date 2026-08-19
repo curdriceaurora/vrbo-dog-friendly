@@ -103,6 +103,76 @@ test("search-fetcher HTML parsing", async (t) => {
     const res = parseListingHtml(html, "00000");
     assert.equal(res, null);
   });
+
+  await t.test('Issue #31 sub-fix 3: parses the window.__APOLLO_STATE__ = JSON.parse("...") string-literal form', () => {
+    const apolloState = {
+      "PropertyInfo:55555": {
+        rules: { __ref: "RulesBlock:1" },
+      },
+      "RulesBlock:1": {
+        ruleList: [{ __ref: "RuleItem:1" }],
+      },
+      "RuleItem:1": {
+        header: "House Rules",
+        section: "Rules",
+        text: "Pets welcome, max 2 dogs under 50 lbs.",
+      },
+    };
+    // Real listing pages double-encode: the whole Apollo state is
+    // JSON.stringify'd, and that string is embedded as a quoted JS string
+    // literal argument to JSON.parse(...).
+    const scriptLiteral = JSON.stringify(JSON.stringify(apolloState));
+    const html = `<html><script>window.__APOLLO_STATE__ = JSON.parse(${scriptLiteral});</script></html>`;
+
+    const res = parseListingHtml(html, "55555");
+    assert.equal(res.ok, true);
+    assert.equal(res.policy.petsAllowed, true);
+    assert.equal(res.policy.maxDogs, 2);
+  });
+
+  await t.test('Issue #31 sub-fix 3: JSON.parse("...") boundary survives an embedded \'");\' inside the payload', () => {
+    const apolloState = {
+      "PropertyInfo:55556": {
+        rules: { __ref: "RulesBlock:1" },
+      },
+      "RulesBlock:1": {
+        ruleList: [{ __ref: "RuleItem:1" }],
+      },
+      "RuleItem:1": {
+        header: "House Rules",
+        section: "Rules",
+        // Deliberately contains a literal `");` sequence. After the
+        // string is JSON-escaped once, that quote becomes `\"`, so the
+        // escaped payload contains a `\");` sequence which a *lazy*
+        // regex boundary match could mistake for the real statement
+        // terminator, truncating the capture mid-string.
+        text: 'Pets welcome, max 2 dogs under 50 lbs. Note: check-in is at 4pm");alert(1) not really.',
+      },
+    };
+    const scriptLiteral = JSON.stringify(JSON.stringify(apolloState));
+    const html = `<html><script>window.__APOLLO_STATE__ = JSON.parse(${scriptLiteral});</script></html>`;
+
+    const res = parseListingHtml(html, "55556");
+    assert.ok(res && res.ok, 'a payload containing an embedded ");" must still parse in full, not truncate');
+    assert.equal(res.policy.petsAllowed, true);
+    assert.equal(res.policy.maxDogs, 2);
+  });
+
+  await t.test('Issue #31 sub-fix 3: a non-JSON payload inside JSON.parse("...") degrades gracefully, never throws', () => {
+    const html = `<html><script>window.__APOLLO_STATE__ = JSON.parse("not valid json content");</script></html>`;
+    assert.doesNotThrow(() => {
+      const res = parseListingHtml(html, "1");
+      assert.equal(res, null, "an inner payload that isn't valid JSON must yield no policy, not throw");
+    });
+  });
+
+  await t.test('Issue #31 sub-fix 3: a truncated JSON.parse("...") statement (no closing boundary) degrades gracefully', () => {
+    const html = '<html><script>window.__APOLLO_STATE__ = JSON.parse("{\\"PropertyInfo:1\\":{\\"foo\\":';
+    assert.doesNotThrow(() => {
+      const res = parseListingHtml(html, "1");
+      assert.equal(res, null, "a statement with no closing boundary must yield no policy, not throw");
+    });
+  });
 });
 
 test("search-fetcher queue and caching", async (t) => {
@@ -1014,6 +1084,76 @@ test("search-fetcher queue and caching", async (t) => {
     const upgraded = await queue.getCached("prop_partial");
     assert.equal(upgraded.policy.maxDogs, 1, "Richer policy must upgrade partial policy");
     assert.equal(upgraded.policy.fee.amount, 50, "Richer policy must upgrade partial fee");
+
+    queue.dispose();
+  });
+
+  await t.test("Issue #31 sub-fix 1: setCached({ persist: false }) writes only to the in-memory cache", async () => {
+    const storageWrites = [];
+    const mockStorage = {
+      store: {},
+      get(keys, cb) {
+        if (!keys) {
+          cb({ ...this.store });
+          return;
+        }
+        const res = {};
+        for (const k of keys) {
+          if (this.store[k] !== undefined) res[k] = this.store[k];
+        }
+        cb(res);
+      },
+      set(items, cb) {
+        storageWrites.push(items);
+        Object.assign(this.store, items);
+        cb && cb();
+      },
+      remove(keys, cb) {
+        for (const k of keys) delete this.store[k];
+        cb && cb();
+      },
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn: async () => ({ ok: true, status: 200, text: async () => "" }),
+      storage: mockStorage,
+      maxConcurrent: 1,
+      minDelayMs: 5,
+    });
+
+    const fastPathPolicy = {
+      schemaVersion: 1,
+      propertyId: "prop_fastpath",
+      source: "search-page-state",
+      petsAllowed: false,
+      maxDogs: null,
+      weightLimit: null,
+      fee: null,
+      deposit: null,
+    };
+
+    const result = await queue.setCached(
+      "prop_fastpath",
+      { status: "ok", propertyId: "prop_fastpath", policy: fastPathPolicy, ts: Date.now() },
+      { persist: false }
+    );
+
+    assert.equal(result.accepted, true, "a persist:false write must still be accepted into memory");
+    assert.equal(storageWrites.length, 0, "persist:false must skip the chrome.storage.local write entirely");
+    assert.equal(mockStorage.store[CACHE_PREFIX + "prop_fastpath"], undefined, "no entry should land in the storage mock");
+
+    const cached = await queue.getCached("prop_fastpath");
+    assert.ok(cached, "a persist:false entry must still be servable from the in-memory LRU cache");
+    assert.equal(cached.policy.petsAllowed, false);
+
+    // A later, richer write with the default persist:true must still upgrade
+    // and persist normally — persist:false must not stick to the cache slot.
+    const richerPolicy = { ...fastPathPolicy, maxDogs: 2, weightLimit: { value: 50, unit: "lb", pounds: 50 } };
+    await queue.setCached("prop_fastpath", { status: "ok", propertyId: "prop_fastpath", policy: richerPolicy, ts: Date.now() });
+
+    assert.equal(storageWrites.length, 1, "a normal (persist: true) setCached call must still write to storage");
+    const upgraded = await queue.getCached("prop_fastpath");
+    assert.equal(upgraded.policy.maxDogs, 2, "the richer write must upgrade the persist:false entry");
 
     queue.dispose();
   });

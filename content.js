@@ -972,7 +972,7 @@
           fast.policy.deposit !== null;
 
         if (isRichOrDefinitive) {
-          activeQueue.setCached(propId, fast).catch(() => {}).finally(() => {
+          activeQueue.setCached(propId, fast, { persist: false }).catch(() => {}).finally(() => {
             if (searchQueue && searchQueue === activeQueue && document.querySelector(`[data-vdp-prop-id="${propId}"]`)) {
               activeQueue.enqueue(propId, url, priority);
             }
@@ -1838,13 +1838,37 @@
 
       // Ignore internal mutations on Vrbow's own badges or tooltips
       if (mutations && mutations.length) {
+        const INTERNAL_SELECTOR = ".vdp-search-badge, .vdp-search-tooltip, .vdp-badge-slot, #vdp-panel";
         let onlyInternal = true;
         for (const m of mutations) {
           const el = m.target;
-          if (!el || !el.closest || !el.closest(".vdp-search-badge, .vdp-search-tooltip, .vdp-badge-slot, #vdp-panel")) {
-            onlyInternal = false;
-            break;
+          if (el && el.closest && el.closest(INTERNAL_SELECTOR)) continue;
+
+          // The target itself isn't inside an internal element — this can
+          // still be a purely internal mutation when it's a badge SLOT (or
+          // badge) being newly inserted into a card's content column: the
+          // mutation record's target is the column (the slot's new parent),
+          // not the slot, so the closest() check above misses it. Check
+          // addedNodes directly: if every added node is itself an internal
+          // element (or contained within one), this record is internal too.
+          const addedNodes = m.addedNodes;
+          if (addedNodes && addedNodes.length) {
+            let allAddedInternal = true;
+            for (let i = 0; i < addedNodes.length; i++) {
+              const node = addedNodes[i];
+              // Non-element nodes (text, comments) don't have .closest — treat
+              // them as non-internal so they still count toward an external mutation.
+              const isInternalNode = node && node.closest && node.closest(INTERNAL_SELECTOR);
+              if (!isInternalNode) {
+                allAddedInternal = false;
+                break;
+              }
+            }
+            if (allAddedInternal) continue;
           }
+
+          onlyInternal = false;
+          break;
         }
         if (onlyInternal) return;
       }
