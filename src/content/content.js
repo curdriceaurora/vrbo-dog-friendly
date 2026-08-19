@@ -38,6 +38,7 @@
   // Parsing/extraction lives in extract.js (loaded ahead of this script in
   // the same isolated world) so it can be unit-tested without a browser.
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
+  const { escapeHtml } = globalThis.VdpFormatters;
 
   function getListingIdFromUrl(urlStr) {
     if (globalThis.VdpSearchFetcher?.extractPropertyIdFromUrl) {
@@ -431,10 +432,6 @@
   function removePanel() {
     const existing = document.getElementById(PANEL_ID);
     if (existing) existing.remove();
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
   // `value` is always escaped. Today every caller passes a literal or a

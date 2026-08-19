@@ -4,29 +4,14 @@ function el(html) {
   return t.content.firstChild;
 }
 
+const { escapeHtml, formatMoney } = globalThis.VdpFormatters;
+
 function renderNotVrbo() {
   const c = document.getElementById("content");
   c.innerHTML = "";
   c.appendChild(
     el(`<p class="muted">Open a Vrbo listing page to see its dog policy summary.</p>`)
   );
-}
-
-const CURRENCY_SYMBOLS = {
-  USD: "$",
-  EUR: "€",
-  GBP: "£",
-  JPY: "¥",
-  AUD: "A$",
-  CAD: "CA$",
-  NZD: "NZ$",
-};
-
-function formatMoney(amount, currency = "USD") {
-  if (typeof amount !== "number") return "";
-  const code = String(currency || "USD").trim().toUpperCase();
-  const sym = CURRENCY_SYMBOLS[code] || `${code} `;
-  return `${sym}${amount}`;
 }
 
 function renderPolicy(policy) {
@@ -91,10 +76,6 @@ function renderPolicy(policy) {
   if (notes.length) {
     c.appendChild(el(`<p class="muted" style="margin-top:8px;">+ ${notes.length} other pet note(s) — see the on-page panel for details.</p>`));
   }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 function withActiveTab(cb) {
