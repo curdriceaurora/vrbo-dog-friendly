@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
+<img src="src/icons/icon128.png" alt="Vrbow Icon" width="96" height="96">
 
 # Vrbow: Vrbo Dog Policy Callout
 
