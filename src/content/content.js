@@ -441,8 +441,7 @@
   function shortSourceLabel(source) {
     if (!source) return "";
     const parts = source.split(">").map((p) => p.trim()).filter(Boolean);
-    const label = parts.length ? parts[parts.length - 1] : source.trim();
-    return label.length > 18 ? `${label.slice(0, 17)}…` : label;
+    return parts.length ? parts[parts.length - 1] : source.trim();
   }
 
   // `value` is always escaped. Today every caller passes a literal or a
@@ -601,7 +600,9 @@
             // boundary.
             feeDisplay = policy.fee.text;
           } else {
-            feeDisplay = "1st dog free, subsequent fee applies";
+            // feeDisplay stays unset here — row() renders feeValueLines
+            // instead and never reads the plain-string value once it has
+            // more than one line.
             feeValueLines = ["1st dog free", "subsequent fee applies"];
           }
         } else if (hasFeeAmount) {
