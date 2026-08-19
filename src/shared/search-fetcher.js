@@ -541,32 +541,41 @@
       });
     }
 
-    async function getCached(propertyId) {
+    function getMemoryCache(id) {
+      if (!id || !memoryCache.has(id)) return null;
+      const mem = memoryCache.get(id);
+      if (Date.now() - mem.ts < ttlMs) {
+        memoryCache.delete(id);
+        memoryCache.set(id, mem);
+        return mem;
+      }
+      memoryCache.delete(id);
+      return null;
+    }
+
+    function resolveCacheKey(propId, urlHint) {
+      if (!propId) return "";
+      try {
+        const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
+          (typeof require === "function" ? require("./site-registry.js") : null);
+        if (siteRegistry && typeof siteRegistry.getCacheKey === "function") {
+          return siteRegistry.getCacheKey(urlHint || propId, propId);
+        }
+      } catch {}
+      return CACHE_PREFIX + propId;
+    }
+
+    async function getCached(propertyId, targetUrl) {
       if (!propertyId || isDisposed) return null;
       const targetId = aliasMap.get(String(propertyId).toLowerCase()) || propertyId;
 
-      // Check in-memory ok cache first (LRU order refreshed on read, expired entry evicted)
-      let memKey = null;
-      let mem = null;
-      if (memoryCache.has(targetId)) {
-        memKey = targetId;
-        mem = memoryCache.get(targetId);
-      } else if (memoryCache.has(propertyId)) {
-        memKey = propertyId;
-        mem = memoryCache.get(propertyId);
-      }
-
+      // Check in-memory LRU cache first (synchronous & zero-cost)
+      const mem = getMemoryCache(targetId) || getMemoryCache(propertyId);
       if (mem) {
-        if (Date.now() - mem.ts < ttlMs) {
-          memoryCache.delete(memKey);
-          memoryCache.set(memKey, mem);
-          return mem.data;
-        } else {
-          memoryCache.delete(memKey);
-        }
+        return mem.data;
       }
 
-      // Check terminal-state cooldown cache in memory
+      // Check terminal cooldowns (transient fast-path for non-ok terminal states)
       const terminal = terminalCooldowns.get(targetId) || terminalCooldowns.get(propertyId);
       if (terminal) {
         if (Date.now() < terminal.expiresAt) {
@@ -580,11 +589,19 @@
       if (storage) {
         return new Promise((resolve) => {
           try {
-            storage.get([
-              CACHE_PREFIX + targetId,
-              CACHE_PREFIX + propertyId,
+            const targetKey = resolveCacheKey(targetId, targetUrl);
+            const propKey = resolveCacheKey(propertyId, targetUrl);
+            const defaultTargetKey = CACHE_PREFIX + targetId;
+            const defaultPropKey = CACHE_PREFIX + propertyId;
+            const keysToFetch = Array.from(new Set([
+              targetKey,
+              propKey,
+              defaultTargetKey,
+              defaultPropKey,
               ALIAS_PREFIX + propertyId,
-            ], (items) => {
+            ]));
+
+            storage.get(keysToFetch, (items) => {
               if (isDisposed) {
                 resolve(null);
                 return;
@@ -594,7 +611,18 @@
                 aliasMap.set(String(propertyId).toLowerCase(), alias);
               }
               const effectiveId = alias || targetId;
-              const entry = items ? (items[CACHE_PREFIX + effectiveId] || items[CACHE_PREFIX + propertyId]) : null;
+              const effectiveKey = resolveCacheKey(effectiveId, targetUrl);
+              const defaultEffectiveKey = CACHE_PREFIX + effectiveId;
+
+              const entry = items ? (
+                items[effectiveKey] ||
+                items[propKey] ||
+                items[targetKey] ||
+                items[defaultEffectiveKey] ||
+                items[defaultPropKey] ||
+                items[defaultTargetKey]
+              ) : null;
+
               if (
                 entry &&
                 entry.cacheVersion === CACHE_RECORD_VERSION &&
@@ -610,7 +638,16 @@
               } else {
                 if (entry) {
                   // Incompatible or expired: prune asynchronously
-                  try { storage.remove([CACHE_PREFIX + effectiveId, CACHE_PREFIX + propertyId], () => {}); } catch {}
+                  try {
+                    storage.remove([
+                      effectiveKey,
+                      propKey,
+                      targetKey,
+                      defaultEffectiveKey,
+                      defaultPropKey,
+                      defaultTargetKey,
+                    ], () => {});
+                  } catch {}
                 }
                 resolve(null);
               }
@@ -628,7 +665,7 @@
       const persist = !options || options.persist !== false;
 
       // Check precedence against existing cache to prevent downgrading richer data
-      const existing = await getCached(propertyId);
+      const existing = await getCached(propertyId, options?.targetUrl || data?.targetUrl);
       if (isDisposed) return { accepted: false, data: null, policy: null };
 
       if (existing && existing.policy && data.policy) {
@@ -661,7 +698,9 @@
 
       if (storage && persist) {
         try {
-          storage.set({ [CACHE_PREFIX + propertyId]: entry }, () => {});
+          const targetUrl = options?.targetUrl || data?.targetUrl;
+          const cacheKey = resolveCacheKey(propertyId, targetUrl);
+          storage.set({ [cacheKey]: entry }, () => {});
         } catch (e) {
           console.warn("Vrbow failed to write cache:", e);
         }
@@ -912,7 +951,23 @@
         const html = await res.text();
         if (isDisposed) return;
 
-        const parsed = parseListingHtml(html, propertyId, canonicalId);
+        let parsed = null;
+        try {
+          const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
+            (typeof require === "function" ? require("./site-registry.js") : null);
+          const site = siteRegistry?.getSiteForUrl(targetUrl);
+          if (site && site.id !== "vrbo" && typeof site.parseListingData === "function") {
+            parsed = site.parseListingData(html, targetUrl, propertyId, canonicalId);
+          } else {
+            parsed = parseListingHtml(html, propertyId, canonicalId);
+          }
+        } catch {
+          parsed = parseListingHtml(html, propertyId, canonicalId);
+        }
+
+        if (parsed && !parsed.policy && !parsed.isChallenge && typeof parsed === "object" && ("petsAllowed" in parsed || "maxDogs" in parsed || "restrictionsFound" in parsed)) {
+          parsed = { ok: true, propertyId, canonicalId, policy: parsed };
+        }
 
         if (parsed && parsed.isChallenge) {
           noteHardBlock();
@@ -937,11 +992,11 @@
           terminalCooldowns.delete(propertyId);
           if (effectiveCanonicalId) terminalCooldowns.delete(effectiveCanonicalId);
 
-          const cachedResult = await setCached(propertyId, data);
+          const cachedResult = await setCached(propertyId, data, { persist: true, targetUrl });
 
           // Class 12 & Class 10: Cache under canonical ID and update alias map
           if (effectiveCanonicalId && effectiveCanonicalId.toLowerCase() !== propertyId.toLowerCase()) {
-            await setCached(effectiveCanonicalId, { ...data, propertyId: effectiveCanonicalId });
+            await setCached(effectiveCanonicalId, { ...data, propertyId: effectiveCanonicalId }, { persist: true, targetUrl });
             aliasMap.set(propertyId.toLowerCase(), effectiveCanonicalId);
             if (storage && typeof storage.set === "function") {
               try {

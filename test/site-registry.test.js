@@ -320,12 +320,10 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
   const vrbo = siteRegistry.getSiteForHostname("vrbo.com");
   assert.ok(vrbo);
 
-  test("vrbo site adapter provides search card, content column, and PDP mount selectors", () => {
+  test("vrbo site adapter provides search card and content column selectors", () => {
     assert.ok(vrbo.searchCardSelector.includes("lodging-card-responsive"));
     assert.ok(Array.isArray(vrbo.cardContentSelector));
     assert.ok(vrbo.cardContentSelector.some((s) => s.includes("content")));
-    assert.ok(Array.isArray(vrbo.pdpMountSelectors));
-    assert.equal(vrbo.requiresPageBridge, true);
   });
 
   test("registry selector helpers resolve site-specific selectors with safe fallbacks", () => {
@@ -339,9 +337,6 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
         ? vrboContentSelectors.some((s) => s.includes("content"))
         : vrboContentSelectors.includes("content")
     );
-
-    assert.ok(Array.isArray(siteRegistry.getPdpMountSelectors("https://www.vrbo.com/123456")));
-    assert.ok(Array.isArray(siteRegistry.getPdpMountSelectors("https://unknown-site.com/123456")));
   });
 
   test("registry getCacheKey creates site-qualified cache keys", () => {
@@ -377,6 +372,120 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
       });
     } finally {
       globalThis.VDPExtract = origExtract;
+    }
+  });
+
+  test("searchQueue storage engine consumes adapter getCacheKey and parseListingData end-to-end", async () => {
+    const { createSearchFetchQueue } = require("../src/shared/search-fetcher.js");
+    const mockStorage = {
+      store: {},
+      get(keys, cb) {
+        const res = {};
+        for (const k of keys) {
+          if (this.store[k] !== undefined) res[k] = this.store[k];
+        }
+        cb(res);
+      },
+      set(items, cb) {
+        Object.assign(this.store, items);
+        if (cb) cb();
+      },
+      remove(keys, cb) {
+        for (const k of keys) delete this.store[k];
+        if (cb) cb();
+      }
+    };
+
+    const mockFetch = async (url) => {
+      return {
+        ok: true,
+        status: 200,
+        url,
+        text: async () => JSON.stringify({ customJson: true, petLimit: 2 })
+      };
+    };
+
+    const customSite = {
+      id: "airbnb",
+      name: "Airbnb",
+      matchesHostname: (h) => /airbnb\.com$/i.test(h),
+      isListingUrl: (u) => /airbnb\.com\/rooms/i.test(u),
+      isSearchUrl: (u) => /airbnb\.com\/s\//i.test(u),
+      getPropertyId: (u) => {
+        const m = /\/rooms\/([a-z0-9]+)/i.exec(u);
+        return m ? m[1] : null;
+      },
+      getCanonicalFetchUrl: (u) => u,
+      decorateFetchUrl: (u) => u,
+      getCacheKey: (id) => `vrbow_cache_airbnb_${id}`,
+      parseListingData: (html, url, propId) => {
+        const data = JSON.parse(html);
+        return {
+          petsAllowed: true,
+          maxDogs: data.petLimit,
+          source: "custom-airbnb-parser",
+          schemaVersion: 1
+        };
+      }
+    };
+
+    // Register custom site into registry
+    siteRegistry.registerSite(customSite);
+
+    try {
+      const queue = createSearchFetchQueue({
+        storage: mockStorage,
+        fetchFn: mockFetch,
+        minDelayMs: 10,
+        sessionCap: 10,
+      });
+
+      // 1. Verify setCached generates site-qualified cache key
+      const policyData = {
+        status: "ok",
+        propertyId: "room999",
+        policy: {
+          petsAllowed: true,
+          maxDogs: 2,
+          schemaVersion: 1
+        }
+      };
+
+      await queue.setCached("room999", policyData, { targetUrl: "https://www.airbnb.com/rooms/room999" });
+      assert.ok(
+        mockStorage.store["vrbow_cache_airbnb_room999"],
+        "queue engine must write under site-scoped cache key"
+      );
+
+      // 2. Verify getCached reads from site-qualified cache key
+      const cached = await queue.getCached("room999", "https://www.airbnb.com/rooms/room999");
+      assert.ok(cached);
+      assert.equal(cached.propertyId, "room999");
+      assert.equal(cached.policy.maxDogs, 2);
+
+      // 3. Verify fetch pipeline dispatches through adapter parseListingData
+      let dispatched = null;
+      queue.subscribe("room888", (res) => {
+        dispatched = res;
+      });
+
+      queue.enqueue("room888", "https://www.airbnb.com/rooms/room888", "high");
+      await new Promise((r) => setTimeout(r, 100));
+
+      assert.ok(dispatched, "queue dispatched result");
+      assert.equal(dispatched.status, "ok");
+      assert.equal(dispatched.policy.maxDogs, 2);
+      assert.equal(dispatched.policy.source, "custom-airbnb-parser");
+
+      // Verify it was stored with the site's cache key
+      assert.ok(
+        mockStorage.store["vrbow_cache_airbnb_room888"],
+        "dispatched item was cached under airbnb-scoped key"
+      );
+
+      queue.dispose();
+    } finally {
+      siteRegistry.unregisterSite("airbnb");
     }
   });
 });

@@ -103,7 +103,14 @@
     return u.toString();
   }
 
-  function vrboParseListingData(html, urlStr) {
+  function vrboParseListingData(html, urlStr, propertyId, canonicalId) {
+    if (
+      typeof globalThis !== "undefined" &&
+      globalThis.VdpSearchFetcher &&
+      typeof globalThis.VdpSearchFetcher.parseListingHtml === "function"
+    ) {
+      return globalThis.VdpSearchFetcher.parseListingHtml(html, propertyId, canonicalId);
+    }
     const ext = getExtractor();
     if (ext && typeof ext.extractListingData === "function") {
       return ext.extractListingData(html, urlStr);
@@ -129,14 +136,6 @@
       '[data-stid*="content"]',
       '[data-stid*="price"]',
     ],
-    pdpMountSelectors: [
-      '[data-stid="rules-and-policies-section"]',
-      '[data-stid="house-rules-section"]',
-      '#policies-section',
-      '#house-rules',
-      '[data-stid="amenities-section"]'
-    ],
-    requiresPageBridge: true,
   };
 
   const SITES = [vrboSite];
@@ -155,7 +154,7 @@
   function getCanonicalFetchUrl(urlStr, baseUrl) {
     const u = parseUrl(urlStr, baseUrl);
     if (!u) return null;
-    const site = getSiteForHostname(u.hostname);
+    const site = getSiteForUrl(urlStr, baseUrl) || getSiteForHostname(u.hostname);
     if (site && typeof site.getCanonicalFetchUrl === "function") {
       return site.getCanonicalFetchUrl(urlStr, baseUrl);
     }
@@ -165,7 +164,7 @@
   function decorateFetchUrl(urlStr, baseUrl) {
     const u = parseUrl(urlStr, baseUrl);
     if (!u) return urlStr;
-    const site = getSiteForHostname(u.hostname);
+    const site = getSiteForUrl(urlStr, baseUrl) || getSiteForHostname(u.hostname);
     if (site && typeof site.decorateFetchUrl === "function") {
       return site.decorateFetchUrl(urlStr, baseUrl);
     }
@@ -178,7 +177,7 @@
       : urlOrHostname;
     return (
       site?.searchCardSelector ||
-      '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-stid="open-grid-item"], article[data-stid]'
+      '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-testid="property-card"], article[data-stid*="card"], div[data-stid*="property-card"]'
     );
   }
 
@@ -187,22 +186,10 @@
       ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
       : urlOrHostname;
     return (
-      site?.cardContentSelector ||
-      '[data-stid="content-column"], [data-stid="card-content"], [data-layer="content"]'
-    );
-  }
-
-  function getPdpMountSelectors(urlOrHostname) {
-    const site = typeof urlOrHostname === "string"
-      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
-      : urlOrHostname;
-    return (
-      site?.pdpMountSelectors || [
-        '[data-stid="rules-and-policies-section"]',
-        '[data-stid="house-rules-section"]',
-        '#policies-section',
-        '#house-rules',
-        '[data-stid="amenities-section"]'
+      site?.cardContentSelector || [
+        ".uitk-card-content",
+        '[data-stid*="content"]',
+        '[data-stid*="price"]',
       ]
     );
   }
@@ -217,18 +204,35 @@
     return `vrbow_cache_${propertyId}`;
   }
 
-  function parseListingData(urlOrSite, html, urlStr) {
+  function parseListingData(urlOrSite, html, urlStr, propertyId, canonicalId) {
     const site = typeof urlOrSite === "string"
       ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
       : urlOrSite;
     if (site && typeof site.parseListingData === "function") {
-      return site.parseListingData(html, urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""));
+      return site.parseListingData(
+        html,
+        urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""),
+        propertyId,
+        canonicalId
+      );
     }
     const ext = getExtractor();
     if (ext && typeof ext.extractListingData === "function") {
       return ext.extractListingData(html, urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""));
     }
     return null;
+  }
+
+  function registerSite(site) {
+    if (!site || !site.id) return;
+    const idx = SITES.findIndex((s) => s.id === site.id);
+    if (idx >= 0) SITES[idx] = site;
+    else SITES.push(site);
+  }
+
+  function unregisterSite(siteId) {
+    const idx = SITES.findIndex((s) => s.id === siteId);
+    if (idx >= 0) SITES.splice(idx, 1);
   }
 
   return {
@@ -238,8 +242,10 @@
     decorateFetchUrl,
     getSearchCardSelector,
     getCardContentSelector,
-    getPdpMountSelectors,
     getCacheKey,
     parseListingData,
+    registerSite,
+    unregisterSite,
+    getAllSites: () => [...SITES],
   };
 });
