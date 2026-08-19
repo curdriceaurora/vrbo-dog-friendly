@@ -1,5 +1,5 @@
 // site-registry.js
-// Centralized site detection, URL routing, and property-ID extraction.
+// Centralized site detection, URL routing, adapter capabilities, and property-ID extraction.
 
 (function (root, factory) {
   if (typeof module !== "undefined" && module.exports) {
@@ -40,10 +40,10 @@
 
   function getExtractor() {
     if (typeof globalThis !== "undefined") {
-      if (globalThis.VDPExtract && typeof globalThis.VDPExtract.extractPropertyId === "function") {
+      if (globalThis.VDPExtract && typeof globalThis.VDPExtract === "object") {
         return globalThis.VDPExtract;
       }
-      if (globalThis.VdpExtract && typeof globalThis.VdpExtract.extractPropertyId === "function") {
+      if (globalThis.VdpExtract && typeof globalThis.VdpExtract === "object") {
         return globalThis.VdpExtract;
       }
     }
@@ -103,15 +103,40 @@
     return u.toString();
   }
 
+  function vrboParseListingData(html, urlStr) {
+    const ext = getExtractor();
+    if (ext && typeof ext.extractListingData === "function") {
+      return ext.extractListingData(html, urlStr);
+    }
+    return null;
+  }
+
   // Vrbo site definition
   const vrboSite = {
     id: "vrbo",
+    name: "Vrbo",
     matchesHostname: vrboMatchesHostname,
     isListingUrl: vrboIsListingUrl,
     isSearchUrl: vrboIsSearchUrl,
     getPropertyId: vrboGetPropertyId,
     getCanonicalFetchUrl: vrboGetCanonicalFetchUrl,
     decorateFetchUrl: vrboDecorateFetchUrl,
+    getCacheKey: (propertyId) => `vrbow_cache_${propertyId}`,
+    parseListingData: vrboParseListingData,
+    searchCardSelector: '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-testid="property-card"], article[data-stid*="card"], div[data-stid*="property-card"]',
+    cardContentSelector: [
+      ".uitk-card-content",
+      '[data-stid*="content"]',
+      '[data-stid*="price"]',
+    ],
+    pdpMountSelectors: [
+      '[data-stid="rules-and-policies-section"]',
+      '[data-stid="house-rules-section"]',
+      '#policies-section',
+      '#house-rules',
+      '[data-stid="amenities-section"]'
+    ],
+    requiresPageBridge: true,
   };
 
   const SITES = [vrboSite];
@@ -147,10 +172,74 @@
     return urlStr;
   }
 
+  function getSearchCardSelector(urlOrHostname) {
+    const site = typeof urlOrHostname === "string"
+      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
+      : urlOrHostname;
+    return (
+      site?.searchCardSelector ||
+      '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-stid="open-grid-item"], article[data-stid]'
+    );
+  }
+
+  function getCardContentSelector(urlOrHostname) {
+    const site = typeof urlOrHostname === "string"
+      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
+      : urlOrHostname;
+    return (
+      site?.cardContentSelector ||
+      '[data-stid="content-column"], [data-stid="card-content"], [data-layer="content"]'
+    );
+  }
+
+  function getPdpMountSelectors(urlOrHostname) {
+    const site = typeof urlOrHostname === "string"
+      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
+      : urlOrHostname;
+    return (
+      site?.pdpMountSelectors || [
+        '[data-stid="rules-and-policies-section"]',
+        '[data-stid="house-rules-section"]',
+        '#policies-section',
+        '#house-rules',
+        '[data-stid="amenities-section"]'
+      ]
+    );
+  }
+
+  function getCacheKey(urlOrSite, propertyId) {
+    const site = typeof urlOrSite === "string"
+      ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
+      : urlOrSite;
+    if (site && typeof site.getCacheKey === "function") {
+      return site.getCacheKey(propertyId);
+    }
+    return `vrbow_cache_${propertyId}`;
+  }
+
+  function parseListingData(urlOrSite, html, urlStr) {
+    const site = typeof urlOrSite === "string"
+      ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
+      : urlOrSite;
+    if (site && typeof site.parseListingData === "function") {
+      return site.parseListingData(html, urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""));
+    }
+    const ext = getExtractor();
+    if (ext && typeof ext.extractListingData === "function") {
+      return ext.extractListingData(html, urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""));
+    }
+    return null;
+  }
+
   return {
     getSiteForUrl,
     getSiteForHostname,
     getCanonicalFetchUrl,
     decorateFetchUrl,
+    getSearchCardSelector,
+    getCardContentSelector,
+    getPdpMountSelectors,
+    getCacheKey,
+    parseListingData,
   };
 });

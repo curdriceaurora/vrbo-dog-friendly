@@ -871,25 +871,31 @@
     '[data-stid*="price"]',
   ];
 
-  // Falls back to the card itself, which is wider than the content column rather
-  // than narrower — a badge spanning the whole card is an acceptable degradation,
-  // an overflowing one is not.
-  function resolveBadgeContainer(card) {
-    for (const selector of BADGE_CONTAINER_SELECTORS) {
-      const match = card.querySelector(selector);
-      if (match) return match;
-    }
-    return card;
-  }
-
   // Static query selector for search cards across desktop/mobile Vrbo layouts
-  const CARD_SELECTORS_QUERY = [
+  const DEFAULT_CARD_SELECTORS_QUERY = [
     '[data-stid="property-card"]',
     '[data-stid="lodging-card-responsive"]',
     '[data-testid="property-card"]',
     'article[data-stid*="card"]',
     'div[data-stid*="property-card"]',
   ].join(", ");
+
+  function getSearchCardSelector() {
+    const site = getSiteRegistry()?.getSiteForUrl(location.href);
+    return site?.searchCardSelector || DEFAULT_CARD_SELECTORS_QUERY;
+  }
+
+  function resolveBadgeContainer(card) {
+    const site = getSiteRegistry()?.getSiteForUrl(location.href);
+    const selectors = site?.cardContentSelector
+      ? (Array.isArray(site.cardContentSelector) ? site.cardContentSelector : site.cardContentSelector.split(",").map((s) => s.trim()))
+      : BADGE_CONTAINER_SELECTORS;
+    for (const selector of selectors) {
+      const match = card.querySelector(selector);
+      if (match) return match;
+    }
+    return card;
+  }
 
   // Instrumentation for #23's gating condition. LOCAL ONLY: these are in-memory
   // counters, readable from the devtools console of this isolated world via
@@ -1372,7 +1378,7 @@
   function scanSearchCards() {
     if (!isSearchUrl(location.href)) return;
     searchStats.scans++;
-    const cards = document.querySelectorAll(CARD_SELECTORS_QUERY);
+    const cards = document.querySelectorAll(getSearchCardSelector());
     for (const card of cards) {
       bindSearchCard(card);
     }

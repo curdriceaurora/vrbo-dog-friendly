@@ -6,11 +6,11 @@ function el(html) {
 
 const { escapeHtml, formatMoney } = globalThis.VdpFormatters;
 
-function renderNotVrbo() {
+function renderUnsupportedPage() {
   const c = document.getElementById("content");
   c.innerHTML = "";
   c.appendChild(
-    el(`<p class="muted">Open a Vrbo listing page to see its dog policy summary.</p>`)
+    el(`<p class="muted">Open a supported vacation rental listing page (Vrbo, etc.) to see its dog policy summary.</p>`)
   );
 }
 
@@ -114,7 +114,7 @@ function isListingUrl(urlStr) {
 function loadPolicy() {
   withActiveTab((tab) => {
     if (!tab || !tab.url) {
-      renderNotVrbo();
+      renderUnsupportedPage();
       return;
     }
     if (isSearchUrl(tab.url)) {
@@ -122,7 +122,7 @@ function loadPolicy() {
       return;
     }
     if (!isListingUrl(tab.url)) {
-      renderNotVrbo();
+      renderUnsupportedPage();
       return;
     }
     chrome.tabs.sendMessage(tab.id, { type: "vdp-get-policy" }, (resp) => {

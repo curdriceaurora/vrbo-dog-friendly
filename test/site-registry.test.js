@@ -315,3 +315,68 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
     }
   });
 });
+
+describe("site-registry: site adapter capabilities & DOM selectors", () => {
+  const vrbo = siteRegistry.getSiteForHostname("vrbo.com");
+  assert.ok(vrbo);
+
+  test("vrbo site adapter provides search card, content column, and PDP mount selectors", () => {
+    assert.ok(vrbo.searchCardSelector.includes("lodging-card-responsive"));
+    assert.ok(Array.isArray(vrbo.cardContentSelector));
+    assert.ok(vrbo.cardContentSelector.some((s) => s.includes("content")));
+    assert.ok(Array.isArray(vrbo.pdpMountSelectors));
+    assert.equal(vrbo.requiresPageBridge, true);
+  });
+
+  test("registry selector helpers resolve site-specific selectors with safe fallbacks", () => {
+    assert.ok(siteRegistry.getSearchCardSelector("https://www.vrbo.com/search").includes("lodging-card-responsive"));
+    assert.ok(siteRegistry.getSearchCardSelector("https://unknown-site.com/search").includes("property-card"));
+
+    const vrboContentSelectors = siteRegistry.getCardContentSelector("https://www.vrbo.com/search");
+    assert.ok(Array.isArray(vrboContentSelectors) || typeof vrboContentSelectors === "string");
+    assert.ok(
+      Array.isArray(vrboContentSelectors)
+        ? vrboContentSelectors.some((s) => s.includes("content"))
+        : vrboContentSelectors.includes("content")
+    );
+
+    assert.ok(Array.isArray(siteRegistry.getPdpMountSelectors("https://www.vrbo.com/123456")));
+    assert.ok(Array.isArray(siteRegistry.getPdpMountSelectors("https://unknown-site.com/123456")));
+  });
+
+  test("registry getCacheKey creates site-qualified cache keys", () => {
+    assert.equal(siteRegistry.getCacheKey("https://www.vrbo.com/123456", "123456"), "vrbow_cache_123456");
+    assert.equal(vrbo.getCacheKey("9999"), "vrbow_cache_9999");
+
+    const customSite = {
+      id: "airbnb",
+      getCacheKey: (id) => `vrbow_cache_airbnb_${id}`,
+    };
+    assert.equal(siteRegistry.getCacheKey(customSite, "555"), "vrbow_cache_airbnb_555");
+  });
+
+  test("parseListingData delegates to site adapter or VDPExtract", () => {
+    const origExtract = globalThis.VDPExtract;
+    try {
+      globalThis.VDPExtract = {
+        extractListingData(html, url) {
+          return { mockParsed: true, htmlLength: html.length, url };
+        }
+      };
+      const res = siteRegistry.parseListingData("https://www.vrbo.com/123456", "<html>test</html>");
+      assert.deepEqual(res, { mockParsed: true, htmlLength: 17, url: "https://www.vrbo.com/123456" });
+
+      const customSite = {
+        parseListingData(html, url) {
+          return { custom: true, url };
+        }
+      };
+      assert.deepEqual(siteRegistry.parseListingData(customSite, "<html></html>", "https://custom.com/1"), {
+        custom: true,
+        url: "https://custom.com/1",
+      });
+    } finally {
+      globalThis.VDPExtract = origExtract;
+    }
+  });
+});
