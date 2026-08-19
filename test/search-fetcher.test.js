@@ -1904,4 +1904,47 @@ test("queue pacing: amendments to issue #20", async (t) => {
     assert.equal(starts.length, 1, `Expected exactly one dispatch, got ${starts.length}`);
     queue.dispose();
   });
+
+  await t.test("bounded LRU memory cache limits entries and evicts oldest items", async () => {
+    const queue = createSearchFetchQueue({
+      maxMemoryEntries: 3,
+      autoMaintenance: false,
+    });
+
+    const dummyPolicy = { schemaVersion: 1, petsAllowed: true };
+    await queue.setCached("prop_1", { status: "ok", policy: dummyPolicy });
+    await queue.setCached("prop_2", { status: "ok", policy: dummyPolicy });
+    await queue.setCached("prop_3", { status: "ok", policy: dummyPolicy });
+
+    assert.equal(queue.getMemoryCacheSize(), 3);
+    assert.ok(await queue.getCached("prop_1"));
+
+    // Adding a 4th entry should evict prop_2 (since prop_1 was just read and moved to MRU)
+    await queue.setCached("prop_4", { status: "ok", policy: dummyPolicy });
+    assert.equal(queue.getMemoryCacheSize(), 3);
+    assert.ok(await queue.getCached("prop_1"), "prop_1 was refreshed and should remain in cache");
+    assert.ok(await queue.getCached("prop_3"), "prop_3 should remain in cache");
+    assert.ok(await queue.getCached("prop_4"), "prop_4 should be in cache");
+    assert.equal(await queue.getCached("prop_2"), null, "prop_2 should have been evicted as oldest");
+
+    queue.dispose();
+  });
+
+  await t.test("expired in-memory cache entries are evicted upon read", async () => {
+    const queue = createSearchFetchQueue({
+      ttlMs: 50,
+      autoMaintenance: false,
+    });
+
+    const dummyPolicy = { schemaVersion: 1, petsAllowed: true };
+    await queue.setCached("prop_expire", { status: "ok", policy: dummyPolicy });
+    assert.equal(queue.getMemoryCacheSize(), 1);
+
+    await new Promise((r) => setTimeout(r, 70));
+    const cached = await queue.getCached("prop_expire");
+    assert.equal(cached, null, "Expired cache entry should return null");
+    assert.equal(queue.getMemoryCacheSize(), 0, "Expired entry should be evicted from memoryCache");
+
+    queue.dispose();
+  });
 });
