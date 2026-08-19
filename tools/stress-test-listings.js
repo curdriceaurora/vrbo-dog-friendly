@@ -4,7 +4,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, execSync } = require("child_process");
 
-const ROOT = path.join(__dirname, "..");
+const ROOT = path.join(__dirname, "..", "src");
 const URL_1 = "https://www.vrbo.com/search?adults=2&children=&regionId=3000448572&destination=Elmont%2C+New+York%2C+United+States+of+America&latLong=40.700935%2C-73.712906&chkin=2026-10-17&chkout=2026-10-24&d1=2026-10-17&d2=2026-10-24&startDate=2026-10-17&endDate=2026-10-24&discounts_group=early_booking&house_rules_group=pets_allowed";
 const URL_2 = "https://www.vrbo.com/search?chkin=2026-10-17&chkout=2026-10-24&privacyTrackingState=CAN_TRACK&productOffersId=369e2587-e81d-479f-a893-0532bd582b25&searchId=495a1ddc-2f0b-47d1-b32b-106531f52249&theme=&destination=Vilano+Beach%2C+St.+Augustine%2C+Florida%2C+United+States+of+America&regionId=602749&latLong=29.93858%2C-81.302017&startDate=2026-10-17&endDate=2026-10-24&adults=2&sort=RECOMMENDED&house_rules_group=pets_allowed";
 const URL_3 = "https://www.vrbo.com/search?chkin=2026-10-17&chkout=2026-10-24&privacyTrackingState=CAN_TRACK&productOffersId=369e2587-e81d-479f-a893-0532bd582b25&searchId=495a1ddc-2f0b-47d1-b32b-106531f52249&theme=&latLong=29.80913%2C-81.26101&mapBounds=29.7145%2C-81.3296&mapBounds=29.90367%2C-81.19242&startDate=2026-10-17&endDate=2026-10-24&adults=2&sort=RECOMMENDED&house_rules_group=pets_allowed&previousRegionId=553248621560560281";

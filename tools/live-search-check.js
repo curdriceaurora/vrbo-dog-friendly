@@ -69,8 +69,15 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+const SCRIPT_PATHS = {
+  "page-bridge.js": path.join(ROOT, "src", "content", "page-bridge.js"),
+  "extract.js": path.join(ROOT, "src", "shared", "extract.js"),
+  "search-fetcher.js": path.join(ROOT, "src", "shared", "search-fetcher.js"),
+  "formatters.js": path.join(ROOT, "src", "shared", "formatters.js"),
+  "content.js": path.join(ROOT, "src", "content", "content.js"),
+};
 function readScript(rel) {
-  return fs.readFileSync(path.join(ROOT, rel), "utf8");
+  return fs.readFileSync(SCRIPT_PATHS[rel] || path.join(ROOT, rel), "utf8");
 }
 
 async function startChrome(port, extensionDir, startUrl, allowEmulated = false) {
@@ -182,7 +189,7 @@ async function run() {
     : DEFAULT_SEARCH_URL;
 
   console.log("Starting Chrome for search page verification...");
-  const { proc, userDataDir, mode } = await startChrome(port, ROOT, rawSearchUrl);
+  const { proc, userDataDir, mode } = await startChrome(port, path.join(ROOT, "src"), rawSearchUrl);
   console.log(`Chrome started (mode: ${mode}).`);
 
   let targetCdp = null;
@@ -258,7 +265,7 @@ async function run() {
 
       await evalCdp(targetCdp, `globalThis.chrome = { storage: { local: { set(o, cb) { cb && cb(); }, get(k, cb) { cb && cb({}); }, remove(k, cb) { cb && cb(); } } }, runtime: { onMessage: { addListener() {} } } };`, { contextId });
 
-      for (const file of ["extract.js", "search-fetcher.js", "content.js"]) {
+      for (const file of ["extract.js", "search-fetcher.js", "formatters.js", "content.js"]) {
         await evalCdp(targetCdp, readScript(file), { contextId });
       }
     }

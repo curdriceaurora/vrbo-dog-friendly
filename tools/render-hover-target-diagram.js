@@ -10,8 +10,8 @@ async function renderHoverTarget() {
   });
   const page = await context.newPage();
 
-  const tokensCss = fs.readFileSync(path.join(__dirname, "../tokens.css"), "utf8");
-  const contentCss = fs.readFileSync(path.join(__dirname, "../content.css"), "utf8");
+  const tokensCss = fs.readFileSync(path.join(__dirname, "../src/content/tokens.css"), "utf8");
+  const contentCss = fs.readFileSync(path.join(__dirname, "../src/content/content.css"), "utf8");
 
   const html = `
 <!DOCTYPE html>
