@@ -737,6 +737,7 @@
   let scrollRafId = null;
   let scrollSettleTimer = null;
   let isScrollPaused = false;
+  let scrollListenersAttached = false;
 
   function onWindowScroll() {
     if (scrollRafId !== null) return; // Coalesce to one computation per frame
@@ -971,7 +972,7 @@
           fast.policy.deposit !== null;
 
         if (isRichOrDefinitive) {
-          activeQueue.setCached(propId, fast).finally(() => {
+          activeQueue.setCached(propId, fast).catch(() => {}).finally(() => {
             if (searchQueue && searchQueue === activeQueue && document.querySelector(`[data-vdp-prop-id="${propId}"]`)) {
               activeQueue.enqueue(propId, url, priority);
             }
@@ -1155,11 +1156,12 @@
       }, { rootMargin: "150px 0px" });
     }
 
-    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+    if (!scrollListenersAttached && typeof window !== "undefined" && typeof window.addEventListener === "function") {
       window.addEventListener("scroll", onWindowScroll, { passive: true });
       if ("onscrollend" in window) {
         window.addEventListener("scrollend", onScrollSettled, { passive: true });
       }
+      scrollListenersAttached = true;
     }
 
     scanSearchCards();
@@ -1183,11 +1185,12 @@
       clearTimeout(scrollSettleTimer);
       scrollSettleTimer = null;
     }
-    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+    if (scrollListenersAttached && typeof window !== "undefined" && typeof window.removeEventListener === "function") {
       window.removeEventListener("scroll", onWindowScroll);
       if ("onscrollend" in window) {
         window.removeEventListener("scrollend", onScrollSettled);
       }
+      scrollListenersAttached = false;
     }
     lastScrollY = 0;
     lastScrollTime = 0;
@@ -1925,6 +1928,7 @@
         onWindowScroll,
         onScrollSettled,
         getIsScrollPaused: () => isScrollPaused,
+        getScrollListenersAttached: () => scrollListenersAttached,
         SCROLL_VELOCITY_THRESHOLD_PX_S,
         SCROLL_SETTLE_DEBOUNCE_MS,
       },

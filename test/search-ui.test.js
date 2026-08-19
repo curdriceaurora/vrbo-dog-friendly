@@ -1323,5 +1323,22 @@ test("content.js: rAF-batched scroll velocity tracking and settle detection (Iss
     assert.equal(globalThis.window._listeners.get("scroll")?.size || 0, 0, "scroll listener must be removed");
     assert.equal(__test.getIsScrollPaused(), false, "isScrollPaused must reset to false");
   });
+
+  await t.test("multiple consecutive initSearchManager calls do not accumulate duplicate scroll listeners", async () => {
+    globalThis.location.href = SEARCH_URL_A;
+    __test.cleanupSearchManager();
+
+    // Call initSearchManager multiple times (e.g. simulating consecutive SPA search query updates)
+    __test.initSearchManager();
+    __test.initSearchManager();
+    __test.initSearchManager();
+
+    assert.equal(__test.getScrollListenersAttached(), true);
+    assert.equal(globalThis.window._listeners.get("scroll")?.size, 1, "exactly one scroll listener must be attached");
+
+    __test.cleanupSearchManager();
+    assert.equal(__test.getScrollListenersAttached(), false);
+    assert.equal(globalThis.window._listeners.get("scroll")?.size || 0, 0, "scroll listener must be cleanly removed");
+  });
 });
 
