@@ -353,3 +353,104 @@ test("#18: badge spans the content column identically regardless of label, and w
     await context.close();
   }
 });
+
+// #18 follow-up: the slot makes width independent of the host container only as
+// far as the host allows. A wrapping flex row lets a 100% slot claim its own
+// line; a grid parent puts it in one cell; a nowrap row makes it compete. This
+// pins what each layout actually yields so the guarantee is not overstated.
+const SEARCH_HTML_LAYOUTS = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Badge Layout Matrix</title>
+    <style>
+      body { margin: 0; padding: 20px; font-family: sans-serif; }
+      [data-stid="property-card"] { position: relative; width: 380px; border: 1px solid #ccc; margin-bottom: 16px; }
+      .uitk-card-link { position: absolute; inset: 0; z-index: 1; background: transparent; display: block; }
+      #nowrap .uitk-card-content { position: relative; display: flex; flex-direction: row; flex-wrap: nowrap; padding: 16px; z-index: 0; }
+      #grid .uitk-card-content { position: relative; display: grid; grid-template-columns: 1fr 1fr; padding: 16px; z-index: 0; }
+      [data-stid="price-summary"] { width: 60px; }
+    </style>
+  </head>
+  <body>
+    <main><div class="Results">
+      <div data-stid="property-card" id="nowrap">
+        <a class="uitk-card-link" href="https://www.vrbo.com/8000002?chkin=2026-09-01"></a>
+        <div data-stid="price-summary">$185</div>
+        <div class="uitk-card-content"><h3>Non Wrapping Row</h3></div>
+      </div>
+      <div data-stid="property-card" id="grid">
+        <a class="uitk-card-link" href="https://www.vrbo.com/8000003?chkin=2026-09-01"></a>
+        <div data-stid="price-summary">$185</div>
+        <div class="uitk-card-content"><h3>Grid Column</h3></div>
+      </div>
+    </div></main>
+  </body>
+</html>`;
+
+test("#18: the slot spans every column of a grid parent and never overflows a nowrap row", async () => {
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${EXTENSION_ROOT}`,
+      `--load-extension=${EXTENSION_ROOT}`
+    ]
+  });
+
+  try {
+    const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
+
+    await page.route("https://www.vrbo.com/Hotel-Search*", (route) => route.fulfill({
+      status: 200, contentType: "text/html", body: SEARCH_HTML_LAYOUTS
+    }));
+    for (const id of ["8000002", "8000003"]) {
+      await page.route(`https://www.vrbo.com/${id}*`, (route) => route.fulfill({
+        status: 200, contentType: "text/html", body: LISTING_LONG
+      }));
+    }
+
+    await page.goto(SEARCH_URL);
+    await expect(page.locator("#grid .vdp-search-badge")).toBeVisible({ timeout: 8_000 });
+    await expect(page.locator("#nowrap .vdp-search-badge")).not.toHaveText(/Checking pet policy/, { timeout: 8_000 });
+
+    const measure = await page.evaluate(() => {
+      const read = (id) => {
+        const badge = document.querySelector(`#${id} .vdp-search-badge`);
+        const host = badge.parentElement.parentElement;
+        const cs = getComputedStyle(host);
+        const avail = host.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        const r = badge.getBoundingClientRect();
+        const hit = (x) => {
+          const el = document.elementFromPoint(x, r.top + r.height / 2);
+          return el && el.closest(".vdp-search-badge") ? "badge" : "miss";
+        };
+        return {
+          ratio: r.width / avail,
+          hits: [hit(r.left + 2), hit(r.left + r.width / 2), hit(r.right - 2)],
+        };
+      };
+      return { nowrap: read("nowrap"), grid: read("grid") };
+    });
+
+    // A grid parent placed the slot in a single cell (50% of a 2-column track).
+    // grid-column: 1 / -1 makes it span every column instead.
+    expect(measure.grid.ratio).toBeGreaterThan(0.99);
+    expect(measure.grid.ratio).toBeLessThanOrEqual(1.005);
+
+    // A nowrap row cannot be won from the child: the slot shares the line with
+    // the host's own content and shrinks. The contract there is only that it
+    // does not overflow — forcing full width would push the host's content out.
+    expect(measure.nowrap.ratio).toBeLessThanOrEqual(1.005);
+    expect(measure.nowrap.ratio).toBeGreaterThan(0.5);
+
+    // Hit-testing must hold across the badge's full box in both layouts.
+    expect(measure.grid.hits).toEqual(["badge", "badge", "badge"]);
+    expect(measure.nowrap.hits).toEqual(["badge", "badge", "badge"]);
+
+    await guard.assertNoLeakedRequests(page);
+  } finally {
+    await context.close();
+  }
+});

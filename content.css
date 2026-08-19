@@ -192,11 +192,24 @@
   pointer-events: auto !important;
 }
 
-/* Block-level slot the badge fills. Owning this element is what makes badge
-   width independent of whether Vrbo's container is block, flex or grid. */
+/* Block-level slot the badge fills. Owning this element is what decouples badge
+   width from the host container's display type.
+
+   How far that goes depends on the host, and the extra two properties are inert
+   outside the layout they name:
+     block / wrapping flex row -> width: 100% claims the full column.
+     grid                      -> width alone fills ONE cell, so grid-column
+                                  spans every track instead.
+     nowrap flex row           -> the slot shares the line with the host's own
+                                  content and shrinks. It cannot be won from the
+                                  child: forcing full width would push the
+                                  host's content out. The contract there is only
+                                  that the badge never overflows. */
 .vdp-badge-slot {
   display: block;
   width: 100%;
+  flex-basis: 100%;
+  grid-column: 1 / -1;
 }
 
 /* Search Results Inline Badge */
