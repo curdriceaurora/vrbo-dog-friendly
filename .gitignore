@@ -11,4 +11,5 @@ test/vrbo_unique_listings.csv
 .agents/
 .claude/
 *.zip
+dist/
 scratch/
