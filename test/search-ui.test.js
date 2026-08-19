@@ -697,14 +697,14 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
 
     // Card is off-screen.
     fireIntersection([{ card, inView: false }]);
-    const dispatchedBefore = __test.getSearchStats().dispatched;
+    const enqueuedBefore = __test.getSearchStats().enqueued;
 
     recycleCard(card, listingUrlFor("2000002"));
     __test.scanSearchCards();
 
     assert.equal(card.getAttribute("data-vdp-prop-id"), "2000002", "re-binding still happens off-screen");
     assert.equal(spies.enqueue.length, 0, "off-screen recycle must not enqueue");
-    assert.equal(__test.getSearchStats().dispatched, dispatchedBefore, "no dispatch for an off-screen recycle");
+    assert.equal(__test.getSearchStats().enqueued, enqueuedBefore, "no enqueue for an off-screen recycle");
 
     // Same card, now on-screen.
     fireIntersection([{ card, inView: true }]);
@@ -717,7 +717,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
       ["3000003"],
       "in-view recycle enqueues exactly the new property"
     );
-    assert.equal(__test.getSearchStats().dispatched, dispatchedBefore + 1);
+    assert.equal(__test.getSearchStats().enqueued, enqueuedBefore + 1);
   });
 
   await t.test("I4b: dwell timers are jittered one-sided, never below the 400 ms floor", async () => {
@@ -929,7 +929,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     freshSearchPage({ minDelayMs: 5000 });
 
     const zero = __test.getSearchStats();
-    assert.equal(zero.dispatched, 0);
+    assert.equal(zero.enqueued, 0);
     assert.equal(zero.prunedOffscreen, 0);
     assert.equal(zero.prunedRecycled, 0);
     assert.equal(zero.prunedStale, 0);
@@ -951,7 +951,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     ]);
     await sleep(700);
 
-    assert.equal(__test.getSearchStats().dispatched, 3, "one dispatch per dwell-gated card");
+    assert.equal(__test.getSearchStats().enqueued, 3, "one enqueue per dwell-gated card");
     assert.ok(__test.getSearchStats().maxQueueDepth >= 1, "queue depth is sampled over time");
     assert.ok(__test.getSearchStats().depthSamples.length >= 3);
     assert.ok(
@@ -985,15 +985,85 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     assert.deepEqual(
       {
         scans: afterReset.scans,
-        dispatched: afterReset.dispatched,
+        enqueued: afterReset.enqueued,
         prunedOffscreen: afterReset.prunedOffscreen,
         prunedRecycled: afterReset.prunedRecycled,
         prunedStale: afterReset.prunedStale,
         maxQueueDepth: afterReset.maxQueueDepth,
         depthSamples: afterReset.depthSamples.length,
       },
-      { scans: 0, dispatched: 0, prunedOffscreen: 0, prunedRecycled: 0, prunedStale: 0, maxQueueDepth: 0, depthSamples: 0 },
+      { scans: 0, enqueued: 0, prunedOffscreen: 0, prunedRecycled: 0, prunedStale: 0, maxQueueDepth: 0, depthSamples: 0 },
       "counters are queue-scoped and reset with it"
     );
+  });
+
+  // #23 gates on measured queue pressure, so the counters that answer it have to
+  // mean what they say. These are the three ways the pre-existing set could not.
+  await t.test("#23 gate: enqueue calls, network requests, and staged depth are distinguishable", async () => {
+    freshSearchPage({ minDelayMs: 5000 });
+    hangingIds.add("1000001");
+
+    const cardA = makeCard("card-a", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardA, inView: true }]);
+    await sleep(700);
+
+    const stats = __test.getSearchStats();
+    assert.equal(stats.enqueued, 1, "one enqueue call");
+    assert.equal(
+      stats.networkRequests,
+      __test.getSearchQueue().getSessionCount(),
+      "networkRequests reads through to the queue's own session counter"
+    );
+
+    // An enqueue that resolves from cache issues no fetch, so the two counters
+    // must diverge. Without this, #23's pruned-vs-dispatched ratio uses an
+    // inflated denominator and understates how well I8b is working.
+    const enqueuedBefore = stats.enqueued;
+    const networkBefore = stats.networkRequests;
+    await __test.getSearchQueue().setCached("7000007", {
+      status: "ok",
+      propertyId: "7000007",
+      policy: { petsAllowed: true, maxDogs: 2, schemaVersion: 1 },
+      ts: Date.now(),
+    });
+    const cardCached = makeCard("card-cached", listingUrlFor("7000007"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardCached, inView: true }]);
+    await sleep(700);
+
+    const after = __test.getSearchStats();
+    assert.equal(after.enqueued, enqueuedBefore + 1, "the cache hit still counts as an enqueue call");
+    assert.equal(after.networkRequests, networkBefore, "but it puts no request on the wire");
+  });
+
+  await t.test("#23 gate: depth samples include items still staging behind getCached()", async () => {
+    // enqueue() stages synchronously but pushes to the queue array only after its
+    // getCached() promise settles, so an item sits in the staging map for at least
+    // a microtask. getQueueLength() alone cannot see it during that window.
+    freshSearchPage({ minDelayMs: 5000 });
+    hangingIds.add("1000001");
+
+    const cardA = makeCard("card-a", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardA, inView: true }]);
+    await sleep(700);
+
+    const queue = __test.getSearchQueue();
+    assert.equal(typeof queue.getPendingCount, "function", "the queue exposes its staged count");
+
+    const cardB = makeCard("card-b", listingUrlFor("2000002"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardB, inView: true }]);
+    await sleep(700);
+
+    const staged = __test.getSearchStats().depthSamples.filter((s) => s.staged > 0);
+    assert.ok(
+      staged.length >= 1,
+      "at least one sample must have caught an item mid-staging, or the undercount is back"
+    );
+    for (const s of __test.getSearchStats().depthSamples) {
+      assert.ok(s.depth >= s.staged, `sample depth ${s.depth} must include its ${s.staged} staged items`);
+    }
   });
 });

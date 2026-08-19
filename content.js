@@ -743,13 +743,22 @@
   function createEmptySearchStats() {
     return {
       scans: 0,
-      dispatched: 0, // Counts post-dwell card enqueue requests passed to the queue engine
+      // Enqueue CALLS handed to the queue engine, not network requests. A call that
+      // resolves from cache issues no fetch, so this is an upper bound on traffic.
+      // For the true network count read `networkRequests` below.
+      enqueued: 0,
+      // Queue items actually withdrawn by remove() on viewport exit. This is I8b's
+      // numerator in #23's "pruned by I8b versus dispatched" ratio.
       prunedOffscreen: 0,
+      // Queue items actually withdrawn when a node was recycled to another property.
       prunedRecycled: 0,
+      // CARDS dropped from tracking on an SPA re-render. Counted per card, not per
+      // queue withdrawal, so it is NOT comparable to the two counters above.
       prunedStale: 0,
       lastQueueDepth: 0,
       maxQueueDepth: 0,
-      depthSamples: [], // [{ t, depth, reason }], bounded ring
+      depthSamples: [], // [{ t, depth, staged, reason }], bounded ring
+      depthSamplesDropped: 0, // Samples evicted by the ring; nonzero means truncated history
     };
   }
 
@@ -759,15 +768,35 @@
 
   function sampleQueueDepth(reason) {
     if (!searchQueue || typeof searchQueue.getQueueLength !== "function") return;
-    const depth = searchQueue.getQueueLength();
+    // enqueue() stages an item behind an async getCached() before pushing it to the
+    // queue array, so getQueueLength() alone undercounts by whatever is still
+    // staging — and under sustained scroll, which is the regime #23 gates on, that
+    // is exactly when the staged population is nonzero. Record both.
+    const queued = searchQueue.getQueueLength();
+    const staged = typeof searchQueue.getPendingCount === "function"
+      ? searchQueue.getPendingCount()
+      : 0;
+    const depth = queued + staged;
     searchStats.lastQueueDepth = depth;
     if (depth > searchStats.maxQueueDepth) searchStats.maxQueueDepth = depth;
-    searchStats.depthSamples.push({ t: Date.now(), depth, reason });
-    if (searchStats.depthSamples.length > MAX_DEPTH_SAMPLES) searchStats.depthSamples.shift();
+    searchStats.depthSamples.push({ t: Date.now(), depth, staged, reason });
+    if (searchStats.depthSamples.length > MAX_DEPTH_SAMPLES) {
+      searchStats.depthSamples.shift();
+      searchStats.depthSamplesDropped++;
+    }
   }
 
   function getSearchStats() {
-    return { ...searchStats, depthSamples: searchStats.depthSamples.slice() };
+    return {
+      ...searchStats,
+      // Read through to the queue's own session counter: the number of requests
+      // actually put on the wire. This is the denominator #23's gate needs, and it
+      // is not the same as `enqueued`.
+      networkRequests: searchQueue && typeof searchQueue.getSessionCount === "function"
+        ? searchQueue.getSessionCount()
+        : 0,
+      depthSamples: searchStats.depthSamples.slice(),
+    };
   }
 
   // Read-only devtools hook. Returns a copy; nothing here is persisted or sent.
@@ -873,8 +902,8 @@
     }
     if (searchQueue && searchQueue === activeQueue) {
       activeQueue.enqueue(propId, url, priority);
-      searchStats.dispatched++;
-      sampleQueueDepth("dispatch");
+      searchStats.enqueued++;
+      sampleQueueDepth("enqueue");
     }
   }
 

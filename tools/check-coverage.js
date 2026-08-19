@@ -82,19 +82,22 @@ async function main() {
     process.exit(1);
   }
 
-  let failed = false;
-  console.log("\n-------------------------------------------------------------------------------");
-  console.log("Coverage Threshold Evaluation");
   // Note: content.js, popup.js, and page-bridge.js are browser-coupled scripts whose
   // browser-path coverage is measured and enforced via Playwright in e2e/js-coverage.spec.js.
   // check-coverage.js specifically enforces Node module thresholds for standalone modules.
   const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js"]);
 
+  // Checked before the section header prints, so a missing row reads as a bare
+  // failure rather than an empty-looking evaluation that happens to exit 1.
   const missing = [...TARGET_NODE_MODULES].filter((f) => !reports[f]);
   if (missing.length) {
     console.error(`\n❌ Coverage rows missing for: ${missing.join(", ")}`);
     process.exit(1);
   }
+
+  let failed = false;
+  console.log("\n-------------------------------------------------------------------------------");
+  console.log("Coverage Threshold Evaluation");
 
   for (const [file, metrics] of Object.entries(reports)) {
     if (!TARGET_NODE_MODULES.has(file)) continue;
