@@ -2,7 +2,7 @@ const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
-const EXTENSION_ROOT = path.join(__dirname, "..");
+const EXTENSION_ROOT = path.join(__dirname, "..", "src");
 const LISTING_URL = "https://www.vrbo.com/123456";
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Miami&house_rules_group=pets_allowed";
 
@@ -146,7 +146,7 @@ for (const scheme of ["light", "dark"]) {
       expect(extensionId).toMatch(/^[a-p]{32}$/);
 
       const popup = await context.newPage();
-      await popup.goto(`chrome-extension://${extensionId}/popup.html`);
+      await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
       await popup.bringToFront();
       await expect(popup.locator("html")).toHaveCSS("color-scheme", scheme);
       await expect(popup.locator("body")).toHaveCSS("background-color", EXPECTED[scheme].surface);

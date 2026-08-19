@@ -4,7 +4,7 @@ const { expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
 const ROOT = path.join(__dirname, "..");
-const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js"]);
+const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js"]);
 
 function calculateExecutionMask(text, functionEntries) {
   if (!text || text.length === 0) return new Uint8Array(0);
@@ -30,14 +30,15 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   const guard = await installNetworkGuard(context);
 
   // Read production script contents
-  const extractJs = fs.readFileSync(path.join(ROOT, "extract.js"), "utf8");
-  const searchFetcherJs = fs.readFileSync(path.join(ROOT, "search-fetcher.js"), "utf8");
-  const pageBridgeJs = fs.readFileSync(path.join(ROOT, "page-bridge.js"), "utf8");
-  const contentJs = fs.readFileSync(path.join(ROOT, "content.js"), "utf8");
-  const popupJs = fs.readFileSync(path.join(ROOT, "popup.js"), "utf8");
-  const tokensCss = fs.readFileSync(path.join(ROOT, "tokens.css"), "utf8");
-  const contentCss = fs.readFileSync(path.join(ROOT, "content.css"), "utf8");
-  const popupCss = fs.readFileSync(path.join(ROOT, "popup.css"), "utf8");
+  const extractJs = fs.readFileSync(path.join(ROOT, "src", "shared", "extract.js"), "utf8");
+  const searchFetcherJs = fs.readFileSync(path.join(ROOT, "src", "shared", "search-fetcher.js"), "utf8");
+  const pageBridgeJs = fs.readFileSync(path.join(ROOT, "src", "content", "page-bridge.js"), "utf8");
+  const formattersJs = fs.readFileSync(path.join(ROOT, "src", "shared", "formatters.js"), "utf8");
+  const contentJs = fs.readFileSync(path.join(ROOT, "src", "content", "content.js"), "utf8");
+  const popupJs = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.js"), "utf8");
+  const tokensCss = fs.readFileSync(path.join(ROOT, "src", "content", "tokens.css"), "utf8");
+  const contentCss = fs.readFileSync(path.join(ROOT, "src", "content", "content.css"), "utf8");
+  const popupCss = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.css"), "utf8");
 
   // Route external script files on context level
   await context.route("https://www.vrbo.com/extract.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: extractJs }));
@@ -45,6 +46,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   await context.route("https://www.vrbo.com/page-bridge.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: pageBridgeJs }));
   await context.route("https://www.vrbo.com/content.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: contentJs }));
   await context.route("https://www.vrbo.com/popup.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: popupJs }));
+  await context.route("https://www.vrbo.com/formatters.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: formattersJs }));
 
   // Route mock listing fetch responses
   await context.route("https://www.vrbo.com/100001*", (r) => r.fulfill({
@@ -150,6 +152,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
       <script src="/extract.js"></script>
       <script src="/search-fetcher.js"></script>
       <script src="/page-bridge.js"></script>
+      <script src="/formatters.js"></script>
       <script src="/content.js"></script>
     </body>
   </html>`;
@@ -198,6 +201,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
       <script src="/extract.js"></script>
       <script src="/search-fetcher.js"></script>
       <script src="/page-bridge.js"></script>
+      <script src="/formatters.js"></script>
       <script src="/content.js"></script>
     </body>
   </html>`;
@@ -244,6 +248,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
           <div id="content"></div>
         </div>
         <script src="/extract.js"></script>
+        <script src="/formatters.js"></script>
         <script src="/popup.js"></script>
       </body>
     </html>`;
