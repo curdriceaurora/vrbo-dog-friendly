@@ -434,27 +434,49 @@
     if (existing) existing.remove();
   }
 
+  // Real source strings can be a combined "Section > Header" (see
+  // formatSourceLabel in extract.js) — for the compact per-row jump link
+  // we only want the lowest-level, linkable label (the header the
+  // snippet actually lives under), not the full hierarchy.
+  function shortSourceLabel(source) {
+    if (!source) return "";
+    const parts = source.split(">").map((p) => p.trim()).filter(Boolean);
+    const label = parts.length ? parts[parts.length - 1] : source.trim();
+    return label.length > 18 ? `${label.slice(0, 17)}…` : label;
+  }
+
   // `value` is always escaped. Today every caller passes a literal or a
   // digits-only regex capture, so nothing can break out — but escaping
   // here means a future pattern that captures freeform listing text
   // can't turn into an injection point.
-  function row(label, value, tone, snippet, source, alternates) {
+  //
+  // `valueLines`, when passed, renders a genuinely compound value (e.g.
+  // two fee conditions, two weight-limit clauses) as separate stacked
+  // lines instead of one comma-joined sentence — the row grows taller,
+  // the column never grows wider. Left unset for anything not already
+  // structured as distinct pieces; we don't attempt to split arbitrary
+  // freeform extracted text on commas, since a comma there isn't
+  // reliably a clause boundary.
+  function row(label, value, tone, snippet, source, alternates, valueLines) {
     const toneClass = tone ? `vdp-tone-${tone}` : "";
     const jumpAttr = snippet ? `data-snippet="${encodeURIComponent(snippet)}" data-source="${encodeURIComponent(source || "")}"` : "";
-    const jumpBtn = snippet ? `<button class="vdp-jump" ${jumpAttr} title="Show where this was found">source</button>` : "";
+    const jumpBtn = snippet
+      ? `<button class="vdp-jump" ${jumpAttr} title="Jump to where this was found in ${escapeHtml(source || "the listing")}">${escapeHtml(shortSourceLabel(source))} <span class="vdp-jump-arrow">↗</span></button>`
+      : "";
     const altHtml =
       alternates && alternates.length
         ? `<div class="vdp-alt">⚠ Listing also states elsewhere: ${alternates
             .map((a) => `<strong>${escapeHtml(a.value)}</strong> (${escapeHtml(a.source || "")})`)
             .join("; ")}</div>`
         : "";
-    return `<div class="vdp-row-wrap">
-      <div class="vdp-row">
-        <span class="vdp-label">${label}</span>
-        <span class="vdp-value ${toneClass}">${escapeHtml(value)}</span>
-        ${jumpBtn}
-      </div>
-      ${altHtml}
+    const valueHtml =
+      valueLines && valueLines.length > 1
+        ? valueLines.map((line) => `<span class="vdp-value-line">${escapeHtml(line)}</span>`).join("")
+        : escapeHtml(value);
+    return `<div class="vdp-row">
+      <span class="vdp-label">${label}</span>
+      <span class="vdp-value ${toneClass}">${valueHtml}${altHtml}</span>
+      ${jumpBtn}
     </div>`;
   }
 
@@ -467,89 +489,12 @@
     let rowsHtml = "";
     let headline = "";
     let headlineTone = "neutral";
+    let isFullySparse = false;
     const raw = policy._raw || policy;
 
-    if (policy.petsAllowed === false) {
-      headline = "🚫 Pets are not allowed";
-      headlineTone = "bad";
-      rowsHtml = row("Policy", "No pets allowed", "bad", raw.petsAllowedSnippet, raw.petsAllowedSource);
-    } else if (!raw.found && !policy.restrictionsFound) {
-      headline = "🐾 No dog policy details detected";
-      headlineTone = "unknown";
-      rowsHtml = `<div class="vdp-empty">This page didn't mention pets/dogs in its listing data or visible text. Try Rescan after the page fully loads, or check House Rules manually.</div>`;
-    } else {
-      headline = policy.petsAllowed === true ? "🐾 Dog-friendly" : "🐾 Dog policy found";
-      headlineTone = policy.petsAllowed === true ? "good" : "unknown";
-
-      rowsHtml += row(
-        "Max dogs",
-        policy.maxDogs !== null ? `${policy.maxDogs}` : "Not specified",
-        policy.maxDogs !== null ? "good" : "unknown",
-        raw.maxDogsSnippet,
-        raw.maxDogsSource,
-        raw.maxDogsAlternates
-      );
-      rowsHtml += row(
-        "Weight limit",
-        policy.weightLimit ? `${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified"),
-        policy.weightLimit || raw.weightPerDog ? "good" : "unknown",
-        raw.weightSnippet,
-        raw.weightSource,
-        raw.weightAlternates
-      );
-      rowsHtml += row(
-        "Pre-registration",
-        (policy.approvalRequired || raw.preReg) ? "Required" : "Not mentioned",
-        (policy.approvalRequired || raw.preReg) ? "warn" : "unknown",
-        raw.preRegSnippet,
-        raw.preRegSource
-      );
-      let feePerStr = "";
-      if (policy.fee) {
-        if (policy.fee.perPet && policy.fee.period && policy.fee.period !== "unknown" && policy.fee.period !== "pet") {
-          feePerStr = ` per pet per ${policy.fee.period}`;
-        } else if (policy.fee.period && policy.fee.period !== "unknown") {
-          feePerStr = ` per ${policy.fee.period}`;
-        }
-      }
-      const isTieredFee = policy.fee?.tiered || (policy.fee?.text && /\$0\s+(?:1st|first)/i.test(policy.fee.text));
-      let feeDisplay;
-      if (isTieredFee) {
-        feeDisplay = policy.fee.text || "1st dog free, subsequent fee applies";
-      } else if (policy.fee && policy.fee.amount !== null) {
-        feeDisplay = typeof VDPExtract?.formatCurrencyDisplay === "function"
-          ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${feePerStr}`
-          : `$${policy.fee.amount}${feePerStr}`;
-      } else {
-        feeDisplay = raw.fee || "Not specified";
-      }
-
-      rowsHtml += row(
-        "Fee",
-        feeDisplay,
-        policy.fee && policy.fee.amount > 0 ? "warn" : policy.fee && policy.fee.amount === 0 ? "good" : (raw.fee && raw.fee !== "No fee mentioned" ? "warn" : "unknown"),
-        raw.feeSnippet,
-        raw.feeSource,
-        raw.feeAlternates
-      );
-      if (policy.deposit || raw.deposit) {
-        const depDisplay = policy.deposit && policy.deposit.amount !== null
-          ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? VDPExtract.formatCurrencyDisplay(policy.deposit.amount, policy.deposit.currency) : `$${policy.deposit.amount}`)
-          : raw.deposit;
-        rowsHtml += row("Refundable deposit", depDisplay, "warn", raw.depositSnippet, raw.depositSource);
-      }
-
-      const notes = raw.otherNotes || [];
-      if (notes.length) {
-        rowsHtml += `<div class="vdp-other-toggle">Other pet notes (${notes.length}) ▾</div>
-          <div class="vdp-other-list">
-            ${notes
-              .map((n) => `<div class="vdp-other-item">"${escapeHtml(n.text)}" <span class="vdp-other-source">— ${escapeHtml(n.source)}</span></div>`)
-              .join("")}
-          </div>`;
-      }
-    }
-
+    // Computed up front (not just for the footer) because the sparse
+    // branch below folds this same text into its one summary line
+    // instead of also rendering a separate footer.
     const entries = raw.entries || policy.entries;
     const found = raw.found ?? policy.found ?? policy.restrictionsFound;
     const usedApollo = entries && entries.some((e) => e.priority > 1);
@@ -581,6 +526,149 @@
       }
     }
 
+    if (policy.petsAllowed === false) {
+      headline = "🚫 Pets are not allowed";
+      headlineTone = "bad";
+      rowsHtml = row("Policy", "No pets allowed", "bad", raw.petsAllowedSnippet, raw.petsAllowedSource);
+    } else if (!raw.found && !policy.restrictionsFound) {
+      headline = "🐾 No dog policy details detected";
+      headlineTone = "unknown";
+      rowsHtml = `<div class="vdp-empty">This page didn't mention pets/dogs in its listing data or visible text. Try Rescan after the page fully loads, or check House Rules manually.</div>`;
+    } else {
+      headline = policy.petsAllowed === true ? "🐾 Dog-friendly" : "🐾 Dog policy found";
+      headlineTone = policy.petsAllowed === true ? "good" : "unknown";
+
+      const notes = raw.otherNotes || [];
+      const hasWeight = Boolean(policy.weightLimit || raw.weightPerDog);
+      const hasPreReg = Boolean(policy.approvalRequired || raw.preReg);
+      const hasFeeAmount = Boolean(policy.fee && policy.fee.amount !== null);
+      const hasFeeText = Boolean(raw.fee);
+
+      isFullySparse =
+        policy.maxDogs === null &&
+        !hasWeight &&
+        !hasPreReg &&
+        !hasFeeAmount &&
+        !hasFeeText &&
+        !policy.deposit &&
+        !raw.deposit &&
+        !notes.length;
+
+      if (isFullySparse) {
+        // Every core field came back unconfirmed — a four-row table of
+        // "Not specified" would give that absence the same structural
+        // weight as a real finding. Collapse to one muted line instead;
+        // still names exactly what was checked, just not as row markup.
+        rowsHtml = `<div class="vdp-unconfirmed">
+          <p class="vdp-unconfirmed-text">Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
+          ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
+        </div>`;
+      } else {
+        rowsHtml += `<div class="vdp-group-hd">Dog limits</div>`;
+        rowsHtml += row(
+          "Max dogs",
+          policy.maxDogs !== null ? `${policy.maxDogs}` : "Not specified",
+          policy.maxDogs !== null ? "good" : "unknown",
+          raw.maxDogsSnippet,
+          raw.maxDogsSource,
+          raw.maxDogsAlternates
+        );
+        rowsHtml += row(
+          "Weight limit",
+          policy.weightLimit ? `${policy.weightLimit.value} ${policy.weightLimit.unit === "lb" ? "lbs" : policy.weightLimit.unit}` : (raw.weightPerDog || "Not specified"),
+          hasWeight ? "good" : "unknown",
+          raw.weightSnippet,
+          raw.weightSource,
+          raw.weightAlternates
+        );
+        rowsHtml += `<div class="vdp-group-hd">Cost &amp; approval</div>`;
+        let feePerStr = "";
+        if (policy.fee) {
+          if (policy.fee.perPet && policy.fee.period && policy.fee.period !== "unknown" && policy.fee.period !== "pet") {
+            feePerStr = ` per pet per ${policy.fee.period}`;
+          } else if (policy.fee.period && policy.fee.period !== "unknown") {
+            feePerStr = ` per ${policy.fee.period}`;
+          }
+        }
+        const isTieredFee = policy.fee?.tiered || (policy.fee?.text && /\$0\s+(?:1st|first)/i.test(policy.fee.text));
+        let feeDisplay;
+        let feeValueLines = null;
+        if (isTieredFee) {
+          if (policy.fee.text) {
+            // Extracted freeform text — its shape isn't guaranteed to be
+            // two clean clauses, so it's shown as a single value rather
+            // than guessed-split on a comma that might not be a clause
+            // boundary.
+            feeDisplay = policy.fee.text;
+          } else {
+            feeDisplay = "1st dog free, subsequent fee applies";
+            feeValueLines = ["1st dog free", "subsequent fee applies"];
+          }
+        } else if (hasFeeAmount) {
+          feeDisplay = typeof VDPExtract?.formatCurrencyDisplay === "function"
+            ? `${VDPExtract.formatCurrencyDisplay(policy.fee.amount, policy.fee.currency)}${feePerStr}`
+            : `$${policy.fee.amount}${feePerStr}`;
+        } else {
+          feeDisplay = raw.fee || "Not specified";
+        }
+
+        rowsHtml += row(
+          "Fee",
+          feeDisplay,
+          policy.fee && policy.fee.amount > 0 ? "warn" : policy.fee && policy.fee.amount === 0 ? "good" : (raw.fee && raw.fee !== "No fee mentioned" ? "warn" : "unknown"),
+          raw.feeSnippet,
+          raw.feeSource,
+          raw.feeAlternates,
+          feeValueLines
+        );
+        if (policy.deposit || raw.deposit) {
+          const depDisplay = policy.deposit && policy.deposit.amount !== null
+            ? (typeof VDPExtract?.formatCurrencyDisplay === "function" ? VDPExtract.formatCurrencyDisplay(policy.deposit.amount, policy.deposit.currency) : `$${policy.deposit.amount}`)
+            : raw.deposit;
+          rowsHtml += row("Refundable deposit", depDisplay, "warn", raw.depositSnippet, raw.depositSource);
+        }
+        rowsHtml += row(
+          "Pre-registration",
+          hasPreReg ? "Required" : "Not mentioned",
+          hasPreReg ? "warn" : "unknown",
+          raw.preRegSnippet,
+          raw.preRegSource
+        );
+
+        if (notes.length) {
+          // Repeated attribution reads as noise, not signal: two snippets
+          // from the same source get one card (one shared source line)
+          // instead of two near-identical cards. Grouped by first
+          // appearance, not sorted — but the "(N)" count still reflects
+          // total snippets found, since that's "how many facts", separate
+          // from how they're packaged into cards.
+          const groups = [];
+          const bySource = new Map();
+          for (const n of notes) {
+            const key = n.source || "";
+            let group = bySource.get(key);
+            if (!group) {
+              group = { source: n.source, quotes: [] };
+              bySource.set(key, group);
+              groups.push(group);
+            }
+            group.quotes.push(n.text);
+          }
+          rowsHtml += `<div class="vdp-other-toggle">Other pet notes (${notes.length}) ▾</div>
+            <div class="vdp-other-list">
+              ${groups
+                .map(
+                  (g) =>
+                    `<div class="vdp-other-item">${g.quotes
+                      .map((q) => `<span class="vdp-other-quote">"${escapeHtml(q)}"</span>`)
+                      .join("")}<span class="vdp-other-source">— ${escapeHtml(g.source)}</span></div>`
+                )
+                .join("")}
+            </div>`;
+        }
+      }
+    }
+
     panel.innerHTML = `
       <div class="vdp-header vdp-tone-${headlineTone}">
         <span class="vdp-title">${headline}</span>
@@ -591,7 +679,7 @@
       </div>
       <div class="vdp-body">
         ${rowsHtml}
-        ${sourceBadge ? `<div class="vdp-source-badge">${sourceBadge}</div>` : ""}
+        ${!isFullySparse && sourceBadge ? `<div class="vdp-source-badge">${sourceBadge}</div>` : ""}
       </div>
     `;
 

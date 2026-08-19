@@ -2,7 +2,7 @@
   position: fixed;
   top: 96px;
   right: 16px;
-  width: 280px;
+  width: 400px;
   max-width: calc(100vw - 32px);
   background: var(--vdp-color-surface);
   border-radius: 12px;
@@ -62,7 +62,7 @@
 }
 
 #vdp-panel .vdp-body {
-  padding: 8px 12px 12px;
+  padding: 4px 16px 14px;
   max-height: 320px;
   overflow-y: auto;
 }
@@ -71,37 +71,102 @@
   display: none;
 }
 
-#vdp-panel .vdp-row-wrap {
-  border-bottom: 1px solid var(--vdp-color-border-subtle);
-}
-
-#vdp-panel .vdp-row-wrap:last-child {
-  border-bottom: none;
-}
-
+/* Row geometry — sized for the typical (Medium-density) case, not the
+   worst case: "Pre-registration" is the longest label any row uses, and
+   "$75 per stay" / "Required" are typical values. A dense listing with
+   long or multi-clause values grows taller rows against this same column
+   budget rather than widening the panel.
+   label(116) -> gutter(30, empty) -> value(1fr, dominant) -> gap(8, empty)
+   -> source(64). The label is right-aligned so its edge sits flush on the
+   gutter regardless of word length, instead of the gutter appearing to
+   drift depending on how short the label happens to be. */
 #vdp-panel .vdp-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 116px 30px 1fr 8px 64px;
   align-items: baseline;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 6px 0 2px;
+  padding: 10px 0;
 }
 
+/* A hairline between consecutive rows, not a border-bottom-then-strip-it-
+   from-the-last-one: rows sit among sibling divs (group headers, the
+   notes toggle, the footer), so "the last .vdp-row" is never actually
+   the last child of its type and a :last-of-type/:last-child rule would
+   silently never fire. The adjacent-sibling form only ever draws a line
+   between two rows that are actually next to each other — none before
+   the first row in a group, none after the last row overall. */
+#vdp-panel .vdp-row + .vdp-row {
+  border-top: 1px solid var(--vdp-color-border-subtle);
+}
+
+#vdp-panel .vdp-group-hd {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--vdp-color-text-muted);
+  padding: 12px 0 4px;
+}
+
+#vdp-panel .vdp-group-hd:first-child {
+  padding-top: 4px;
+}
+
+/* Conflicting/alternate values sit inside the value cell (see .vdp-value)
+   as a muted sub-line, not as a separate full-width callout below the
+   row — that way the conflict stays visually attached to its field. */
 #vdp-panel .vdp-alt {
+  display: block;
+  font-weight: 400;
   font-size: 11px;
   color: var(--vdp-policy-warning-text);
-  background: var(--vdp-policy-warning-surface);
-  border-radius: 6px;
-  padding: 4px 6px;
-  margin: 0 0 6px;
+  margin-top: 4px;
   line-height: 1.4;
 }
 
+/* Compound values (e.g. two fee conditions, two weight-limit clauses)
+   stack as separate lines in the same cell instead of one comma-joined
+   sentence. Row height grows; the column never grows wider. */
+#vdp-panel .vdp-value-line {
+  display: block;
+}
+
+#vdp-panel .vdp-value-line + .vdp-value-line {
+  margin-top: 2px;
+}
+
 #vdp-panel .vdp-source-badge {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--vdp-color-border-subtle);
+  font-size: 10px;
+  color: var(--vdp-color-text-muted);
+  opacity: 0.85;
+  text-align: left;
+}
+
+/* Sparse state: when every core field (max dogs, weight limit, fee,
+   pre-registration) is unconfirmed, the four-row table is replaced by a
+   single muted line naming what was checked. This keeps "nothing found"
+   from carrying the same structural weight as confirmed data — it
+   contracts from the normal row layout rather than reusing it with
+   "Not specified" filled in four times. */
+#vdp-panel .vdp-unconfirmed {
+  padding: 10px 0 6px;
+}
+
+#vdp-panel .vdp-unconfirmed-text {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--vdp-color-text-muted);
+}
+
+#vdp-panel .vdp-unconfirmed-src {
+  display: block;
   margin-top: 8px;
   font-size: 10.5px;
-  color: var(--vdp-color-text-muted);
-  text-align: center;
+  opacity: 0.85;
 }
 
 #vdp-panel .vdp-other-toggle {
@@ -124,30 +189,53 @@
   display: flex;
 }
 
+/* Pullquote treatment: the quote is its own line (wraps freely, however
+   long it runs) and the source is a separate line below, right-justified
+   — so a long quote never drags the attribution into an awkward mid-line
+   wrap the way one trailing-inline sentence used to. */
 #vdp-panel .vdp-other-item {
   font-size: 11.5px;
   color: var(--vdp-color-text-secondary);
   background: var(--vdp-color-surface-subtle);
-  border-radius: 6px;
-  padding: 6px 8px;
+  border-left: 2px solid var(--vdp-color-border);
+  border-radius: 4px;
+  padding: 8px 10px;
   line-height: 1.4;
 }
 
-#vdp-panel .vdp-other-source {
-  color: var(--vdp-color-text-muted);
+#vdp-panel .vdp-other-quote {
+  display: block;
   font-style: italic;
 }
 
+/* Multiple quotes attributed to the same source share one card. The
+   quote marks each line already carries are enough of a boundary — a
+   divider on top would be redundant, so this is spacing only. */
+#vdp-panel .vdp-other-quote + .vdp-other-quote {
+  margin-top: 8px;
+}
+
+#vdp-panel .vdp-other-source {
+  display: block;
+  text-align: right;
+  margin-top: 6px;
+  color: var(--vdp-color-text-muted);
+  font-style: italic;
+  font-size: 10.5px;
+}
+
 #vdp-panel .vdp-label {
+  grid-column: 1;
   color: var(--vdp-color-text-secondary);
-  flex-shrink: 0;
   font-weight: 500;
+  text-align: right;
+  align-self: start;
+  padding-top: 1px;
 }
 
 #vdp-panel .vdp-value {
+  grid-column: 3;
   font-weight: 600;
-  text-align: right;
-  flex-grow: 1;
 }
 
 .vdp-tone-good { color: var(--vdp-policy-allowed-text); }
@@ -157,15 +245,34 @@
 .vdp-tone-loading { color: var(--vdp-policy-loading-text); }
 .vdp-tone-capped { color: var(--vdp-policy-capped-text); }
 
+/* Labeled jump link: shows the lowest-level, linkable source name (see
+   shortSourceLabel in content.js) plus a trailing arrow as the
+   clickability cue, in the panel's existing link color — compact and
+   informative rather than the bare word "source". Rows with no snippet
+   to jump to render no button at all, so the column is simply blank. */
 #vdp-panel .vdp-jump {
+  grid-column: 5;
+  justify-self: end;
   border: none;
   background: none;
   color: var(--vdp-color-link);
+  font: inherit;
   font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
   padding: 0;
-  text-decoration: underline;
+  text-align: right;
   flex-shrink: 0;
+}
+
+#vdp-panel .vdp-jump:hover,
+#vdp-panel .vdp-jump:focus-visible {
+  text-decoration: underline;
+}
+
+#vdp-panel .vdp-jump-arrow {
+  font-weight: 400;
 }
 
 #vdp-panel .vdp-empty {
@@ -424,11 +531,10 @@
     border: 1px solid ButtonText;
   }
 
-  #vdp-panel .vdp-row-wrap {
-    border-bottom: 1px solid CanvasText;
+  #vdp-panel .vdp-row + .vdp-row {
+    border-top: 1px solid CanvasText;
   }
 
-  #vdp-panel .vdp-alt,
   #vdp-panel .vdp-other-item {
     border: 1px solid CanvasText;
   }

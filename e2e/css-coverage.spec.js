@@ -48,6 +48,10 @@ test("exercises 100% of production theme rules across color schemes and forced c
         await button.hover();
         await button.focus();
 
+        const jumpLink = page.locator("#vdp-panel .vdp-jump").first();
+        await jumpLink.hover();
+        await jumpLink.focus();
+
         const searchBadge = page.locator(".vdp-search-badge").first();
         await searchBadge.hover();
         await searchBadge.focus();
@@ -71,10 +75,8 @@ test("exercises 100% of production theme rules across color schemes and forced c
           getComputedStyle(header).backgroundColor;
           header.className = "vdp-header vdp-tone-capped";
           getComputedStyle(header).backgroundColor;
-          const finalRow = document.createElement("div");
-          finalRow.className = "vdp-row-wrap";
-          panel.querySelector(".vdp-body").appendChild(finalRow);
-          getComputedStyle(finalRow).borderBottomStyle;
+          // .vdp-row + .vdp-row (the inter-row hairline) is exercised
+          // naturally by any two adjacent rows in the fixture below.
         });
 
         await page.evaluate(() => {
