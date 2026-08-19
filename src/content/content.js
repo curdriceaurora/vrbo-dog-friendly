@@ -460,7 +460,7 @@
     const toneClass = tone ? `vdp-tone-${tone}` : "";
     const jumpAttr = snippet ? `data-snippet="${encodeURIComponent(snippet)}" data-source="${encodeURIComponent(source || "")}"` : "";
     const jumpBtn = snippet
-      ? `<button class="vdp-jump" ${jumpAttr} title="Jump to where this was found in ${escapeHtml(source || "the listing")}">${escapeHtml(shortSourceLabel(source))} <span class="vdp-jump-arrow">↗</span></button>`
+      ? `<button type="button" class="vdp-jump" ${jumpAttr} title="Jump to where this was found in ${escapeHtml(source || "the listing")}">${escapeHtml(shortSourceLabel(source))} <span class="vdp-jump-arrow">↗</span></button>`
       : "";
     const altHtml =
       alternates && alternates.length
@@ -674,8 +674,8 @@
       <div class="vdp-header vdp-tone-${headlineTone}">
         <span class="vdp-title">${headline}</span>
         <div class="vdp-header-btns">
-          <button class="vdp-rescan" title="Rescan page">↻</button>
-          <button class="vdp-close" title="Close">×</button>
+          <button type="button" class="vdp-rescan" title="Rescan page">↻</button>
+          <button type="button" class="vdp-close" title="Close">×</button>
         </div>
       </div>
       <div class="vdp-body">
