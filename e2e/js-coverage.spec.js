@@ -1,6 +1,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const { expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const ROOT = path.join(__dirname, "..");
 const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js"]);
@@ -26,6 +27,7 @@ function calculateExecutionMask(text, functionEntries) {
 test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, and page-bridge.js", async ({ browser }) => {
   const aggregate = new Map();
   const context = await browser.newContext();
+  const guard = await installNetworkGuard(context);
 
   // Read production script contents
   const extractJs = fs.readFileSync(path.join(ROOT, "extract.js"), "utf8");
@@ -424,6 +426,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
     await p.close();
   }
 
+  await guard.assertNoLeakedRequests();
   await context.close();
 
   console.log("\n===============================================================================");

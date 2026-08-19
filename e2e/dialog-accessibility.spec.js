@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Seattle&house_rules_group=pets_allowed";
@@ -47,6 +48,7 @@ test("8.1.6: verifies dialog accessibility contract, non-modal semantics, focus-
   try {
     const pageErrors = [];
     const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     await page.route("https://www.vrbo.com/Hotel-Search*", (route) => route.fulfill({
@@ -153,6 +155,7 @@ test("8.1.6: verifies dialog accessibility contract, non-modal semantics, focus-
 
     // 8. Assert zero page errors
     expect(pageErrors).toEqual([]);
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }

@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=LakeTahoe&house_rules_group=pets_allowed";
@@ -73,6 +74,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
   try {
     const pageErrors = [];
     const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     // Deferred promise to hold Property A response in flight
@@ -192,6 +194,119 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
 
     // 7. Verify zero uncaught errors
     expect(pageErrors).toEqual([]);
+    await guard.assertNoLeakedRequests(page);
+  } finally {
+    await context.close();
+  }
+});
+
+// I3: a card that is recycled to a new href while it is off-screen must not
+// fetch. The assertion is a REQUEST COUNT against the mock route handler, not
+// an "was it intercepted" check: every request in this suite is intercepted by
+// design, so interception proves only that no live traffic left the browser. A
+// mocked request has still fired. Counting handler invocations is what
+// distinguishes "no fetch happened" from "the fetch was caught".
+const SEARCH_OFFSCREEN_URL = "https://www.vrbo.com/Hotel-Search?destination=Tahoe&virtualized=1";
+
+const SEARCH_OFFSCREEN_HTML = `<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><title>Off-screen Recycle Test</title></head>
+  <body>
+    <main id="search-main">
+      <!-- Pushes the card far below the fold, well past the observer's 150px rootMargin. -->
+      <div id="spacer" style="height: 4000px"></div>
+      <div class="Results">
+        <div data-stid="property-card" id="card-1">
+          <div class="uitk-card-content">
+            <a href="https://www.vrbo.com/1000001?chkin=2026-09-01&adults=2">Cabin A</a>
+          </div>
+        </div>
+      </div>
+      <div id="tail-spacer" style="height: 2000px"></div>
+    </main>
+  </body>
+</html>`;
+
+test("I3: recycling an off-screen card to a new href fires zero listing requests until it is scrolled into view", async () => {
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${EXTENSION_ROOT}`,
+      `--load-extension=${EXTENSION_ROOT}`
+    ]
+  });
+
+  try {
+    const pageErrors = [];
+    const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+
+    // Handler invocation counters — the actual acceptance measurement.
+    const requestCounts = { "1000001": 0, "2000002": 0 };
+
+    await page.route("https://www.vrbo.com/Hotel-Search*", (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: SEARCH_OFFSCREEN_HTML
+    }));
+
+    await page.route("https://www.vrbo.com/1000001*", (route) => {
+      requestCounts["1000001"]++;
+      return route.fulfill({ status: 200, contentType: "text/html", body: LISTING_A_HTML });
+    });
+
+    await page.route("https://www.vrbo.com/2000002*", (route) => {
+      requestCounts["2000002"]++;
+      return route.fulfill({ status: 200, contentType: "text/html", body: LISTING_B_HTML });
+    });
+
+    await page.goto(SEARCH_OFFSCREEN_URL);
+
+    const card = page.locator("#card-1");
+    const badge = card.locator(".vdp-search-badge");
+
+    // The card binds and badges even while off-screen; only the fetch is gated.
+    await expect(card).toHaveAttribute("data-vdp-prop-id", "1000001", { timeout: 6_000 });
+    await expect(badge).toHaveClass(/vdp-badge-loading/);
+
+    // Comfortably past the dwell window (400ms + up to 200ms jitter) and the
+    // queue's dispatch delay.
+    await page.waitForTimeout(2_000);
+    expect(requestCounts["1000001"]).toBe(0);
+
+    // Recycle the off-screen node to a different property, exactly as a
+    // virtualized list does, and poke the production MutationObserver.
+    await page.evaluate(() => {
+      const cardEl = document.getElementById("card-1");
+      const link = cardEl.querySelector("a");
+      link.href = "https://www.vrbo.com/2000002?chkin=2026-09-01&adults=2";
+      link.textContent = "Cabin B";
+      const trigger = document.createElement("span");
+      trigger.className = "recycled-mutation-trigger";
+      cardEl.appendChild(trigger);
+    });
+
+    // Re-binding still happens off-screen — this is a fetch gate, not a bind gate.
+    await expect(card).toHaveAttribute("data-vdp-prop-id", "2000002", { timeout: 6_000 });
+    await expect(card).toHaveAttribute("data-vdp-fetch-url", "https://www.vrbo.com/2000002");
+
+    await page.waitForTimeout(2_000);
+    expect(requestCounts["2000002"]).toBe(0);
+    expect(requestCounts["1000001"]).toBe(0);
+    await expect(badge).toHaveClass(/vdp-badge-loading/);
+
+    // The gate must be a gate, not a permanent block: scrolling the card into
+    // view releases exactly one request for the property it now shows.
+    await card.scrollIntoViewIfNeeded();
+    await expect(badge).toHaveClass(/vdp-badge-allowed/, { timeout: 8_000 });
+    await expect(badge).toContainText(/dogs allowed/i);
+    expect(requestCounts["2000002"]).toBe(1);
+    expect(requestCounts["1000001"]).toBe(0);
+
+    expect(pageErrors).toEqual([]);
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }

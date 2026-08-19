@@ -16,73 +16,37 @@
   const POLICY_SCHEMA_VERSION = 1;
   const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   const DEFAULT_CONCURRENCY = 2;
-  const DEFAULT_MIN_DELAY_MS = 400;
+  // Base of the adaptive delay ladder (I10). effectiveMinDelayMs = baseDelayMs * 2 ** ladderStep,
+  // so background pacing walks 800 -> 1600 -> 3200 ms.
+  const DEFAULT_MIN_DELAY_MS = 800;
+  // Global dispatch floor applied to EVERY dispatch regardless of class, high priority
+  // included. Scales on the same shared ladder: 250 -> 500 -> 1000 ms.
+  const HIGH_PRIORITY_FLOOR_MS = 250;
+  // ladderStep saturates here: 800 * 2 ** 2 = 3200 ms. There is no step 3.
+  const MAX_LADDER_STEP = 2;
+  // One-sided jitter: +[0, 30%] of the resolved wait, never below the floor. A symmetric
+  // +/- jitter would permit firing faster than the rate limit it is meant to enforce.
+  const DELAY_JITTER_RATIO = 0.3;
+  // Timeouts / 5xx only escalate after a small cluster, so one noisy timeout does not throttle.
+  const DEFAULT_ERROR_CLUSTER_THRESHOLD = 3;
+  const DEFAULT_ERROR_CLUSTER_WINDOW_MS = 60000;
+  // Recovery is deliberately asymmetric: one success never steps down, a sustained
+  // clean window (zero non-successes) does.
+  const DEFAULT_CLEAN_WINDOW_MS = 60000;
   const DEFAULT_SESSION_CAP = 40;
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
   const DEFAULT_COOLDOWN_MS = 30000; // 30s cooldown for terminal states
 
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
+   * Delegates to shared pure extractor in extract.js.
    */
-  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited = new Set(), depth = 0, isExplicitPetContext = false) {
-    if (node == null || depth > 35) return;
-
-    if (node && typeof node === "object" && typeof node.__ref === "string") {
-      if (visited.has(node.__ref)) return;
-      visited.add(node.__ref);
-      const target = state[node.__ref];
-      if (target) walkApolloNode(state, target, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
-      return;
+  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited, depth, isExplicitPetContext) {
+    if (extract && typeof extract.walkApolloNode === "function") {
+      return extract.walkApolloNode(state, node, headerCtx, sectionCtx, out, visited, depth, isExplicitPetContext);
     }
-
-    if (Array.isArray(node)) {
-      for (const el of node) walkApolloNode(state, el, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
-      return;
-    }
-
-    if (typeof node !== "object") return;
-
-    // Multi-Unit Hierarchy Pruning (Class 11):
-    // Do not follow unit/room-level branches when inspecting top-level property
-    if (node.__typename && /^(?:Unit|RentalUnit|Room|LodgingUnit|RatePlan|RoomType)$/i.test(node.__typename)) {
-      return;
-    }
-
-    let nextHeader = headerCtx;
-    let nextSection = sectionCtx;
-    let explicitPet = isExplicitPetContext || Boolean(node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename));
-
-    if (node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename)) {
-      if (!nextHeader || nextHeader === "Listing Data") nextHeader = "Pets";
-      if (!nextSection || nextSection === "Rules") nextSection = "House Rules / Policies";
-    }
-
-    const headerText = typeof node.header === "object" ? node.header?.text : (typeof node.header === "string" ? node.header : "");
-    if (typeof headerText === "string" && headerText.trim()) {
-      nextHeader = headerText.trim();
-      if (/house rules|polic|important information/i.test(nextHeader)) nextSection = "House Rules / Policies";
-      else if (/about this property|about this space|about this listing/i.test(nextHeader)) nextSection = "About this property";
-      else if (!nextSection) nextSection = nextHeader;
-      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
-    }
-    if (typeof node.sectionName === "string" && node.sectionName.trim()) {
-      nextHeader = node.sectionName.trim();
-      if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
-      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
-    }
-
-    for (const [k, v] of Object.entries(node)) {
-      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim().length > 0) {
-        out.push({
-          header: nextHeader || "Listing Data",
-          section: nextSection || nextHeader || "Rules",
-          text: v.trim(),
-          isDedicatedPetsHeader: explicitPet,
-          explicitPetContext: explicitPet,
-        });
-      } else if (v && typeof v === "object") {
-        walkApolloNode(state, v, nextHeader, nextSection, out, visited, depth + 1, explicitPet);
-      }
+    if (typeof console !== "undefined" && typeof console.warn === "function") {
+      console.warn("[vrbow] extract.walkApolloNode is unavailable; check script load order");
     }
   }
 
@@ -376,6 +340,31 @@
     const ttlMs = options.ttlMs !== undefined ? options.ttlMs : DEFAULT_TTL_MS;
     const pauseOnChallengeMs = options.pauseOnChallengeMs !== undefined ? options.pauseOnChallengeMs : PAUSE_ON_CHALLENGE_MS;
     const cooldownMs = options.cooldownMs !== undefined ? options.cooldownMs : DEFAULT_COOLDOWN_MS;
+    // minDelayMs IS baseDelayMs: the ladder base, not a separate knob.
+    const baseDelayMs = minDelayMs;
+    // Global spacing floor: hpFloor = min(HIGH_PRIORITY_FLOOR_MS, baseDelayMs).
+    // The clamp is an invariant of the two-tracker design, not a test convenience:
+    // lastDispatchAt gates EVERY dispatch, so hpFloor is the aggregate rate limit
+    // sitting underneath the per-class background floor. Letting it exceed
+    // baseDelayMs would make the "global" floor stricter than the background floor
+    // it is supposed to sit under, and background items would then be paced by the
+    // high-priority term instead of their own. At production constants the clamp is
+    // inert (min(250, 800) = 250); it only binds when baseDelayMs is configured
+    // below 250 ms.
+    const highPriorityFloorMs = Math.min(
+      options.highPriorityFloorMs !== undefined ? options.highPriorityFloorMs : HIGH_PRIORITY_FLOOR_MS,
+      baseDelayMs
+    );
+    const errorClusterThreshold = options.errorClusterThreshold !== undefined
+      ? options.errorClusterThreshold
+      : DEFAULT_ERROR_CLUSTER_THRESHOLD;
+    const errorClusterWindowMs = options.errorClusterWindowMs !== undefined
+      ? options.errorClusterWindowMs
+      : DEFAULT_ERROR_CLUSTER_WINDOW_MS;
+    const cleanWindowMs = options.cleanWindowMs !== undefined
+      ? options.cleanWindowMs
+      : DEFAULT_CLEAN_WINDOW_MS;
+    const randomFn = typeof options.randomFn === "function" ? options.randomFn : Math.random;
 
     const memoryCache = new Map();
     const terminalCooldowns = new Map(); // propertyId -> { data, expiresAt, allowBypass }
@@ -389,7 +378,17 @@
     let isProcessing = false;
     let pausedUntil = 0;
     let isDisposed = false;
-    let lastRequestStartTime = 0;
+    // Two trackers, not three. lastDispatchAt is written by every dispatch (both classes),
+    // so it is always at least as recent as a dedicated high-priority tracker would be.
+    let lastDispatchAt = 0;
+    let lastBgStart = 0;
+    let ladderStep = 0;
+    let lastNonSuccessAt = Date.now();
+    const softFailureTimes = [];
+    // enqueue() stages a property synchronously but only pushes it to `queue` after an
+    // async storage lookup. Tokens let remove() cancel a still-pending push.
+    const pendingEnqueues = new Map();
+    let enqueueSeq = 0;
     let maxObservedConcurrency = 0;
     let pauseTimer = null;
     let maintenanceIntervalTimer = null;
@@ -568,6 +567,90 @@
       return { accepted: true, data: persistentData, policy: persistentData.policy };
     }
 
+    // --- Adaptive delay ladder: one scalar, one counter, one timer -------------
+    function effectiveMinDelayMs() {
+      return baseDelayMs * Math.pow(2, ladderStep);
+    }
+
+    function hpMinDelayMs() {
+      return highPriorityFloorMs * Math.pow(2, ladderStep);
+    }
+
+    /** One-sided jitter, applied ONCE to an already-resolved wait. */
+    function applyJitter(waitMs) {
+      if (!(waitMs > 0)) return waitMs;
+      return waitMs + randomFn() * DELAY_JITTER_RATIO * waitMs;
+    }
+
+    function bumpLadder() {
+      if (ladderStep < MAX_LADDER_STEP) ladderStep++;
+    }
+
+    /**
+     * Restarts the clean window used for recovery. Called only by the two pressure
+     * outcomes below (hard block, soft failure). Everything else — `unknown`, 404 and
+     * other non-429/403 4xx — is inert on this path as well as on the ladder.
+     */
+    function noteNonSuccess() {
+      lastNonSuccessAt = Date.now();
+    }
+
+    /**
+     * 429 / 403 / bot challenge. Does exactly two things, once per event:
+     * sets the hard 30s pause AND advances the shared ladder. The pause is the
+     * immediate stop; the ladder is what makes the resumption slower.
+     */
+    function noteHardBlock() {
+      pausedUntil = Date.now() + pauseOnChallengeMs;
+      noteNonSuccess();
+      bumpLadder();
+    }
+
+    /** Timeout / 5xx / network error: escalates only on a cluster. */
+    function noteSoftFailure() {
+      const now = Date.now();
+      noteNonSuccess();
+      softFailureTimes.push(now);
+      while (softFailureTimes.length > 0 && now - softFailureTimes[0] > errorClusterWindowMs) {
+        softFailureTimes.shift();
+      }
+      if (softFailureTimes.length >= errorClusterThreshold) {
+        softFailureTimes.length = 0; // next escalation needs another full cluster
+        bumpLadder();
+      }
+    }
+
+    /**
+     * A concrete-policy success. Steps down only after a sustained clean window.
+     *
+     * Recovery is success-driven BY DESIGN, not on a timer: a ladder sitting above
+     * step 0 with zero traffic does not self-heal, it waits for the next successful
+     * fetch. This is intentional. An idle queue issues no requests, so an elevated
+     * floor costs nothing while idle, and the first request after an idle stretch is
+     * the one that most needs to be careful. Queues do not outlive a page session,
+     * so there is no long-lived state to leak.
+     */
+    function noteSuccess() {
+      const now = Date.now();
+      if (ladderStep > 0 && now - lastNonSuccessAt >= cleanWindowMs) {
+        ladderStep--;
+        lastNonSuccessAt = now; // the next step-down needs another full window
+      }
+    }
+
+    /**
+     * wait = max(hpFloor - since(lastDispatchAt), classFloor - since(classStart))
+     * Background needs both terms: the global one binds when a hover has just fired,
+     * the class one otherwise. High priority only needs the global term, since
+     * lastDispatchAt already covers every previous high-priority dispatch.
+     */
+    function computeDispatchWait(isHighPriority, now) {
+      const globalWait = hpMinDelayMs() - (now - lastDispatchAt);
+      if (isHighPriority) return Math.max(globalWait, 0);
+      const classWait = effectiveMinDelayMs() - (now - lastBgStart);
+      return Math.max(globalWait, classWait, 0);
+    }
+
     async function processQueue() {
       if (isProcessing || isDisposed) return;
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
@@ -588,46 +671,53 @@
           (typeof document === "undefined" || document.visibilityState !== "hidden") &&
           Date.now() >= pausedUntil
         ) {
-          // Check global pacing delay between network request starts
-          const now = Date.now();
-          const elapsed = now - lastRequestStartTime;
-          if (elapsed < minDelayMs) {
-            const waitTime = minDelayMs - elapsed;
-            scheduleTimer(processQueue, waitTime);
-            break;
-          }
-
-          // Pick next item: prioritize items in highPriorityIds or marked priority: "high"
+          // Peek the next item FIRST: per-class pacing floors cannot be evaluated before
+          // the item's class is known, so the gate below runs after the priority pick.
           let nextIndex = queue.findIndex((item) => item.priority === "high" || highPriorityIds.has(item.propertyId));
           const isHighPriority = nextIndex !== -1;
           if (nextIndex === -1) nextIndex = 0;
+          const candidate = queue[nextIndex];
 
-          const [nextItem] = queue.splice(nextIndex, 1);
-          highPriorityIds.delete(nextItem.propertyId);
+          // Resolutions that issue no network request are settled before the pacing gate,
+          // so a skipped item never consumes a dispatch slot's worth of delay.
 
           // Check session cap: background requests are capped; explicit user hover (priority: "high") bypasses the background cap
           if (!isHighPriority && sessionRequestsCount >= sessionCap) {
-            enqueuedOrActive.delete(nextItem.propertyId);
-            const result = { status: "capped", propertyId: nextItem.propertyId };
-            recordTerminalState(nextItem.propertyId, result, true);
-            notify(nextItem.propertyId, result);
+            queue.splice(nextIndex, 1);
+            highPriorityIds.delete(candidate.propertyId);
+            enqueuedOrActive.delete(candidate.propertyId);
+            const result = { status: "capped", propertyId: candidate.propertyId };
+            recordTerminalState(candidate.propertyId, result, true);
+            notify(candidate.propertyId, result);
             continue;
           }
 
           // Check memory cache once more before firing network
-          const targetId = aliasMap.get(String(nextItem.propertyId).toLowerCase()) || nextItem.propertyId;
-          const cached = memoryCache.get(targetId) || memoryCache.get(nextItem.propertyId);
-          if (cached && Date.now() - cached.ts < ttlMs) {
-            if (!isShallowPreliminaryPolicy(cached.data?.policy)) {
-              enqueuedOrActive.delete(nextItem.propertyId);
-              notify(nextItem.propertyId, cached.data);
-              continue;
-            }
+          const targetId = aliasMap.get(String(candidate.propertyId).toLowerCase()) || candidate.propertyId;
+          const cached = memoryCache.get(targetId) || memoryCache.get(candidate.propertyId);
+          if (cached && Date.now() - cached.ts < ttlMs && !isShallowPreliminaryPolicy(cached.data?.policy)) {
+            queue.splice(nextIndex, 1);
+            highPriorityIds.delete(candidate.propertyId);
+            enqueuedOrActive.delete(candidate.propertyId);
+            notify(candidate.propertyId, cached.data);
+            continue;
           }
+
+          // Pacing gate. Jitter is applied ONCE to the resolved max(...), never per term.
+          const wait = computeDispatchWait(isHighPriority, Date.now());
+          if (wait > 0) {
+            scheduleTimer(processQueue, applyJitter(wait));
+            break;
+          }
+
+          const [nextItem] = queue.splice(nextIndex, 1);
+          highPriorityIds.delete(nextItem.propertyId);
 
           // Execute fetch
           sessionRequestsCount++;
-          lastRequestStartTime = Date.now();
+          const dispatchedAt = Date.now();
+          lastDispatchAt = dispatchedAt;
+          if (!isHighPriority) lastBgStart = dispatchedAt;
           activeRequests.add(nextItem.propertyId);
           maxObservedConcurrency = Math.max(maxObservedConcurrency, activeRequests.size);
 
@@ -680,7 +770,9 @@
         if (isDisposed) return;
 
         if (res.status === 429 || res.status === 403) {
-          pausedUntil = Date.now() + pauseOnChallengeMs;
+          // One shared counter: noteHardBlock sets pausedUntil AND advances ladderStep,
+          // exactly once for this event.
+          noteHardBlock();
           const result = { status: "rate_limited", propertyId };
           recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
@@ -688,6 +780,12 @@
         }
 
         if (!res.ok) {
+          // Only 5xx is server pressure and feeds the error cluster. A 404 (or any
+          // other 4xx that is not 429/403) proves the server is healthy and answering
+          // — the property is simply gone. It is fully inert, exactly like `unknown`:
+          // it neither advances the ladder nor resets the clean window, so a scatter
+          // of delisted listings cannot hold the ladder elevated and block recovery.
+          if (res.status >= 500) noteSoftFailure();
           const result = { status: "error", code: res.status, propertyId };
           recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
@@ -711,7 +809,7 @@
         const parsed = parseListingHtml(html, propertyId, canonicalId);
 
         if (parsed && parsed.isChallenge) {
-          pausedUntil = Date.now() + pauseOnChallengeMs;
+          noteHardBlock();
           const result = { status: "rate_limited", propertyId };
           recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
@@ -722,6 +820,7 @@
         const hasConcrete = hasConcretePolicy(parsed && parsed.policy);
 
         if (hasConcrete) {
+          noteSuccess();
           const data = {
             status: "ok",
             propertyId,
@@ -759,6 +858,9 @@
             notify(effectiveCanonicalId, winner);
           }
         } else {
+          // `unknown` follows a SUCCESSFUL fetch and parse that found no concrete policy.
+          // It is not a failure: it must not advance the ladder and must not reset the
+          // clean window, so no pacing signal is emitted here.
           const result = {
             status: "unknown",
             propertyId,
@@ -771,11 +873,13 @@
         if (isDisposed) return;
         if (err.name === "AbortError") {
           // Stalled request timed out: emit terminal timeout result (never cached)
+          noteSoftFailure();
           const result = { status: "timeout", propertyId };
           recordTerminalState(propertyId, result, false);
           notify(propertyId, result);
           return;
         }
+        noteSoftFailure();
         const result = { status: "error", error: err.message, propertyId };
         recordTerminalState(propertyId, result, false);
         notify(propertyId, result);
@@ -831,10 +935,16 @@
       enqueuedOrActive.add(propertyId);
 
       // 4. Check storage cache
+      const token = ++enqueueSeq;
+      pendingEnqueues.set(propertyId, token);
       getCached(propertyId).then((cached) => {
         if (isDisposed) return;
+        // remove() (or a newer enqueue) invalidated this staged push.
+        if (pendingEnqueues.get(propertyId) !== token) return;
+        pendingEnqueues.delete(propertyId);
         if (cached && cached.status === "ok") {
           enqueuedOrActive.delete(propertyId);
+          highPriorityIds.delete(propertyId);
           notify(propertyId, cached);
           return;
         }
@@ -844,10 +954,37 @@
       });
     }
 
+    /**
+     * I8a: cancel a single queued (or still-staging) item. Returns true if something
+     * was cancelled, false for an unknown id or one already in flight.
+     *
+     * Clearing `enqueuedOrActive` is mandatory, not cosmetic: enqueue() early-returns
+     * on `enqueuedOrActive.has(propertyId)`, so splicing the queue array alone would
+     * lock that property out of enqueueing for the rest of the session.
+     *
+     * Deliberately does NOT touch sessionRequestsCount or terminalCooldowns:
+     * clearQueue() semantics are unchanged and the session budget must survive.
+     */
+    function remove(propertyId) {
+      if (!propertyId || isDisposed) return false;
+      if (activeRequests.has(propertyId)) return false; // in-flight: not removable
+
+      const idx = queue.findIndex((item) => item.propertyId === propertyId);
+      const known = idx !== -1 || pendingEnqueues.has(propertyId) || enqueuedOrActive.has(propertyId);
+      if (!known) return false;
+
+      if (idx !== -1) queue.splice(idx, 1);
+      pendingEnqueues.delete(propertyId);
+      enqueuedOrActive.delete(propertyId);
+      highPriorityIds.delete(propertyId);
+      return true;
+    }
+
     function clearQueue() {
       queue.length = 0;
       enqueuedOrActive.clear();
       highPriorityIds.clear();
+      pendingEnqueues.clear();
       sessionRequestsCount = 0;
       terminalCooldowns.clear();
     }
@@ -893,6 +1030,7 @@
       getCached,
       setCached,
       enqueue,
+      remove,
       clearQueue,
       dispose,
       subscribe,
@@ -901,6 +1039,9 @@
       getSessionCount: () => sessionRequestsCount,
       getMaxObservedConcurrency: () => maxObservedConcurrency,
       isPaused: () => Date.now() < pausedUntil,
+      getLadderStep: () => ladderStep,
+      getEffectiveMinDelayMs: effectiveMinDelayMs,
+      getHighPriorityDelayMs: hpMinDelayMs,
       isInCooldown: (propertyId) => {
         const t = terminalCooldowns.get(propertyId);
         return Boolean(t && Date.now() < t.expiresAt && !t.allowBypass);
@@ -978,8 +1119,12 @@
 
   /**
    * Extract numeric/alphanumeric property ID from a Vrbo listing URL or path.
+   * Delegates to shared pure extractor in extract.js.
    */
   function extractPropertyIdFromUrl(urlStr, baseUrl = "https://www.vrbo.com") {
+    if (extract && typeof extract.extractPropertyId === "function") {
+      return extract.extractPropertyId(urlStr, baseUrl);
+    }
     if (!urlStr || typeof urlStr !== "string") return null;
     try {
       const u = new URL(urlStr, baseUrl);

@@ -805,3 +805,178 @@ test("Consolidated State-Transition Suite", async (t) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Issue #20: dispatch spacing at production constants.
+// Two trackers, one shared ladder:
+//   lastDispatchAt -> every dispatch, both classes, floor 250 * 2 ** step
+//   lastBgStart    -> background only,             floor 800 * 2 ** step
+//   wait = max(hpFloor - since(lastDispatchAt), classFloor - since(classStart))
+// ---------------------------------------------------------------------------
+
+const PACING_OK_HTML =
+  "<section class=\"house-rules\"><h2>House Rules</h2><p>Dogs welcome, maximum 2 dogs.</p></section>";
+
+function pacingFetch(startTimes) {
+  return async (url) => {
+    startTimes.push({ t: Date.now(), url });
+    if (url.includes("429")) return { ok: false, status: 429 };
+    return { ok: true, status: 200, text: async () => PACING_OK_HTML };
+  };
+}
+
+function dispatchGaps(startTimes) {
+  const out = [];
+  for (let i = 1; i < startTimes.length; i++) out.push(startTimes[i].t - startTimes[i - 1].t);
+  return out;
+}
+
+test("Queue dispatch spacing at production constants (issue #20)", async (t) => {
+  await t.test("high-priority floor: a hover 50ms after a background start dispatches within ~325ms, not 800ms", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({ fetchFn: pacingFetch(starts), maxConcurrent: 2 });
+
+    queue.enqueue("floor_bg", "https://www.vrbo.com/floorbg", "normal");
+    await new Promise((r) => setTimeout(r, 50));
+    queue.enqueue("floor_hover", "https://www.vrbo.com/floorhover", "high");
+
+    await new Promise((r) => setTimeout(r, 900));
+
+    const bg = starts.find((s) => s.url.includes("floorbg"));
+    const hover = starts.find((s) => s.url.includes("floorhover"));
+    assert.ok(bg, "background item must dispatch");
+    assert.ok(hover, "hover must dispatch");
+
+    const gap = hover.t - bg.t;
+    assert.ok(gap >= 250 - 20, `Hover must still respect the 250ms global floor, got ${gap}ms`);
+    assert.ok(
+      gap <= 325 + 60,
+      `Hover must be gated by the 250ms global floor, not the 800ms background floor, got ${gap}ms`
+    );
+    queue.dispose();
+  });
+
+  await t.test("aggregate bound: an interleaved background + hover burst never dispatches closer than 250ms", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({ fetchFn: pacingFetch(starts), maxConcurrent: 3 });
+
+    queue.enqueue("agg_bg1", "https://www.vrbo.com/aggbg1", "normal");
+    queue.enqueue("agg_h1", "https://www.vrbo.com/aggh1", "high");
+    queue.enqueue("agg_h2", "https://www.vrbo.com/aggh2", "high");
+    queue.enqueue("agg_bg2", "https://www.vrbo.com/aggbg2", "normal");
+    queue.enqueue("agg_h3", "https://www.vrbo.com/aggh3", "high");
+    queue.enqueue("agg_h4", "https://www.vrbo.com/aggh4", "high");
+
+    await new Promise((r) => setTimeout(r, 2400));
+
+    assert.ok(starts.length >= 5, `Expected >= 5 dispatch samples, got ${starts.length}`);
+    for (const g of dispatchGaps(starts)) {
+      assert.ok(g >= 250 - 25, `Aggregate rate must stay at or under 4/s at step 0, found a ${g}ms gap`);
+    }
+    queue.dispose();
+  });
+
+  await t.test("per-class: background-to-background holds at 800ms with hovers interleaved; hover-to-hover holds at 250ms", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({ fetchFn: pacingFetch(starts), maxConcurrent: 3 });
+
+    queue.enqueue("pc_bg1", "https://www.vrbo.com/pcbg1", "normal");
+    queue.enqueue("pc_bg2", "https://www.vrbo.com/pcbg2", "normal");
+    await new Promise((r) => setTimeout(r, 60));
+    queue.enqueue("pc_h1", "https://www.vrbo.com/pch1", "high");
+    await new Promise((r) => setTimeout(r, 300));
+    queue.enqueue("pc_h2", "https://www.vrbo.com/pch2", "high");
+
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const bg = starts.filter((s) => s.url.includes("pcbg")).map((s) => s.t);
+    const hp = starts.filter((s) => s.url.includes("pch")).map((s) => s.t);
+    assert.equal(bg.length, 2, "both background items must dispatch");
+    assert.equal(hp.length, 2, "both hovers must dispatch");
+
+    assert.ok(
+      bg[1] - bg[0] >= 800 - 25,
+      `Background-to-background must stay >= 800ms despite interleaved hovers, got ${bg[1] - bg[0]}ms`
+    );
+    assert.ok(
+      hp[1] - hp[0] >= 250 - 25,
+      `Hover-to-hover must stay >= 250ms, got ${hp[1] - hp[0]}ms`
+    );
+    queue.dispose();
+  });
+
+  await t.test("ladder composition: at ladderStep 2 global spacing is >= 1000ms and background >= 3200ms", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({
+      fetchFn: pacingFetch(starts),
+      maxConcurrent: 3,
+      pauseOnChallengeMs: 0, // isolate the ladder from the hard pause
+      cooldownMs: 0,
+    });
+
+    // Two hard blocks drive the shared ladder to its cap.
+    queue.enqueue("lc_429_a", "https://www.vrbo.com/lc429a", "high");
+    await new Promise((r) => setTimeout(r, 400));
+    queue.enqueue("lc_429_b", "https://www.vrbo.com/lc429b", "high");
+    await new Promise((r) => setTimeout(r, 800));
+
+    assert.equal(queue.getLadderStep(), 2);
+    assert.equal(queue.getEffectiveMinDelayMs(), 3200);
+    assert.equal(queue.getHighPriorityDelayMs(), 1000);
+
+    starts.length = 0;
+    await new Promise((r) => setTimeout(r, 1400)); // clear residual floors
+    queue.enqueue("lc_h1", "https://www.vrbo.com/lch1", "high");
+    queue.enqueue("lc_h2", "https://www.vrbo.com/lch2", "high");
+    queue.enqueue("lc_bg1", "https://www.vrbo.com/lcbg1", "normal");
+    queue.enqueue("lc_bg2", "https://www.vrbo.com/lcbg2", "normal");
+
+    await new Promise((r) => setTimeout(r, 9000));
+
+    const hp = starts.filter((s) => s.url.includes("lch")).map((s) => s.t);
+    const bg = starts.filter((s) => s.url.includes("lcbg")).map((s) => s.t);
+    assert.equal(hp.length, 2, "both high-priority items must dispatch");
+    assert.equal(bg.length, 2, "both background items must dispatch");
+
+    for (const g of dispatchGaps(starts)) {
+      assert.ok(g >= 1000 - 30, `Global spacing at step 2 must be >= 1000ms, found ${g}ms`);
+    }
+    assert.ok(
+      bg[1] - bg[0] >= 3200 - 40,
+      `Background spacing at step 2 must be >= 3200ms, got ${bg[1] - bg[0]}ms`
+    );
+    queue.dispose();
+  });
+
+  await t.test("remove() cancels a queued card without disturbing the rest of the visible page's queue", async () => {
+    const starts = [];
+    const queue = createSearchFetchQueue({
+      fetchFn: pacingFetch(starts),
+      maxConcurrent: 1,
+      minDelayMs: 60,
+      highPriorityFloorMs: 60,
+    });
+
+    // Simulates a search page scanning six cards, then scrolling two out of view.
+    for (let i = 1; i <= 6; i++) queue.enqueue(`card_${i}`, `https://www.vrbo.com/card${i}`, "normal");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(queue.remove("card_5"), true);
+    assert.equal(queue.remove("card_6"), true);
+    assert.equal(queue.remove("card_5"), false, "a second remove() of the same id must return false");
+
+    await new Promise((r) => setTimeout(r, 900));
+
+    const urls = starts.map((s) => s.url);
+    assert.ok(!urls.some((u) => u.includes("card5")), "card_5 must never dispatch");
+    assert.ok(!urls.some((u) => u.includes("card6")), "card_6 must never dispatch");
+    for (const keep of ["card1", "card2", "card3", "card4"]) {
+      assert.ok(urls.some((u) => u.includes(keep)), `${keep} must still dispatch`);
+    }
+
+    // The cards scrolled back into view can be re-enqueued.
+    queue.enqueue("card_5", "https://www.vrbo.com/card5", "high");
+    await new Promise((r) => setTimeout(r, 300));
+    assert.ok(starts.some((s) => s.url.includes("card5")), "a removed card must be re-enqueueable");
+    queue.dispose();
+  });
+});

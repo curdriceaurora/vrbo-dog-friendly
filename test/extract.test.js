@@ -508,6 +508,40 @@ test("buildCorpus", async (t) => {
   });
 });
 
+test("extractPropertyId and walkApolloNode pure helpers", async (t) => {
+  const { extractPropertyId, walkApolloNode } = require("../extract.js");
+
+  await t.test("extractPropertyId parses various Vrbo URL formats and pathnames", () => {
+    assert.strictEqual(extractPropertyId("https://www.vrbo.com/12345?chkin=2026"), "12345");
+    assert.strictEqual(extractPropertyId("https://www.vrbo.com/p12345"), "12345");
+    assert.strictEqual(extractPropertyId("/vacation-rentals/p987654/"), "987654");
+    assert.strictEqual(extractPropertyId("/pdp/5551212"), "5551212");
+    assert.strictEqual(extractPropertyId("/pdp/lo/444333"), "444333");
+    assert.strictEqual(extractPropertyId("invalid-url"), null);
+    assert.strictEqual(extractPropertyId(null), null);
+  });
+
+  await t.test("walkApolloNode resolves references and extracts leaf items", () => {
+    const state = {
+      "PetPolicy:1": {
+        __typename: "PetPolicy",
+        header: { text: "Pets" },
+        value: "Dogs welcome up to 50 lbs with $50 fee",
+      },
+      "Property:1": {
+        __typename: "Property",
+        petPolicy: { __ref: "PetPolicy:1" },
+        unit: { __typename: "RentalUnit", name: "Child unit to ignore" },
+      }
+    };
+    const out = [];
+    walkApolloNode(state, state["Property:1"], null, null, out);
+    assert.strictEqual(out.length, 2);
+    assert.ok(out.some((item) => item.text === "Dogs welcome up to 50 lbs with $50 fee" && item.isDedicatedPetsHeader));
+    assert.ok(out.some((item) => item.text === "Pets" && item.isDedicatedPetsHeader));
+  });
+});
+
 
 
 
