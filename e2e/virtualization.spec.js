@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=LakeTahoe&house_rules_group=pets_allowed";
@@ -73,6 +74,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
   try {
     const pageErrors = [];
     const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     // Deferred promise to hold Property A response in flight
@@ -192,6 +194,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
 
     // 7. Verify zero uncaught errors
     expect(pageErrors).toEqual([]);
+    guard.assertNoLeakedRequests();
   } finally {
     await context.close();
   }
@@ -237,6 +240,7 @@ test("I3: recycling an off-screen card to a new href fires zero listing requests
   try {
     const pageErrors = [];
     const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
     page.on("pageerror", (error) => pageErrors.push(error.message));
 
     // Handler invocation counters — the actual acceptance measurement.
@@ -302,6 +306,7 @@ test("I3: recycling an off-screen card to a new href fires zero listing requests
     expect(requestCounts["1000001"]).toBe(0);
 
     expect(pageErrors).toEqual([]);
+    guard.assertNoLeakedRequests();
   } finally {
     await context.close();
   }

@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Seattle&house_rules_group=pets_allowed";
@@ -80,6 +81,7 @@ test("verifies browser hit-testing order, physical mouse coordinate hover, and c
     const pageErrors = [];
     const navigatedUrls = [];
     const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
     page.on("pageerror", (error) => pageErrors.push(error.message));
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) navigatedUrls.push(frame.url());
@@ -150,6 +152,54 @@ test("verifies browser hit-testing order, physical mouse coordinate hover, and c
     expect(page.url()).toContain("Hotel-Search");
 
     expect(pageErrors).toEqual([]);
+    guard.assertNoLeakedRequests();
+  } finally {
+    await context.close();
+  }
+});
+
+test("verifies live-traffic guardrail aborts unrouted requests and catches violations", async () => {
+  const context = await chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    args: [
+      `--disable-extensions-except=${EXTENSION_ROOT}`,
+      `--load-extension=${EXTENSION_ROOT}`
+    ]
+  });
+
+  try {
+    const page = await context.newPage();
+    const guard = await installNetworkGuard(context, page);
+
+    // Provide search page with an intentionally unrouted property link
+    await page.route("https://www.vrbo.com/Hotel-Search*", (route) => route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: `<!doctype html>
+<html>
+  <body>
+    <main>
+      <div class="Results">
+        <div data-stid="property-card" id="card-unrouted">
+          <a href="https://www.vrbo.com/9999999?chkin=2026-09-01">Unrouted Listing</a>
+        </div>
+      </div>
+    </main>
+  </body>
+</html>`
+    }));
+
+    await page.goto(SEARCH_URL);
+    const card = page.locator("#card-unrouted");
+    await expect(card.locator(".vdp-search-badge")).toBeVisible({ timeout: 6_000 });
+
+    // Wait past dwell and dispatch to ensure fetch attempt is caught by catch-all
+    await page.waitForTimeout(1_500);
+
+    const leaked = guard.getLeakedRequests();
+    expect(leaked.some((url) => url.includes("9999999"))).toBe(true);
+    expect(() => guard.assertNoLeakedRequests()).toThrow(/Live traffic guardrail violation/);
   } finally {
     await context.close();
   }

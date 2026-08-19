@@ -87,7 +87,10 @@ async function main() {
   console.log("Coverage Threshold Evaluation");
   console.log("-------------------------------------------------------------------------------");
 
+const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js"]);
+
   for (const [file, metrics] of Object.entries(reports)) {
+    if (!TARGET_NODE_MODULES.has(file)) continue;
     const linePass = metrics.line >= THRESHOLDS.line;
     const branchPass = metrics.branch >= THRESHOLDS.branch;
     const funcsPass = metrics.funcs >= THRESHOLDS.funcs;

@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..");
 const LISTING_URL = "https://www.vrbo.com/123456";
@@ -78,6 +79,7 @@ for (const scheme of ["light", "dark"]) {
     try {
       const pageErrors = [];
       const page = await context.newPage();
+      const guard = await installNetworkGuard(context, page);
       page.on("pageerror", (error) => pageErrors.push(error.message));
       await page.route("https://www.vrbo.com/123456*", (route) => route.fulfill({
         status: 200,
@@ -138,6 +140,7 @@ for (const scheme of ["light", "dark"]) {
       await expect(badge).toBeFocused();
 
       expect(pageErrors).toEqual([]);
+      guard.assertNoLeakedRequests();
 
       const extensionId = await extensionIdFromManagementPage(context);
       expect(extensionId).toMatch(/^[a-p]{32}$/);
