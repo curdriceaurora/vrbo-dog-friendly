@@ -4,8 +4,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const extract = require("../extract.js");
-const { createSearchFetchQueue } = require("../search-fetcher.js");
+const extract = require("../src/shared/extract.js");
+const { createSearchFetchQueue } = require("../src/shared/search-fetcher.js");
 
 // Minimal DOM simulation for integration testing
 class MockElement {
@@ -686,7 +686,7 @@ test("Consolidated State-Transition Suite", async (t) => {
       minDelayMs: 5,
     });
 
-    const { validateListingUrl } = require("../search-fetcher.js");
+    const { validateListingUrl } = require("../src/shared/search-fetcher.js");
 
     function simulateCardBinding(cardElement) {
       const anchors = cardElement.querySelectorAll("a[href]");

@@ -9,7 +9,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert");
-const { extractPolicy, buildCorpus, normalizePolicy, deriveSearchBadge } = require("../extract.js");
+const { extractPolicy, buildCorpus, normalizePolicy, deriveSearchBadge } = require("../src/shared/extract.js");
 
 // Runs one sentence through the extractor as if it came from a
 // dedicated "Pets" row in the listing data.
@@ -540,7 +540,7 @@ test("buildCorpus", async (t) => {
 });
 
 test("extractPropertyId and walkApolloNode pure helpers", async (t) => {
-  const { extractPropertyId, walkApolloNode } = require("../extract.js");
+  const { extractPropertyId, walkApolloNode } = require("../src/shared/extract.js");
 
   await t.test("extractPropertyId parses various Vrbo URL formats and pathnames", () => {
     assert.strictEqual(extractPropertyId("https://www.vrbo.com/12345?chkin=2026"), "12345");
