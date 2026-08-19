@@ -723,6 +723,30 @@
   let lastSearchScanAt = 0;
   let searchScanThrottleTimer = null;
 
+  // #18: mount priority for the badge, most to least preferred. This MUST be
+  // tried one selector at a time. A single querySelector() with all three joined
+  // by commas returns the first match in DOCUMENT ORDER, not the first selector
+  // that matches — so on a card whose price element precedes its content column,
+  // the badge lands in the narrow price box. That was invisible while the badge
+  // was inline-flex and sized to its own text; once width is a percentage, the
+  // container becomes the layout.
+  const BADGE_CONTAINER_SELECTORS = [
+    ".uitk-card-content",
+    '[data-stid*="content"]',
+    '[data-stid*="price"]',
+  ];
+
+  // Falls back to the card itself, which is wider than the content column rather
+  // than narrower — a badge spanning the whole card is an acceptable degradation,
+  // an overflowing one is not.
+  function resolveBadgeContainer(card) {
+    for (const selector of BADGE_CONTAINER_SELECTORS) {
+      const match = card.querySelector(selector);
+      if (match) return match;
+    }
+    return card;
+  }
+
   // Static query selector for search cards across desktop/mobile Vrbo layouts
   const CARD_SELECTORS_QUERY = [
     '[data-stid="property-card"]',
@@ -1268,13 +1292,20 @@
       badge.dataset.vdpText = "Checking pet policy...";
       badge.textContent = "⏳ Checking pet policy...";
 
-      const targetContainer = card.querySelector('[data-stid*="price"], [data-stid*="content"], .uitk-card-content') || card;
+      const targetContainer = resolveBadgeContainer(card);
       if (targetContainer !== card) {
         targetContainer.style.position = "relative";
         targetContainer.style.zIndex = "2";
         targetContainer.style.pointerEvents = "auto";
       }
-      targetContainer.appendChild(badge);
+      // #18: the badge goes in a slot the extension owns, not straight into
+      // Vrbo's container. width: 100% on the badge would only behave if that
+      // container happened to be a block; the slot makes the badge's width
+      // independent of whether the host is block, flex-row, flex-column or grid.
+      const slot = document.createElement("div");
+      slot.className = "vdp-badge-slot";
+      slot.appendChild(badge);
+      targetContainer.appendChild(slot);
 
       // Dynamic handlers read card data attributes at event time
       badge.addEventListener("click", (e) => {
