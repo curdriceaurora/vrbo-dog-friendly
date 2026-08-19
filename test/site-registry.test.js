@@ -184,6 +184,40 @@ describe("site-registry: Vrbo getCanonicalFetchUrl", () => {
     assert.equal(vrbo.getCanonicalFetchUrl(null), null);
     assert.equal(vrbo.getCanonicalFetchUrl("not a url"), null);
   });
+
+  test("registry getCanonicalFetchUrl delegates to site adapter and falls back generically", () => {
+    assert.equal(
+      siteRegistry.getCanonicalFetchUrl("https://www.vrbo.com/123456?q=1"),
+      "https://www.vrbo.com/123456"
+    );
+    assert.equal(
+      siteRegistry.getCanonicalFetchUrl("https://example.com/test?q=1"),
+      "https://example.com/test"
+    );
+    assert.equal(siteRegistry.getCanonicalFetchUrl("bad-url"), null);
+  });
+});
+
+describe("site-registry: Vrbo decorateFetchUrl", () => {
+  const vrbo = siteRegistry.getSiteForHostname("vrbo.com");
+  assert.ok(vrbo);
+
+  test("appends locale=en_US and siteid=1 query parameters to Vrbo fetch URLs", () => {
+    const res = vrbo.decorateFetchUrl("https://www.vrbo.com/123456");
+    const u = new URL(res);
+    assert.equal(u.searchParams.get("locale"), "en_US");
+    assert.equal(u.searchParams.get("siteid"), "1");
+  });
+
+  test("registry decorateFetchUrl delegates to site adapter and preserves non-Vrbo URLs unchanged", () => {
+    const vrboRes = siteRegistry.decorateFetchUrl("https://www.vrbo.com/123456");
+    const vrboUrl = new URL(vrboRes);
+    assert.equal(vrboUrl.searchParams.get("locale"), "en_US");
+    assert.equal(vrboUrl.searchParams.get("siteid"), "1");
+
+    const otherRes = siteRegistry.decorateFetchUrl("https://example.com/123456");
+    assert.equal(otherRes, "https://example.com/123456");
+  });
 });
 
 describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
@@ -222,25 +256,9 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
     assert.equal(vrbo.getPropertyId("bad url"), null);
   });
 
-  test("delegates to VdpSearchFetcher when available", () => {
-    const origSearchFetcher = globalThis.VdpSearchFetcher;
-    try {
-      globalThis.VdpSearchFetcher = {
-        extractPropertyIdFromUrl(url) {
-          return url.includes("mock") ? "mock-fetcher-id" : null;
-        }
-      };
-      assert.equal(vrbo.getPropertyId("https://www.vrbo.com/mock"), "mock-fetcher-id");
-    } finally {
-      globalThis.VdpSearchFetcher = origSearchFetcher;
-    }
-  });
-
-  test("delegates to VDPExtract when SearchFetcher is absent", () => {
-    const origSearchFetcher = globalThis.VdpSearchFetcher;
+  test("delegates to VDPExtract when available", () => {
     const origExtract = globalThis.VDPExtract;
     try {
-      delete globalThis.VdpSearchFetcher;
       globalThis.VDPExtract = {
         extractPropertyId(url) {
           return url.includes("mock-extract") ? "mock-extract-id" : null;
@@ -248,7 +266,6 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
       };
       assert.equal(vrbo.getPropertyId("https://www.vrbo.com/mock-extract"), "mock-extract-id");
     } finally {
-      globalThis.VdpSearchFetcher = origSearchFetcher;
       globalThis.VDPExtract = origExtract;
     }
   });

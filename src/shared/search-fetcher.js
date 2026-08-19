@@ -858,15 +858,11 @@
         const validated = validateListingUrl(url);
         let targetUrl = validated ? validated.fetchUrl : url;
 
-        // Class 14: Force English locale query parameters on Vrbo listing URLs
         try {
-          if (typeof targetUrl === "string" && (targetUrl.startsWith("http://") || targetUrl.startsWith("https://") || targetUrl.startsWith("/"))) {
-            const parsedUrl = new URL(targetUrl, "https://www.vrbo.com");
-            if (/^(?:www\.)?vrbo\.com$/i.test(parsedUrl.hostname)) {
-              parsedUrl.searchParams.set("locale", "en_US");
-              parsedUrl.searchParams.set("siteid", "1");
-              targetUrl = parsedUrl.toString();
-            }
+          const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
+            (typeof require === "function" ? require("./site-registry.js") : null);
+          if (siteRegistry && typeof siteRegistry.decorateFetchUrl === "function") {
+            targetUrl = siteRegistry.decorateFetchUrl(targetUrl);
           }
         } catch {}
 
@@ -1279,9 +1275,9 @@
       const propId = site.getPropertyId(u.href);
       if (!propId) return null;
 
-      const fetchUrl = typeof site.getCanonicalFetchUrl === "function"
-        ? site.getCanonicalFetchUrl(u.href)
-        : `https://${u.hostname}${u.pathname}`;
+      const fetchUrl = typeof siteRegistry.getCanonicalFetchUrl === "function"
+        ? siteRegistry.getCanonicalFetchUrl(u.href)
+        : (typeof site.getCanonicalFetchUrl === "function" ? site.getCanonicalFetchUrl(u.href) : `https://${u.hostname}${u.pathname}`);
 
       return {
         propertyId: propId,

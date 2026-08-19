@@ -40,11 +40,6 @@
 
   function getExtractor() {
     if (typeof globalThis !== "undefined") {
-      if (globalThis.VdpSearchFetcher && typeof globalThis.VdpSearchFetcher.extractPropertyIdFromUrl === "function") {
-        return {
-          extractPropertyId: (url, base) => globalThis.VdpSearchFetcher.extractPropertyIdFromUrl(url, base),
-        };
-      }
       if (globalThis.VDPExtract && typeof globalThis.VDPExtract.extractPropertyId === "function") {
         return globalThis.VDPExtract;
       }
@@ -99,6 +94,15 @@
     return `https://www.vrbo.com${u.pathname}`;
   }
 
+  function vrboDecorateFetchUrl(urlStr, baseUrl) {
+    if (!urlStr || typeof urlStr !== "string") return urlStr;
+    const u = parseUrl(urlStr, baseUrl);
+    if (!u || !vrboMatchesHostname(u.hostname)) return urlStr;
+    u.searchParams.set("locale", "en_US");
+    u.searchParams.set("siteid", "1");
+    return u.toString();
+  }
+
   // Vrbo site definition
   const vrboSite = {
     id: "vrbo",
@@ -107,6 +111,7 @@
     isSearchUrl: vrboIsSearchUrl,
     getPropertyId: vrboGetPropertyId,
     getCanonicalFetchUrl: vrboGetCanonicalFetchUrl,
+    decorateFetchUrl: vrboDecorateFetchUrl,
   };
 
   const SITES = [vrboSite];
@@ -122,8 +127,30 @@
     return getSiteForHostname(u.hostname);
   }
 
+  function getCanonicalFetchUrl(urlStr, baseUrl) {
+    const u = parseUrl(urlStr, baseUrl);
+    if (!u) return null;
+    const site = getSiteForHostname(u.hostname);
+    if (site && typeof site.getCanonicalFetchUrl === "function") {
+      return site.getCanonicalFetchUrl(urlStr, baseUrl);
+    }
+    return `https://${u.hostname}${u.pathname}`;
+  }
+
+  function decorateFetchUrl(urlStr, baseUrl) {
+    const u = parseUrl(urlStr, baseUrl);
+    if (!u) return urlStr;
+    const site = getSiteForHostname(u.hostname);
+    if (site && typeof site.decorateFetchUrl === "function") {
+      return site.decorateFetchUrl(urlStr, baseUrl);
+    }
+    return urlStr;
+  }
+
   return {
     getSiteForUrl,
     getSiteForHostname,
+    getCanonicalFetchUrl,
+    decorateFetchUrl,
   };
 });

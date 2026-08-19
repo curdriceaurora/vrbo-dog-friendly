@@ -1089,13 +1089,14 @@
     try {
       const u = new URL(urlStr, location.href);
       if (u.protocol !== "https:") return null;
-      const site = getSiteRegistry()?.getSiteForUrl(u.href);
+      const registry = getSiteRegistry();
+      const site = registry?.getSiteForUrl(u.href);
       if (!site || !site.isListingUrl(u.href)) return null;
       const propId = site.getPropertyId(u.href);
       if (!propId) return null;
-      const fetchUrl = typeof site.getCanonicalFetchUrl === "function"
-        ? site.getCanonicalFetchUrl(u.href)
-        : `https://${u.hostname}${u.pathname}`;
+      const fetchUrl = typeof registry?.getCanonicalFetchUrl === "function"
+        ? registry.getCanonicalFetchUrl(u.href)
+        : (typeof site.getCanonicalFetchUrl === "function" ? site.getCanonicalFetchUrl(u.href) : `https://${u.hostname}${u.pathname}`);
       return {
         propertyId: propId,
         navigationUrl: u.href,
@@ -1791,7 +1792,8 @@
     const footer = document.createElement("div");
     footer.className = "vdp-tooltip-footer";
     const link = document.createElement("a");
-    if (typeof url === "string" && (url.startsWith("https://www.vrbo.com/") || url.startsWith("/"))) {
+    const site = getSiteRegistry()?.getSiteForUrl(url, location.href);
+    if (typeof url === "string" && ((site && site.isListingUrl(url, location.href)) || url.startsWith("/"))) {
       link.href = url;
     } else {
       link.href = "#";
