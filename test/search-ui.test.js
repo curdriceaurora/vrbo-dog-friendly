@@ -599,6 +599,7 @@ function installHarness() {
   globalThis.setInterval = () => ({ mockInterval: true });
   globalThis.clearInterval = () => {};
 
+  globalThis.VdpSiteRegistry = require("../src/shared/site-registry.js");
   globalThis.VDPExtract = require("../src/shared/extract.js");
   globalThis.VdpFormatters = require("../src/shared/formatters.js");
   globalThis.VdpSearchFetcher = {

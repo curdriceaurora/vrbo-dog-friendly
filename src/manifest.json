@@ -34,7 +34,7 @@
       "matches": [
         "*://*.vrbo.com/*"
       ],
-      "js": ["shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
+      "js": ["shared/site-registry.js", "shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
       "css": ["content/tokens.css", "content/content.css"],
       "run_at": "document_idle"
     }

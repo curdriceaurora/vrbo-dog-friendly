@@ -86,13 +86,8 @@ function withActiveTab(cb) {
 }
 
 function isSearchUrl(urlStr) {
-  try {
-    const u = new URL(urlStr);
-    if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
-    return /^\/(search|Hotel-Search|vacation-rentals\/search)/i.test(u.pathname);
-  } catch {
-    return false;
-  }
+  const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr);
+  return site ? site.isSearchUrl(urlStr) : false;
 }
 
 function renderSearchPageNotice() {
@@ -104,17 +99,8 @@ function renderSearchPageNotice() {
 }
 
 function isListingUrl(urlStr) {
-  try {
-    const u = new URL(urlStr);
-    if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
-    const path = u.pathname;
-    if (/^\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
-    if (/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
-    if (/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(path)) return true;
-    return false;
-  } catch {
-    return false;
-  }
+  const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr);
+  return site ? site.isListingUrl(urlStr) : false;
 }
 
 function loadPolicy() {

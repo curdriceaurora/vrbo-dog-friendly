@@ -4,7 +4,7 @@ const { expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
 const ROOT = path.join(__dirname, "..");
-const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js"]);
+const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js"]);
 
 function calculateExecutionMask(text, functionEntries) {
   if (!text || text.length === 0) return new Uint8Array(0);
@@ -30,6 +30,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   const guard = await installNetworkGuard(context);
 
   // Read production script contents
+  const siteRegistryJs = fs.readFileSync(path.join(ROOT, "src", "shared", "site-registry.js"), "utf8");
   const extractJs = fs.readFileSync(path.join(ROOT, "src", "shared", "extract.js"), "utf8");
   const searchFetcherJs = fs.readFileSync(path.join(ROOT, "src", "shared", "search-fetcher.js"), "utf8");
   const pageBridgeJs = fs.readFileSync(path.join(ROOT, "src", "content", "page-bridge.js"), "utf8");
@@ -41,6 +42,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   const popupCss = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.css"), "utf8");
 
   // Route external script files on context level
+  await context.route("https://www.vrbo.com/site-registry.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: siteRegistryJs }));
   await context.route("https://www.vrbo.com/extract.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: extractJs }));
   await context.route("https://www.vrbo.com/search-fetcher.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: searchFetcherJs }));
   await context.route("https://www.vrbo.com/page-bridge.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: pageBridgeJs }));
@@ -149,6 +151,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
           <a href="https://www.vrbo.com/100002">Mountain Cabin</a>
         </div>
       </div>
+      <script src="/site-registry.js"></script>
       <script src="/extract.js"></script>
       <script src="/search-fetcher.js"></script>
       <script src="/page-bridge.js"></script>
@@ -198,6 +201,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
           <p id="pet-rule">Dogs are welcome! Up to 2 pets allowed up to 40 lbs. Pet fee is $150 per stay. Non-refundable deposit $100. Prior approval required.</p>
         </section>
       </main>
+      <script src="/site-registry.js"></script>
       <script src="/extract.js"></script>
       <script src="/search-fetcher.js"></script>
       <script src="/page-bridge.js"></script>
@@ -247,8 +251,8 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
           </div>
           <div id="content"></div>
         </div>
-        <script src="/extract.js"></script>
         <script src="/formatters.js"></script>
+        <script src="/site-registry.js"></script>
         <script src="/popup.js"></script>
       </body>
     </html>`;

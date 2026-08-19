@@ -85,7 +85,7 @@ async function main() {
   // Note: content.js, popup.js, and page-bridge.js are browser-coupled scripts whose
   // browser-path coverage is measured and enforced via Playwright in e2e/js-coverage.spec.js.
   // check-coverage.js specifically enforces Node module thresholds for standalone modules.
-  const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js"]);
+  const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js", "site-registry.js"]);
 
   // Checked before the section header prints, so a missing row reads as a bare
   // failure rather than an empty-looking evaluation that happens to exit 1.

@@ -41,43 +41,18 @@
   const { escapeHtml } = globalThis.VdpFormatters;
 
   function getListingIdFromUrl(urlStr) {
-    if (globalThis.VdpSearchFetcher?.extractPropertyIdFromUrl) {
-      return globalThis.VdpSearchFetcher.extractPropertyIdFromUrl(urlStr || location.href);
-    }
-    try {
-      const u = new URL(urlStr || location.href);
-      const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(u.pathname);
-      if (!m) return null;
-      let id = m[1];
-      if (/^p\d+/i.test(id)) id = id.slice(1);
-      return id;
-    } catch {
-      return null;
-    }
+    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    return site ? site.getPropertyId(urlStr || location.href) : null;
   }
 
   function isListingUrl(urlStr) {
-    try {
-      const u = new URL(urlStr || location.href);
-      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
-      const path = u.pathname;
-      if (/^\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
-      if (/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(path)) return true;
-      if (/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(path)) return true;
-      return false;
-    } catch {
-      return false;
-    }
+    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    return site ? site.isListingUrl(urlStr || location.href) : false;
   }
 
   function isSearchUrl(urlStr) {
-    try {
-      const u = new URL(urlStr || location.href);
-      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return false;
-      return /(?:hotel-search|search|vacation-rentals\/search)/i.test(u.pathname);
-    } catch {
-      return false;
-    }
+    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    return site ? site.isSearchUrl(urlStr || location.href) : false;
   }
 
   function looksLikeListingPage() {
