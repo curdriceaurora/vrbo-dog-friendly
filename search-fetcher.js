@@ -36,6 +36,7 @@
   const DEFAULT_SESSION_CAP = 40;
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
   const DEFAULT_COOLDOWN_MS = 30000; // 30s cooldown for terminal states
+  const DEFAULT_MAX_MEMORY_ENTRIES = 250; // Cap on in-memory LRU cache entries
 
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
@@ -365,6 +366,9 @@
       ? options.cleanWindowMs
       : DEFAULT_CLEAN_WINDOW_MS;
     const randomFn = typeof options.randomFn === "function" ? options.randomFn : Math.random;
+    const maxMemoryEntries = typeof options.maxMemoryEntries === "number"
+      ? options.maxMemoryEntries
+      : DEFAULT_MAX_MEMORY_ENTRIES;
 
     const memoryCache = new Map();
     const terminalCooldowns = new Map(); // propertyId -> { data, expiresAt, allowBypass }
@@ -373,6 +377,18 @@
     const enqueuedOrActive = new Set();
     const subscribers = new Map(); // propertyId -> Set of callbacks
     const highPriorityIds = new Set();
+
+    function setMemoryCache(key, value) {
+      if (!key) return;
+      memoryCache.delete(key);
+      memoryCache.set(key, value);
+      if (memoryCache.size > maxMemoryEntries) {
+        const oldestKey = memoryCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          memoryCache.delete(oldestKey);
+        }
+      }
+    }
 
     let sessionRequestsCount = 0;
     let isProcessing = false;
@@ -460,10 +476,25 @@
       if (!propertyId || isDisposed) return null;
       const targetId = aliasMap.get(String(propertyId).toLowerCase()) || propertyId;
 
-      // Check in-memory ok cache first
-      const mem = memoryCache.get(targetId) || memoryCache.get(propertyId);
-      if (mem && Date.now() - mem.ts < ttlMs) {
-        return mem.data;
+      // Check in-memory ok cache first (LRU order refreshed on read, expired entry evicted)
+      let memKey = null;
+      let mem = null;
+      if (memoryCache.has(targetId)) {
+        memKey = targetId;
+        mem = memoryCache.get(targetId);
+      } else if (memoryCache.has(propertyId)) {
+        memKey = propertyId;
+        mem = memoryCache.get(propertyId);
+      }
+
+      if (mem) {
+        if (Date.now() - mem.ts < ttlMs) {
+          memoryCache.delete(memKey);
+          memoryCache.set(memKey, mem);
+          return mem.data;
+        } else {
+          memoryCache.delete(memKey);
+        }
       }
 
       // Check terminal-state cooldown cache in memory
@@ -502,8 +533,10 @@
                 Date.now() < entry.expiresAt &&
                 entry.data?.policy?.schemaVersion === POLICY_SCHEMA_VERSION
               ) {
-                memoryCache.set(effectiveId, { data: entry.data, ts: entry.storedAt || Date.now() });
-                memoryCache.set(propertyId, { data: entry.data, ts: entry.storedAt || Date.now() });
+                setMemoryCache(effectiveId, { data: entry.data, ts: entry.storedAt || Date.now() });
+                if (propertyId !== effectiveId) {
+                  setMemoryCache(propertyId, { data: entry.data, ts: entry.storedAt || Date.now() });
+                }
                 resolve(entry.data);
               } else {
                 if (entry) {
@@ -554,7 +587,7 @@
         expiresAt,
         data: persistentData,
       };
-      memoryCache.set(propertyId, { data: persistentData, ts: storedAt });
+      setMemoryCache(propertyId, { data: persistentData, ts: storedAt });
 
       if (storage) {
         try {
@@ -1050,6 +1083,7 @@
         const t = terminalCooldowns.get(propertyId);
         return Boolean(t && Date.now() < t.expiresAt && !t.allowBypass);
       },
+      getMemoryCacheSize: () => memoryCache.size,
     };
   }
 

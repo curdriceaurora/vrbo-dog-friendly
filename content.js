@@ -237,12 +237,14 @@
       }
 
       const candidates = Array.from(document.querySelectorAll('button, [role="button"], a, [aria-expanded]')).filter((el) => {
-        if (!(el.offsetParent !== null || el.getClientRects().length > 0)) return false;
         if (el.closest(OFF_LIMITS)) return false;
         const label = (el.textContent || el.getAttribute("aria-label") || "").trim();
-        if (TOGGLE_TEXT_RE.test(label)) return true;
-        if (el.getAttribute("aria-expanded") === "false") return inRelevantSection(el);
-        return false;
+        const isToggle = TOGGLE_TEXT_RE.test(label);
+        const isAriaFalse = el.getAttribute("aria-expanded") === "false";
+        if (!isToggle && !isAriaFalse) return false;
+        if (!isToggle && isAriaFalse && !inRelevantSection(el)) return false;
+        if (!(el.offsetParent !== null || el.getClientRects().length > 0)) return false;
+        return true;
       });
 
       for (const el of candidates.slice(0, 25)) {
@@ -343,6 +345,8 @@
     return "Listing details";
   }
 
+  const QUICK_PET_CHECK = /\b(pets?|dogs?|canines?)\b/i;
+
   function collectDomPetSentences() {
     const root = document.querySelector("main") || document.body;
     if (!root) return [];
@@ -351,7 +355,7 @@
     let node;
     while ((node = walker.nextNode())) {
       const rawText = node.textContent && node.textContent.trim();
-      if (!rawText) continue;
+      if (!rawText || !QUICK_PET_CHECK.test(rawText)) continue;
       const parent = node.parentElement;
       if (parent && parent.closest(DOM_EXCLUDE)) continue;
 
@@ -387,7 +391,8 @@
   function findNodeForSnippet(snippet) {
     if (!snippet) return null;
     const short = snippet.slice(0, 40);
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const root = document.querySelector("main") || document.body;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
       if (node.textContent && node.textContent.includes(short)) {
@@ -1749,7 +1754,7 @@
         let onlyInternal = true;
         for (const m of mutations) {
           const el = m.target;
-          if (!el || !el.closest || (!el.closest(".vdp-search-badge") && !el.closest(".vdp-search-tooltip") && !el.closest("#vdp-panel"))) {
+          if (!el || !el.closest || !el.closest(".vdp-search-badge, .vdp-search-tooltip, .vdp-badge-slot, #vdp-panel")) {
             onlyInternal = false;
             break;
           }
@@ -1832,6 +1837,7 @@
         getTrackedSearchCards: () => trackedSearchCards,
         getSearchCardObserver: () => searchCardObserver,
         SEARCH_SCAN_THROTTLE_MS,
+        expandCollapsedSections,
       },
     };
   }

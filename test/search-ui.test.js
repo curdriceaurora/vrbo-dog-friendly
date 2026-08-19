@@ -1177,3 +1177,44 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// expandCollapsedSections: TOGGLE_TEXT_RE short-circuit regression.
+//
+// perf/pipeline-hotspots-and-lru-cache reordered the candidate filter to run
+// the cheap checks before the layout query. A TOGGLE_TEXT_RE label match
+// (e.g. "Show more") is meant to expand a section on its own, independent of
+// aria-expanded/inRelevantSection — that's the whole reason the code checks
+// TOGGLE_TEXT_RE before falling back to the aria-expanded+section check. A
+// naive reordering can accidentally AND the two signals together instead of
+// preserving that short-circuit.
+// ---------------------------------------------------------------------------
+
+test("content.js: expandCollapsedSections keeps the TOGGLE_TEXT_RE short-circuit", async (t) => {
+  installHarness();
+
+  await t.test("a toggle-labeled button with aria-expanded=false outside a relevant section still expands", async () => {
+    for (const child of mockDocument.body.childNodes.slice()) child.remove();
+    globalThis.location.href = LISTING_URL;
+
+    // Ancestor text never mentions house rules/policies/amenities/about
+    // this property/pets/dogs, so inRelevantSection(el) is false. The only
+    // signal that should still grant expansion is the label match itself.
+    const wrapper = mockDocument.body.appendChild(new MockNode("div"));
+    const reviewsSection = wrapper.appendChild(new MockNode("div"));
+    const button = reviewsSection.appendChild(new MockNode("button"));
+    button.textContent = "Show more";
+    button.setAttribute("aria-expanded", "false");
+
+    let clicked = false;
+    button.click = () => { clicked = true; };
+
+    await __test.expandCollapsedSections();
+
+    assert.equal(
+      clicked,
+      true,
+      "a TOGGLE_TEXT_RE label match must expand the section regardless of aria-expanded/section relevance"
+    );
+  });
+});
