@@ -728,6 +728,66 @@
   let lastSearchScanAt = 0;
   let searchScanThrottleTimer = null;
 
+  // Scroll velocity tracking & settle detection (Issue #23)
+  const SCROLL_VELOCITY_THRESHOLD_PX_S = 150;
+  const SCROLL_SETTLE_DEBOUNCE_MS = 150;
+
+  let lastScrollY = 0;
+  let lastScrollTime = 0;
+  let scrollRafId = null;
+  let scrollSettleTimer = null;
+  let isScrollPaused = false;
+
+  function onWindowScroll() {
+    if (scrollRafId !== null) return; // Coalesce to one computation per frame
+
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null;
+      const now = performance.now();
+      const currentY = typeof window !== "undefined" ? (window.scrollY || document.documentElement?.scrollTop || document.body?.scrollTop || 0) : 0;
+
+      // Explicit first-event guard: initialize baseline without a false-positive
+      // velocity spike. performance.now() is never exactly 0 once any time has
+      // elapsed since navigation start, so this sentinel is unambiguous.
+      if (lastScrollTime === 0) {
+        lastScrollY = currentY;
+        lastScrollTime = now;
+        return;
+      }
+
+      const dt = now - lastScrollTime;
+      if (dt > 0) {
+        const velocity = (Math.abs(currentY - lastScrollY) / dt) * 1000;
+        lastScrollY = currentY;
+        lastScrollTime = now;
+
+        if (velocity >= SCROLL_VELOCITY_THRESHOLD_PX_S && !isScrollPaused) {
+          isScrollPaused = true;
+          if (searchQueue && typeof searchQueue.setScrollPaused === "function") {
+            searchQueue.setScrollPaused(true);
+          }
+        }
+      }
+
+      // Reset trailing settle debounce on every frame while scroll activity continues
+      if (scrollSettleTimer !== null) clearTimeout(scrollSettleTimer);
+      scrollSettleTimer = setTimeout(onScrollSettled, SCROLL_SETTLE_DEBOUNCE_MS);
+    });
+  }
+
+  function onScrollSettled() {
+    if (scrollSettleTimer !== null) {
+      clearTimeout(scrollSettleTimer);
+      scrollSettleTimer = null;
+    }
+    if (isScrollPaused) {
+      isScrollPaused = false;
+      if (searchQueue && typeof searchQueue.setScrollPaused === "function") {
+        searchQueue.setScrollPaused(false);
+      }
+    }
+  }
+
   // #18: mount priority for the badge, most to least preferred. This MUST be
   // tried one selector at a time. A single querySelector() with all three joined
   // by commas returns the first match in DOCUMENT ORDER, not the first selector
@@ -1095,6 +1155,13 @@
       }, { rootMargin: "150px 0px" });
     }
 
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("scroll", onWindowScroll, { passive: true });
+      if ("onscrollend" in window) {
+        window.addEventListener("scrollend", onScrollSettled, { passive: true });
+      }
+    }
+
     scanSearchCards();
   }
 
@@ -1108,6 +1175,23 @@
       searchScanThrottleTimer = null;
     }
     lastSearchScanAt = 0;
+    if (scrollRafId !== null) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(scrollRafId);
+      scrollRafId = null;
+    }
+    if (scrollSettleTimer !== null) {
+      clearTimeout(scrollSettleTimer);
+      scrollSettleTimer = null;
+    }
+    if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+      window.removeEventListener("scroll", onWindowScroll);
+      if ("onscrollend" in window) {
+        window.removeEventListener("scrollend", onScrollSettled);
+      }
+    }
+    lastScrollY = 0;
+    lastScrollTime = 0;
+    isScrollPaused = false;
     // Counters are queue-scoped: they reset with the queue they describe.
     resetSearchStats();
     latestSearchApolloData = null;
@@ -1838,6 +1922,11 @@
         getSearchCardObserver: () => searchCardObserver,
         SEARCH_SCAN_THROTTLE_MS,
         expandCollapsedSections,
+        onWindowScroll,
+        onScrollSettled,
+        getIsScrollPaused: () => isScrollPaused,
+        SCROLL_VELOCITY_THRESHOLD_PX_S,
+        SCROLL_SETTLE_DEBOUNCE_MS,
       },
     };
   }

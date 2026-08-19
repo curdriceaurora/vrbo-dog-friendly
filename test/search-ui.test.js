@@ -584,6 +584,18 @@ function installHarness() {
     return id;
   };
   globalThis.clearTimeout = (id) => { liveTimers.delete(id); realClearTimeout(id); };
+  globalThis.requestAnimationFrame = (fn) => {
+    const id = realSetTimeout(fn, 16);
+    liveTimers.add(id);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = (id) => {
+    liveTimers.delete(id);
+    realClearTimeout(id);
+  };
+  globalThis.performance = {
+    now: () => Date.now(),
+  };
   globalThis.setInterval = () => ({ mockInterval: true });
   globalThis.clearInterval = () => {};
 
@@ -1218,3 +1230,98 @@ test("content.js: expandCollapsedSections keeps the TOGGLE_TEXT_RE short-circuit
     );
   });
 });
+
+test("content.js: rAF-batched scroll velocity tracking and settle detection (Issue #23)", async (t) => {
+  installHarness();
+
+  await t.test("first scroll event establishes baseline without false-positive velocity pause", async () => {
+    globalThis.location.href = SEARCH_URL_A;
+    __test.cleanupSearchManager();
+    __test.initSearchManager();
+
+    const queue = __test.getSearchQueue();
+    assert.ok(queue, "searchQueue must be initialized");
+    assert.equal(queue.isScrollPaused(), false);
+
+    // First scroll event
+    globalThis.window.scrollY = 100;
+    __test.onWindowScroll();
+    await new Promise((r) => setTimeout(r, 25)); // allow rAF callback to execute
+
+    assert.equal(queue.isScrollPaused(), false, "First event must only establish baseline");
+    assert.equal(__test.getIsScrollPaused(), false);
+
+    __test.cleanupSearchManager();
+  });
+
+  await t.test("sustained scroll exceeding velocity threshold pauses queue and resumes on settle debounce", async () => {
+    globalThis.location.href = SEARCH_URL_A;
+    __test.cleanupSearchManager();
+    __test.initSearchManager();
+
+    const queue = __test.getSearchQueue();
+
+    // 1. Establish baseline at scrollY = 0
+    globalThis.window.scrollY = 0;
+    __test.onWindowScroll();
+    await new Promise((r) => setTimeout(r, 25));
+
+    // 2. Simulate fast scroll: 500px down in 25ms = 20,000 px/s (well above 150 px/s threshold)
+    globalThis.window.scrollY = 500;
+    __test.onWindowScroll();
+    await new Promise((r) => setTimeout(r, 25));
+
+    assert.equal(queue.isScrollPaused(), true, "Queue must pause when scroll velocity >= 150 px/s");
+    assert.equal(__test.getIsScrollPaused(), true);
+
+    // 3. Wait for settle debounce (150ms)
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(queue.isScrollPaused(), false, "Queue must unpause after scroll settle debounce expires");
+    assert.equal(__test.getIsScrollPaused(), false);
+
+    __test.cleanupSearchManager();
+  });
+
+  await t.test("native scrollend event immediately settles scroll pause without waiting for debounce", async () => {
+    globalThis.location.href = SEARCH_URL_A;
+    __test.cleanupSearchManager();
+    __test.initSearchManager();
+
+    const queue = __test.getSearchQueue();
+
+    // 1. Baseline
+    globalThis.window.scrollY = 0;
+    __test.onWindowScroll();
+    await new Promise((r) => setTimeout(r, 25));
+
+    // 2. Fast scroll
+    globalThis.window.scrollY = 600;
+    __test.onWindowScroll();
+    await new Promise((r) => setTimeout(r, 25));
+    assert.equal(queue.isScrollPaused(), true);
+
+    // 3. Dispatch scrollend directly
+    __test.onScrollSettled();
+    assert.equal(queue.isScrollPaused(), false, "onScrollSettled must immediately unpause queue");
+
+    __test.cleanupSearchManager();
+  });
+
+  await t.test("cleanupSearchManager tears down window scroll listeners and cancels pending rAF / settle timers", async () => {
+    globalThis.location.href = SEARCH_URL_A;
+    __test.cleanupSearchManager();
+    __test.initSearchManager();
+
+    assert.ok(globalThis.window._listeners.get("scroll")?.size > 0, "scroll listener must be attached");
+
+    // Initiate scroll activity
+    globalThis.window.scrollY = 100;
+    __test.onWindowScroll();
+
+    __test.cleanupSearchManager();
+
+    assert.equal(globalThis.window._listeners.get("scroll")?.size || 0, 0, "scroll listener must be removed");
+    assert.equal(__test.getIsScrollPaused(), false, "isScrollPaused must reset to false");
+  });
+});
+

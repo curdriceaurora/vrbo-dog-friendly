@@ -1947,4 +1947,191 @@ test("queue pacing: amendments to issue #20", async (t) => {
 
     queue.dispose();
   });
+
+  await t.test("Issue #23: scroll-velocity pause halts normal dispatch and preserves pacing/ladder state", async () => {
+    let fetchCalls = 0;
+    const fetchFn = async () => {
+      fetchCalls++;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<html><body>Dogs allowed</body></html>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn,
+      minDelayMs: 100,
+      highPriorityFloorMs: 50,
+      autoMaintenance: false,
+    });
+
+    const initialStep = queue.getLadderStep();
+    const initialPaused = queue.isPaused();
+
+    // 1. Enqueue items and immediately pause scroll
+    queue.setScrollPaused(true);
+    assert.equal(queue.isScrollPaused(), true);
+
+    queue.enqueue("prop_1", "https://www.vrbo.com/111", "normal");
+    queue.enqueue("prop_2", "https://www.vrbo.com/222", "normal");
+
+    // Wait past the minDelayMs window
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(fetchCalls, 0, "Normal priority items must not dispatch while scrollPaused is true");
+    assert.equal(queue.getQueueLength(), 2, "Items should remain queued while scroll paused");
+
+    // Ladder and pausedUntil invariants must be preserved
+    assert.equal(queue.getLadderStep(), initialStep, "Scroll pause must not advance the ladder");
+    assert.equal(queue.isPaused(), initialPaused, "Scroll pause must not set pausedUntil");
+
+    // 2. High-priority item cuts through even when scroll is paused
+    queue.enqueue("prop_hp", "https://www.vrbo.com/333", "high");
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(fetchCalls, 1, "High priority item must dispatch even when scroll is paused");
+    assert.equal(queue.getQueueLength(), 2, "Normal items must still remain paused in queue");
+
+    // 3. Resume scroll -> queue drains
+    queue.setScrollPaused(false);
+    assert.equal(queue.isScrollPaused(), false);
+    await new Promise((r) => setTimeout(r, 350));
+    assert.equal(fetchCalls, 3, "Queue should drain normal items once scroll resumes");
+
+    queue.dispose();
+  });
+
+  await t.test("Issue #23: idle scheduling defers entry-point dispatch and cancels on high-priority arrival", async () => {
+    let idleCallbacks = [];
+    let cancelledHandles = [];
+    let nextHandle = 1;
+
+    const requestIdleCallbackFn = (cb, opts) => {
+      const handle = nextHandle++;
+      idleCallbacks.push({ handle, cb, opts });
+      return handle;
+    };
+
+    const cancelIdleCallbackFn = (handle) => {
+      cancelledHandles.push(handle);
+      idleCallbacks = idleCallbacks.filter((item) => item.handle !== handle);
+    };
+
+    let fetchCalls = 0;
+    const fetchFn = async () => {
+      fetchCalls++;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<html><body>Dogs allowed</body></html>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn,
+      maxConcurrent: 1,
+      minDelayMs: 50,
+      highPriorityFloorMs: 25,
+      idleCallbackTimeoutMs: 1000,
+      requestIdleCallbackFn,
+      cancelIdleCallbackFn,
+      autoMaintenance: false,
+    });
+
+    // 1. Enqueue normal item: should schedule via requestIdleCallbackFn with timeout 1000
+    queue.enqueue("prop_normal", "https://www.vrbo.com/111", "normal");
+    await new Promise((r) => setTimeout(r, 10)); // let staging getCached resolve
+
+    assert.equal(idleCallbacks.length, 1, "Should have scheduled 1 idle callback for normal enqueue");
+    assert.equal(idleCallbacks[0].opts.timeout, 1000, "Should specify timeout: 1000");
+    assert.equal(fetchCalls, 0, "Fetch should not dispatch before idle callback executes");
+
+    // 2. High-priority enqueue arrives: should cancel the pending idle callback and dispatch synchronously
+    const pendingHandle = idleCallbacks[0].handle;
+    queue.enqueue("prop_hp", "https://www.vrbo.com/222", "high");
+    await new Promise((r) => setTimeout(r, 10));
+
+    assert.ok(cancelledHandles.includes(pendingHandle), "High-priority arrival must cancel pending idle callback");
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(fetchCalls, 1, "High-priority item should have dispatched immediately");
+
+    // 3. Executing remaining idle callback drains normal work
+    if (idleCallbacks.length > 0) {
+      const remaining = idleCallbacks.shift();
+      remaining.cb({ didTimeout: true, timeRemaining: () => 0 });
+    }
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(fetchCalls, 2, "Normal item should dispatch when idle callback runs");
+
+    queue.dispose();
+  });
+
+  await t.test("Issue #23: dispose cancels pending idle callback handle", async () => {
+    let cancelled = false;
+    const requestIdleCallbackFn = () => 42;
+    const cancelIdleCallbackFn = (handle) => {
+      if (handle === 42) cancelled = true;
+    };
+
+    const queue = createSearchFetchQueue({
+      requestIdleCallbackFn,
+      cancelIdleCallbackFn,
+      autoMaintenance: false,
+    });
+
+    queue.enqueue("prop_test", "https://www.vrbo.com/111", "normal");
+    await new Promise((r) => setTimeout(r, 10));
+
+    queue.dispose();
+    assert.equal(cancelled, true, "dispose() must cancel pending idle callback handle");
+  });
+
+  await t.test("Issue #23: mid-drain scroll pause halts remaining queued items and resumes seamlessly", async () => {
+    let fetchCalls = 0;
+    const fetchFn = async () => {
+      fetchCalls++;
+      return {
+        ok: true,
+        status: 200,
+        text: async () => "<html><body>Dogs allowed</body></html>",
+      };
+    };
+
+    const queue = createSearchFetchQueue({
+      fetchFn,
+      maxConcurrent: 1,
+      minDelayMs: 60,
+      autoMaintenance: false,
+    });
+
+    // Enqueue 4 items
+    queue.enqueue("prop_mid_1", "https://www.vrbo.com/1");
+    queue.enqueue("prop_mid_2", "https://www.vrbo.com/2");
+    queue.enqueue("prop_mid_3", "https://www.vrbo.com/3");
+    queue.enqueue("prop_mid_4", "https://www.vrbo.com/4");
+
+    // Wait for the first item to dispatch
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(fetchCalls, 1, "First item should dispatch");
+
+    // Now pause scrolling mid-drain while items 2, 3, 4 are still queued
+    queue.setScrollPaused(true);
+    assert.equal(queue.isScrollPaused(), true);
+
+    // Wait past multiple pacing intervals (150ms)
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(fetchCalls, 1, "Queue must halt mid-drain and not dispatch items 2, 3, 4 while scrollPaused is true");
+    assert.equal(queue.getQueueLength(), 3, "Items 2, 3, 4 should remain in queue");
+
+    // Resume scrolling
+    queue.setScrollPaused(false);
+    assert.equal(queue.isScrollPaused(), false);
+
+    // Wait for remaining items to drain across their paced intervals
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(fetchCalls, 4, "All 4 items should have dispatched after resuming");
+    assert.equal(queue.getQueueLength(), 0, "Queue should be completely drained");
+
+    queue.dispose();
+  });
 });
+
