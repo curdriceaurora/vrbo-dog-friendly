@@ -28,7 +28,7 @@ function main() {
 
   // Zip the CONTENTS of src/ (not a wrapping src/ directory), so the
   // archive root is exactly what Chrome expects to unpack an extension from.
-  const entries = fs.readdirSync(SRC_DIR);
+  const entries = fs.readdirSync(SRC_DIR).filter((e) => !e.startsWith("."));
   execFileSync("zip", ["-r", "-X", zipPath, ...entries], { cwd: SRC_DIR, stdio: "inherit" });
 
   console.log(`✅ Built ${path.relative(ROOT, zipPath)}`);

@@ -17,13 +17,13 @@ npx playwright install chromium
 Run this command in your terminal:
 
 ```bash
-node --check content.js && node --check search-fetcher.js && node --check extract.js && node --check page-bridge.js && node --check popup.js && node --test
+npm run test:all
 ```
 
 ### Details
 - Requires no external dependencies or network connection.
 - Validates JavaScript syntax for all extension files (`content.js`, `search-fetcher.js`, `extract.js`, `page-bridge.js`, and `popup.js`).
-- Executes 62 unit and integration tests against `extract.js`, `search-fetcher.js`, state-transition lifecycles, and request managers using Node's test runner.
+- Executes 185 unit and integration tests against `extract.js`, `search-fetcher.js`, state-transition lifecycles, and request managers using Node's test runner.
 - Verifies rule extraction, weight limits, fees, deposits, Apollo GraphQL schema parsing, request throttling, concurrency caps, abort signals, card virtualization, focus trapping, canonical policy normalization, and local cache eviction.
 
 ## 2. Automated Theme Tests
