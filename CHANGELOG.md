@@ -2,6 +2,39 @@
 
 This document records all changes to **Vrbow**.
 
+## [v1.2.0] - 2026-08-18
+
+### Search Request Pacing & Queue Engine
+- **Adaptive Backoff Ladder**: Implements a dynamic backoff ladder (`800ms` base $\rightarrow$ `1600ms` $\rightarrow$ `3200ms`, saturating at step 2) for background search requests. A 429 status code or bot challenge triggers an immediate 30-second pause and advances the ladder. Error clusters (3 timeouts or 5xx responses within 60s) advance the ladder, while 404s and non-rate-limit 4xx responses remain fully inert.
+- **One-Sided Pacing Jitter**: Adds single-sided jitter (`+[0, 30%]`) to resolved dispatch intervals, preventing synchronized request bursts while strictly enforcing the lower rate floor.
+- **Asymmetric Recovery**: Recovery requires a continuous 60-second clean window following a concrete success before stepping down the ladder.
+- **Global & High-Priority Dispatch Floors**: Enforces a 250 ms global dispatch floor across all requests (capping throughput at 4 req/sec) while allowing explicit hover interactions to bypass background queues with a dedicated 250 ms delay floor.
+- **Queue Item Removal API**: Adds `queue.remove(propertyId)` to withdraw queued or pending items cleanly when cards scroll out of view without locking properties out of future requests.
+
+### Search Card Orchestration & Viewport Virtualization
+- **Viewport Dwell Gating**: Delays card fetch enqueuing until a property card remains in view for a jittered dwell window (`[400, 600) ms`), eliminating wasteful requests during rapid scrolling.
+- **Off-Screen Recycling Gate**: Recycled search cards located outside the viewport update DOM bindings silently without issuing network requests until scrolled into view.
+- **Leading-Edge Scan Throttling**: Throttles DOM `MutationObserver` scan bursts with a 250 ms leading-edge gate to ensure instant initial card binding without compounding UI lag.
+- **Navigation & Viewport Pruning**: Automatically cancels queued fetch requests when cards exit the viewport or during SPA search-to-search transitions, preserving session budgets.
+- **Subscription Teardown**: Cleans up active card subscriptions during recycling and pruning so late-arriving responses cannot repaint stale or detached cards.
+
+### Search Badge Layout & Sizing (#18)
+- **Deterministic Container Resolution**: Evaluates mount containers in prioritized order (`.uitk-card-content`, `[data-stid*="content"]`, `[data-stid*="price"]`, fallback to `card`), preventing document-order mounting anomalies on price-first card templates.
+- **Layout Decoupling with `.vdp-badge-slot`**: Wraps the badge in a dedicated `.vdp-badge-slot` container styled with `flex-basis: 100%` and `grid-column: 1 / -1`, enabling the badge to span block parents, wrapping flex rows, and multi-column CSS grids identically while preventing overflow on non-wrapping flex rows.
+- **Border-Box Sizing**: Configures `box-sizing: border-box` on search badges, eliminating 18px horizontal padding/border overflow against parent containers.
+- **Synchronized Stacking Context**: Updates CSS container elevation selector to `:has(> .vdp-badge-slot)` to match inline style elevation on the container and guarantee reliable hit-testing over `.uitk-card-link` overlays.
+
+### Queue Instrumentation & Metric Precision (#23)
+- **Disambiguated Counters**: Separates `enqueued` attempts from true `networkRequests` (`getSessionCount()`) to accurately assess pruning efficacy against cache hits.
+- **Staged Queue Depth Accounting**: Includes in-flight items staging behind async cache checks (`getPendingCount()`) in queue depth sampling.
+- **Sample Eviction Tracking**: Counts ring buffer evictions in `depthSamplesDropped`.
+
+### E2E Test Safety & Guardrails (#19)
+- **Catch-All Network Guardrail**: Installs automated `**/*` request interception across all E2E suites to detect and abort accidental unrouted external traffic during tests.
+- **Playwright Worker Cap**: Limits Playwright test runs to 2 concurrent workers for test stability.
+
+---
+
 ## [v1.1.2] - 2026-08-18
 
 ### Search Card Hit-Testing & Interaction

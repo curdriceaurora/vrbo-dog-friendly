@@ -54,7 +54,7 @@ The extension can also add pet policy badges directly to Vrbo search results, ma
 
 ### Retrieval & Performance
 - **Disabled by default**: Search enrichment is off by default because it retrieves policy details for individual properties. Enable it in settings when useful.
-- **Controlled queue**: Uses request throttling (400 ms safety delay), bounded concurrency (max 2 active requests), deduplication, and a 24-hour cache to avoid placing unnecessary load on Vrbo.
+- **Adaptive request pacing**: Employs an adaptive backoff ladder (800 ms base delay, scaling up to 3200 ms under rate limits or error clusters), global 250 ms dispatch floor, one-sided jitter, dwell debouncing (400–600 ms), and a 24-hour local cache to minimize load on Vrbo.
 
 ## Privacy & Theming
 
@@ -65,7 +65,7 @@ The extension can also add pet policy badges directly to Vrbo search results, ma
 
 ## Installation & Setup
 
-1. Download **`vrbow-v1.1.2.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
+1. Download **`vrbow-v1.2.0.zip`** from [Releases](https://github.com/curdriceaurora/vrbow/releases).
 2. Unzip the file into a folder on your computer.
 3. Open `chrome://extensions` in your browser.
 4. Turn on **Developer mode** in the top-right corner.
