@@ -1093,10 +1093,13 @@
       if (!site || !site.isListingUrl(u.href)) return null;
       const propId = site.getPropertyId(u.href);
       if (!propId) return null;
+      const fetchUrl = typeof site.getCanonicalFetchUrl === "function"
+        ? site.getCanonicalFetchUrl(u.href)
+        : `https://${u.hostname}${u.pathname}`;
       return {
         propertyId: propId,
         navigationUrl: u.href,
-        fetchUrl: `https://www.vrbo.com${u.pathname}`,
+        fetchUrl,
       };
     } catch {
       return null;

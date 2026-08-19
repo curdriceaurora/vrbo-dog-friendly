@@ -17,6 +17,9 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (extractModule) {
   "use strict";
 
+  const cachedExtractor =
+    extractModule && typeof extractModule.extractPropertyId === "function" ? extractModule : null;
+
   function parseUrl(urlStr, baseUrl) {
     if (!urlStr || typeof urlStr !== "string") return null;
     try {
@@ -49,10 +52,7 @@
         return globalThis.VdpExtract;
       }
     }
-    if (extractModule && typeof extractModule.extractPropertyId === "function") {
-      return extractModule;
-    }
-    return null;
+    return cachedExtractor;
   }
 
   function vrboMatchesHostname(hostname) {
@@ -73,7 +73,7 @@
   function vrboIsSearchUrl(urlStr, baseUrl) {
     const u = parseUrl(urlStr, baseUrl);
     if (!u || !vrboMatchesHostname(u.hostname)) return false;
-    return /(?:^|\/)(?:search|hotel-search|vacation-rentals\/search)/i.test(u.pathname);
+    return /(?:^|\/)(?:search|hotel-search|vacation-rentals\/search)(?:\/|\?|#|$)/i.test(u.pathname);
   }
 
   function vrboGetPropertyId(urlStr, baseUrl) {
@@ -92,6 +92,13 @@
     return id || null;
   }
 
+  function vrboGetCanonicalFetchUrl(urlStr, baseUrl) {
+    if (!urlStr || typeof urlStr !== "string") return null;
+    const u = parseUrl(urlStr, baseUrl);
+    if (!u || !vrboMatchesHostname(u.hostname)) return null;
+    return `https://www.vrbo.com${u.pathname}`;
+  }
+
   // Vrbo site definition
   const vrboSite = {
     id: "vrbo",
@@ -99,6 +106,7 @@
     isListingUrl: vrboIsListingUrl,
     isSearchUrl: vrboIsSearchUrl,
     getPropertyId: vrboGetPropertyId,
+    getCanonicalFetchUrl: vrboGetCanonicalFetchUrl,
   };
 
   const SITES = [vrboSite];

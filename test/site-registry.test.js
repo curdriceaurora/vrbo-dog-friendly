@@ -131,6 +131,13 @@ describe("site-registry: Vrbo isSearchUrl", () => {
     assert.equal(vrbo.isSearchUrl("/search?destination=Miami"), true);
   });
 
+  test("enforces keyword boundary precision against false positive suffixes", () => {
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/searchpage"), false);
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/foo/searchbar"), false);
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/hotel-search-villa"), false);
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/search/results"), true);
+  });
+
   test("rejects non-search pages and non-Vrbo hostnames", () => {
     assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/123456"), false);
     assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/"), false);
@@ -149,6 +156,33 @@ describe("site-registry: Vrbo isSearchUrl", () => {
     assert.equal(vrbo.isSearchUrl(null), false);
     assert.equal(vrbo.isSearchUrl(undefined), false);
     assert.equal(vrbo.isSearchUrl("not-a-url"), false);
+  });
+});
+
+describe("site-registry: Vrbo getCanonicalFetchUrl", () => {
+  const vrbo = siteRegistry.getSiteForHostname("vrbo.com");
+  assert.ok(vrbo);
+
+  test("constructs canonical HTTPS fetch URL without query parameters or hashes", () => {
+    assert.equal(
+      vrbo.getCanonicalFetchUrl("https://www.vrbo.com/123456?unitId=1&foo=bar#reviews"),
+      "https://www.vrbo.com/123456"
+    );
+    assert.equal(
+      vrbo.getCanonicalFetchUrl("https://vrbo.com/pdp/123456?tab=rules"),
+      "https://www.vrbo.com/pdp/123456"
+    );
+    assert.equal(
+      vrbo.getCanonicalFetchUrl("/vacation-rentals/p123456?avail=1"),
+      "https://www.vrbo.com/vacation-rentals/p123456"
+    );
+  });
+
+  test("returns null for non-Vrbo or invalid URLs", () => {
+    assert.equal(vrbo.getCanonicalFetchUrl("https://airbnb.com/rooms/123"), null);
+    assert.equal(vrbo.getCanonicalFetchUrl(""), null);
+    assert.equal(vrbo.getCanonicalFetchUrl(null), null);
+    assert.equal(vrbo.getCanonicalFetchUrl("not a url"), null);
   });
 });
 

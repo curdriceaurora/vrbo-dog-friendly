@@ -1272,38 +1272,20 @@
 
       const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
         (typeof require === "function" ? require("./site-registry.js") : null);
-      if (siteRegistry) {
-        const site = siteRegistry.getSiteForUrl(u.href);
-        if (!site || !site.isListingUrl(u.href)) return null;
-        const propId = site.getPropertyId(u.href);
-        if (!propId) return null;
-        return {
-          propertyId: propId,
-          navigationUrl: u.href,
-          fetchUrl: `https://www.vrbo.com${u.pathname}`,
-        };
-      }
+      if (!siteRegistry) return null;
 
-      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
-
-      const propId = extractPropertyIdFromUrl(urlStr, baseUrl);
+      const site = siteRegistry.getSiteForUrl(u.href);
+      if (!site || !site.isListingUrl(u.href)) return null;
+      const propId = site.getPropertyId(u.href);
       if (!propId) return null;
 
-      // Make sure the path matches a listing format
-      if (
-        !/^\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
-        !/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
-        !/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(u.pathname)
-      ) {
-        return null;
-      }
-
-      const navigationUrl = u.href;
-      const fetchUrl = `https://www.vrbo.com${u.pathname}`;
+      const fetchUrl = typeof site.getCanonicalFetchUrl === "function"
+        ? site.getCanonicalFetchUrl(u.href)
+        : `https://${u.hostname}${u.pathname}`;
 
       return {
         propertyId: propId,
-        navigationUrl,
+        navigationUrl: u.href,
         fetchUrl,
       };
     } catch {
