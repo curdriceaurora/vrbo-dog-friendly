@@ -49,18 +49,18 @@
   }
 
   function getListingIdFromUrl(urlStr) {
-    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
-    return site ? site.getPropertyId(urlStr || location.href) : null;
+    const reg = getSiteRegistry();
+    return reg ? reg.getPropertyId(urlStr || location.href) : null;
   }
 
   function isListingUrl(urlStr) {
-    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
-    return site ? site.isListingUrl(urlStr || location.href) : false;
+    const reg = getSiteRegistry();
+    return reg ? reg.isListingUrl(urlStr || location.href) : false;
   }
 
   function isSearchUrl(urlStr) {
-    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
-    return site ? site.isSearchUrl(urlStr || location.href) : false;
+    const reg = getSiteRegistry();
+    return reg ? reg.isSearchUrl(urlStr || location.href) : false;
   }
 
   function looksLikeListingPage() {
@@ -881,16 +881,15 @@
   ].join(", ");
 
   function getSearchCardSelector() {
-    const site = getSiteRegistry()?.getSiteForUrl(location.href);
-    return site?.searchCardSelector || DEFAULT_CARD_SELECTORS_QUERY;
+    const reg = getSiteRegistry();
+    return reg?.getSearchCardSelector(location.href) || DEFAULT_CARD_SELECTORS_QUERY;
   }
 
   function resolveBadgeContainer(card) {
-    const site = getSiteRegistry()?.getSiteForUrl(location.href);
-    const selectors = site?.cardContentSelector
-      ? (Array.isArray(site.cardContentSelector) ? site.cardContentSelector : site.cardContentSelector.split(",").map((s) => s.trim()))
-      : BADGE_CONTAINER_SELECTORS;
-    for (const selector of selectors) {
+    const reg = getSiteRegistry();
+    const selectors = reg?.getCardContentSelector(location.href) || BADGE_CONTAINER_SELECTORS;
+    const list = Array.isArray(selectors) ? selectors : selectors.split(",").map((s) => s.trim());
+    for (const selector of list) {
       const match = card.querySelector(selector);
       if (match) return match;
     }
@@ -1096,13 +1095,10 @@
       const u = new URL(urlStr, location.href);
       if (u.protocol !== "https:") return null;
       const registry = getSiteRegistry();
-      const site = registry?.getSiteForUrl(u.href);
-      if (!site || !site.isListingUrl(u.href)) return null;
-      const propId = site.getPropertyId(u.href);
+      if (!registry || !registry.isListingUrl(u.href)) return null;
+      const propId = registry.getPropertyId(u.href);
       if (!propId) return null;
-      const fetchUrl = typeof registry?.getCanonicalFetchUrl === "function"
-        ? registry.getCanonicalFetchUrl(u.href)
-        : (typeof site.getCanonicalFetchUrl === "function" ? site.getCanonicalFetchUrl(u.href) : `https://${u.hostname}${u.pathname}`);
+      const fetchUrl = registry.getCanonicalFetchUrl(u.href);
       return {
         propertyId: propId,
         navigationUrl: u.href,
@@ -1550,7 +1546,7 @@
       }
     });
 
-    searchQueue?.getCached(propId).then((cached) => {
+    searchQueue?.getCached(propId, fetchUrl).then((cached) => {
       if (cached && card.getAttribute("data-vdp-prop-id") === propId) {
         updateBadgeUi(badge, cached);
       }
@@ -1628,7 +1624,7 @@
     activeTooltipPropId = propId;
     badge.setAttribute("aria-expanded", "true");
 
-    searchQueue?.getCached(propId).then((cached) => {
+    searchQueue?.getCached(propId, url).then((cached) => {
       // Async scope guard: verify active target, propId, element connectivity, and parent card propId
       const parentCard = badge.closest ? badge.closest("[data-vdp-prop-id]") : null;
       if (
@@ -1798,8 +1794,8 @@
     const footer = document.createElement("div");
     footer.className = "vdp-tooltip-footer";
     const link = document.createElement("a");
-    const site = getSiteRegistry()?.getSiteForUrl(url, location.href);
-    if (typeof url === "string" && ((site && site.isListingUrl(url, location.href)) || url.startsWith("/"))) {
+    const registry = getSiteRegistry();
+    if (typeof url === "string" && ((registry && registry.isListingUrl(url, location.href)) || url.startsWith("/"))) {
       link.href = url;
     } else {
       link.href = "#";

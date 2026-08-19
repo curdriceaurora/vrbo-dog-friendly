@@ -358,8 +358,8 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
           return { mockParsed: true, htmlLength: html.length, url };
         }
       };
-      const res = siteRegistry.parseListingData("https://www.vrbo.com/123456", "<html>test</html>");
-      assert.deepEqual(res, { mockParsed: true, htmlLength: 17, url: "https://www.vrbo.com/123456" });
+      const res = siteRegistry.parseListingData("https://unknown-site.com/123456", "<html>test</html>");
+      assert.deepEqual(res, { mockParsed: true, htmlLength: 17, url: "https://unknown-site.com/123456" });
 
       const customSite = {
         parseListingData(html, url) {
@@ -370,6 +370,16 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
         custom: true,
         url: "https://custom.com/1",
       });
+
+      // Vrbo site adapter parses via vrboSite.parseListingData
+      const vrboParsed = siteRegistry.parseListingData(
+        "https://www.vrbo.com/123456",
+        "<section><h2>House Rules</h2><p>Dogs welcome, max 2 dogs</p></section>",
+        "https://www.vrbo.com/123456",
+        "123456"
+      );
+      assert.ok(vrboParsed);
+      assert.equal(vrboParsed.policy?.maxDogs, 2);
     } finally {
       globalThis.VDPExtract = origExtract;
     }

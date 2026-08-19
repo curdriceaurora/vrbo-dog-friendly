@@ -955,9 +955,8 @@
         try {
           const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
             (typeof require === "function" ? require("./site-registry.js") : null);
-          const site = siteRegistry?.getSiteForUrl(targetUrl);
-          if (site && site.id !== "vrbo" && typeof site.parseListingData === "function") {
-            parsed = site.parseListingData(html, targetUrl, propertyId, canonicalId);
+          if (siteRegistry && typeof siteRegistry.parseListingData === "function") {
+            parsed = siteRegistry.parseListingData(targetUrl, html, targetUrl, propertyId, canonicalId);
           } else {
             parsed = parseListingHtml(html, propertyId, canonicalId);
           }
@@ -1325,14 +1324,11 @@
         (typeof require === "function" ? require("./site-registry.js") : null);
       if (!siteRegistry) return null;
 
-      const site = siteRegistry.getSiteForUrl(u.href);
-      if (!site || !site.isListingUrl(u.href)) return null;
-      const propId = site.getPropertyId(u.href);
+      if (!siteRegistry.isListingUrl(u.href)) return null;
+      const propId = siteRegistry.getPropertyId(u.href);
       if (!propId) return null;
 
-      const fetchUrl = typeof siteRegistry.getCanonicalFetchUrl === "function"
-        ? siteRegistry.getCanonicalFetchUrl(u.href)
-        : (typeof site.getCanonicalFetchUrl === "function" ? site.getCanonicalFetchUrl(u.href) : `https://${u.hostname}${u.pathname}`);
+      const fetchUrl = siteRegistry.getCanonicalFetchUrl(u.href);
 
       return {
         propertyId: propId,

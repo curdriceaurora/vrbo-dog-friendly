@@ -94,8 +94,8 @@ function getSiteRegistry() {
 }
 
 function isSearchUrl(urlStr) {
-  const site = getSiteRegistry()?.getSiteForUrl(urlStr);
-  return site ? site.isSearchUrl(urlStr) : false;
+  const reg = getSiteRegistry();
+  return reg ? reg.isSearchUrl(urlStr) : false;
 }
 
 function renderSearchPageNotice() {
@@ -107,8 +107,8 @@ function renderSearchPageNotice() {
 }
 
 function isListingUrl(urlStr) {
-  const site = getSiteRegistry()?.getSiteForUrl(urlStr);
-  return site ? site.isListingUrl(urlStr) : false;
+  const reg = getSiteRegistry();
+  return reg ? reg.isListingUrl(urlStr) : false;
 }
 
 function loadPolicy() {

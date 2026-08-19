@@ -111,6 +111,14 @@
     ) {
       return globalThis.VdpSearchFetcher.parseListingHtml(html, propertyId, canonicalId);
     }
+    if (typeof require === "function") {
+      try {
+        const sf = require("./search-fetcher.js");
+        if (sf && typeof sf.parseListingHtml === "function") {
+          return sf.parseListingHtml(html, propertyId, canonicalId);
+        }
+      } catch {}
+    }
     const ext = getExtractor();
     if (ext && typeof ext.extractListingData === "function") {
       return ext.extractListingData(html, urlStr);
@@ -149,6 +157,21 @@
     const u = parseUrl(urlStr, baseUrl);
     if (!u) return null;
     return getSiteForHostname(u.hostname);
+  }
+
+  function isListingUrl(urlStr, baseUrl) {
+    const site = getSiteForUrl(urlStr, baseUrl);
+    return site ? site.isListingUrl(urlStr, baseUrl) : false;
+  }
+
+  function isSearchUrl(urlStr, baseUrl) {
+    const site = getSiteForUrl(urlStr, baseUrl);
+    return site ? site.isSearchUrl(urlStr, baseUrl) : false;
+  }
+
+  function getPropertyId(urlStr, baseUrl) {
+    const site = getSiteForUrl(urlStr, baseUrl);
+    return site ? site.getPropertyId(urlStr, baseUrl) : null;
   }
 
   function getCanonicalFetchUrl(urlStr, baseUrl) {
@@ -238,6 +261,9 @@
   return {
     getSiteForUrl,
     getSiteForHostname,
+    isListingUrl,
+    isSearchUrl,
+    getPropertyId,
     getCanonicalFetchUrl,
     decorateFetchUrl,
     getSearchCardSelector,
