@@ -207,6 +207,37 @@ test("fees and deposits", async (t) => {
     assert.equal(canonicalUsd.fee.amount, 25);
   });
 
+  await t.test("issue #30: thousands separators are disambiguated from decimal commas", () => {
+    // US-style thousands grouping must not be mistaken for a bare 3-digit
+    // number (the historical bug: "$1,000" -> "$000" -> amount 0).
+    const thousands = normalizePolicy(policyFor("There is a $1,000 pet fee for this property."));
+    assert.strictEqual(thousands.fee.amount, 1000);
+    assert.strictEqual(thousands.fee.currency, "USD");
+
+    // Thousands grouping with cents.
+    const thousandsCents = normalizePolicy(policyFor("There is a $2,500.00 pet fee for this property."));
+    assert.strictEqual(thousandsCents.fee.amount, 2500);
+    assert.strictEqual(thousandsCents.fee.currency, "USD");
+
+    // European decimal comma (no thousands grouping) must still parse as a
+    // decimal, not get misread as a malformed thousands group.
+    assert.strictEqual(policyFor("Dog fee: 50,00 EUR").fee, "€50.00");
+    const europeanDecimal = normalizePolicy(policyFor("Dog fee: 50,00 EUR"));
+    assert.strictEqual(europeanDecimal.fee.amount, 50);
+    assert.strictEqual(europeanDecimal.fee.currency, "EUR");
+
+    // A fractional US thousands amount keeps its cents.
+    const fractionalThousands = normalizePolicy(policyFor("There is a $1,250.50 pet fee for this property."));
+    assert.strictEqual(fractionalThousands.fee.amount, 1250.5);
+    assert.strictEqual(fractionalThousands.fee.currency, "USD");
+
+    // Deposits share the same AMT building block, so the same bug class
+    // (and fix) applies to a 4-figure deposit.
+    const deposit = normalizePolicy(policyFor("Refundable pet deposit of $1,500."));
+    assert.strictEqual(deposit.deposit.amount, 1500);
+    assert.strictEqual(deposit.deposit.currency, "USD");
+  });
+
   await t.test("fractional weight preservation and badge derivation", () => {
     const raw = { petsAllowed: true, weightPerDog: "22.5 kg" };
     const canonical = normalizePolicy(raw);

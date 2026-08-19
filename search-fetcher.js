@@ -76,7 +76,20 @@
       const endScriptIdx = html.indexOf("</script>", idx);
       const slice = endScriptIdx !== -1 ? html.slice(idx, endScriptIdx) : html.slice(idx, idx + 5000000);
       
-      const jsonParseMatch = /window\.__APOLLO_STATE__\s*=\s*JSON\.parse\((["'])([\s\S]+?)\1\s*\);/.exec(slice);
+      // Issue #31: `slice` is already bounded to this one <script> block (or a
+      // 5MB cap), and in practice a listing page emits exactly one
+      // `window.__APOLLO_STATE__ = JSON.parse("...")` assignment per block.
+      // Using a GREEDY capture (rather than lazy `+?`) means the regex engine
+      // consumes to the end of the slice and backtracks to the LAST
+      // occurrence of the closing-quote/`);` boundary, not the first — this
+      // is the far more likely real terminator if the escaped JSON payload
+      // itself happens to contain a literal `");`-like sequence. It is not a
+      // bulletproof JSON-aware scan (a pathological payload could still fool
+      // it), so the JSON.parse calls below stay try/catch-guarded: a
+      // truncated/garbled capture simply fails to parse and `state` stays
+      // null, falling through to the direct-object and <script id=...>
+      // patterns below instead of throwing.
+      const jsonParseMatch = /window\.__APOLLO_STATE__\s*=\s*JSON\.parse\((["'])([\s\S]+)\1\s*\);/.exec(slice);
       if (jsonParseMatch) {
         const rawQuoted = jsonParseMatch[0].slice(jsonParseMatch[0].indexOf("(") + 1, jsonParseMatch[0].lastIndexOf(")"));
         try {
@@ -610,8 +623,9 @@
       return null;
     }
 
-    async function setCached(propertyId, data) {
+    async function setCached(propertyId, data, options) {
       if (!propertyId || isDisposed || !data) return { accepted: false, data: null, policy: null };
+      const persist = !options || options.persist !== false;
 
       // Check precedence against existing cache to prevent downgrading richer data
       const existing = await getCached(propertyId);
@@ -645,7 +659,7 @@
       };
       setMemoryCache(propertyId, { data: persistentData, ts: storedAt });
 
-      if (storage) {
+      if (storage && persist) {
         try {
           storage.set({ [CACHE_PREFIX + propertyId]: entry }, () => {});
         } catch (e) {
