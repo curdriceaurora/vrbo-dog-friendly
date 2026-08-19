@@ -194,7 +194,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
 
     // 7. Verify zero uncaught errors
     expect(pageErrors).toEqual([]);
-    guard.assertNoLeakedRequests();
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }
@@ -306,7 +306,7 @@ test("I3: recycling an off-screen card to a new href fires zero listing requests
     expect(requestCounts["1000001"]).toBe(0);
 
     expect(pageErrors).toEqual([]);
-    guard.assertNoLeakedRequests();
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }

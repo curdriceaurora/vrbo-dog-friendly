@@ -711,7 +711,7 @@
   function createEmptySearchStats() {
     return {
       scans: 0,
-      dispatched: 0,
+      dispatched: 0, // Counts post-dwell card enqueue requests passed to the queue engine
       prunedOffscreen: 0,
       prunedRecycled: 0,
       prunedStale: 0,

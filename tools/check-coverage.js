@@ -85,9 +85,10 @@ async function main() {
   let failed = false;
   console.log("\n-------------------------------------------------------------------------------");
   console.log("Coverage Threshold Evaluation");
-  console.log("-------------------------------------------------------------------------------");
-
-const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js"]);
+  // Note: content.js, popup.js, and page-bridge.js are browser-coupled scripts whose
+  // browser-path coverage is measured and enforced via Playwright in e2e/js-coverage.spec.js.
+  // check-coverage.js specifically enforces Node module thresholds for standalone modules.
+  const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js"]);
 
   for (const [file, metrics] of Object.entries(reports)) {
     if (!TARGET_NODE_MODULES.has(file)) continue;

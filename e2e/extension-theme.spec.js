@@ -140,7 +140,7 @@ for (const scheme of ["light", "dark"]) {
       await expect(badge).toBeFocused();
 
       expect(pageErrors).toEqual([]);
-      guard.assertNoLeakedRequests();
+      await guard.assertNoLeakedRequests(page);
 
       const extensionId = await extensionIdFromManagementPage(context);
       expect(extensionId).toMatch(/^[a-p]{32}$/);

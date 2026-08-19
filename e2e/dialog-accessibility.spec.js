@@ -155,7 +155,7 @@ test("8.1.6: verifies dialog accessibility contract, non-modal semantics, focus-
 
     // 8. Assert zero page errors
     expect(pageErrors).toEqual([]);
-    guard.assertNoLeakedRequests();
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }

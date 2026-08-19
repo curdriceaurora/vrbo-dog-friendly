@@ -152,7 +152,7 @@ test("verifies browser hit-testing order, physical mouse coordinate hover, and c
     expect(page.url()).toContain("Hotel-Search");
 
     expect(pageErrors).toEqual([]);
-    guard.assertNoLeakedRequests();
+    await guard.assertNoLeakedRequests(page);
   } finally {
     await context.close();
   }
@@ -199,7 +199,7 @@ test("verifies live-traffic guardrail aborts unrouted requests and catches viola
 
     const leaked = guard.getLeakedRequests();
     expect(leaked.some((url) => url.includes("9999999"))).toBe(true);
-    expect(() => guard.assertNoLeakedRequests()).toThrow(/Live traffic guardrail violation/);
+    await expect(guard.assertNoLeakedRequests(page, { settleMs: 0 })).rejects.toThrow(/Live traffic guardrail violation/);
   } finally {
     await context.close();
   }

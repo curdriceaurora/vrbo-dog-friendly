@@ -426,7 +426,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
     await p.close();
   }
 
-  guard.assertNoLeakedRequests();
+  await guard.assertNoLeakedRequests();
   await context.close();
 
   console.log("\n===============================================================================");
