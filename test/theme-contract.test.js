@@ -4,7 +4,16 @@ const path = require("node:path");
 const test = require("node:test");
 
 const ROOT = path.join(__dirname, "..");
-const read = (file) => fs.readFileSync(path.join(ROOT, file), "utf8");
+const FILE_PATHS = {
+  "manifest.json": path.join(ROOT, "src", "manifest.json"),
+  "popup.html": path.join(ROOT, "src", "popup", "popup.html"),
+  "popup.css": path.join(ROOT, "src", "popup", "popup.css"),
+  "popup.js": path.join(ROOT, "src", "popup", "popup.js"),
+  "tokens.css": path.join(ROOT, "src", "content", "tokens.css"),
+  "content.css": path.join(ROOT, "src", "content", "content.css"),
+  "content.js": path.join(ROOT, "src", "content", "content.js"),
+};
+const read = (file) => fs.readFileSync(FILE_PATHS[file] || path.join(ROOT, file), "utf8");
 
 const REQUIRED_TOKENS = [
   "--vdp-font-family",
@@ -90,11 +99,11 @@ function contrastRatio(first, second) {
 
 test("theme assets load in the required order and remain scoped", () => {
   const manifest = JSON.parse(read("manifest.json"));
-  const isolatedScript = manifest.content_scripts.find((entry) => entry.js?.includes("content.js"));
-  assert.deepEqual(isolatedScript.css, ["tokens.css", "content.css"]);
+  const isolatedScript = manifest.content_scripts.find((entry) => entry.js?.includes("content/content.js"));
+  assert.deepEqual(isolatedScript.css, ["content/tokens.css", "content/content.css"]);
 
   const popup = read("popup.html");
-  assert.ok(popup.indexOf('href="tokens.css"') < popup.indexOf('href="popup.css"'));
+  assert.ok(popup.indexOf('href="../content/tokens.css"') < popup.indexOf('href="popup.css"'));
   assert.match(popup, /<html class="vdp-theme-root">/);
   assert.doesNotMatch(popup, /<body class="vdp-theme-root">/);
 

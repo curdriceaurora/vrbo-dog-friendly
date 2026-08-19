@@ -10,7 +10,7 @@
   },
   "action": {
     "default_title": "Vrbow – Vrbo Dog Policy Callout",
-    "default_popup": "popup.html",
+    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -26,7 +26,7 @@
       "matches": [
         "*://*.vrbo.com/*"
       ],
-      "js": ["page-bridge.js"],
+      "js": ["content/page-bridge.js"],
       "world": "MAIN",
       "run_at": "document_start"
     },
@@ -34,8 +34,8 @@
       "matches": [
         "*://*.vrbo.com/*"
       ],
-      "js": ["extract.js", "search-fetcher.js", "content.js"],
-      "css": ["tokens.css", "content.css"],
+      "js": ["shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
+      "css": ["content/tokens.css", "content/content.css"],
       "run_at": "document_idle"
     }
   ],

@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 
 async function captureLiveSearchDemo() {
-  const extensionPath = path.join(__dirname, "..");
+  const extensionPath = path.join(__dirname, "..", "src");
   const context = await chromium.launchPersistentContext("", {
     headless: false,
     args: [

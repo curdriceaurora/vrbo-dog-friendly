@@ -19,9 +19,9 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const { createSearchFetchQueue, resolveSearchApolloRecord, hasConcretePolicy } = require("../search-fetcher.js");
+const { createSearchFetchQueue, resolveSearchApolloRecord, hasConcretePolicy } = require("../src/shared/search-fetcher.js");
 
-const BRIDGE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "page-bridge.js"), "utf8");
+const BRIDGE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "src", "content", "page-bridge.js"), "utf8");
 
 // Load page-bridge.js into a sandboxed browser-like environment. Events
 // dispatched on the mocked window fire synchronously (mirroring how

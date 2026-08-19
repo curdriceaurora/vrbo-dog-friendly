@@ -1,7 +1,7 @@
 // test/search-fetcher.test.js
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseListingHtml, createSearchFetchQueue, validateListingUrl, performStorageMaintenance, CACHE_PREFIX, serializeSearchPolicyForCache, calculatePolicyCompleteness, canPolicyUpgrade } = require("../search-fetcher.js");
+const { parseListingHtml, createSearchFetchQueue, validateListingUrl, performStorageMaintenance, CACHE_PREFIX, serializeSearchPolicyForCache, calculatePolicyCompleteness, canPolicyUpgrade } = require("../src/shared/search-fetcher.js");
 
 test("search-fetcher HTML parsing", async (t) => {
   await t.test("detects bot challenge HTML and marks as challenge", () => {
@@ -1279,7 +1279,7 @@ test("search-fetcher queue and caching", async (t) => {
 
 test("page-bridge and extract currency exports", async (t) => {
   await t.test("extract.js exports formatCurrencyDisplay supporting non-USD currencies", () => {
-    const extract = require("../extract.js");
+    const extract = require("../src/shared/extract.js");
     assert.equal(typeof extract.formatCurrencyDisplay, "function", "formatCurrencyDisplay must be exported");
     assert.equal(extract.formatCurrencyDisplay(100, "USD"), "$100");
     assert.equal(extract.formatCurrencyDisplay(75, "EUR"), "€75");
@@ -1289,8 +1289,8 @@ test("page-bridge and extract currency exports", async (t) => {
   });
 
   await t.test("parseListingHtml extracts detailed pet constraints from HTML body when Apollo has only shallow policy", () => {
-    const fetcher = require("../search-fetcher.js");
-    const extract = require("../extract.js");
+    const fetcher = require("../src/shared/search-fetcher.js");
+    const extract = require("../src/shared/extract.js");
     const html = `
       <html>
         <head>
@@ -1330,7 +1330,7 @@ test("page-bridge and extract currency exports", async (t) => {
   });
 
   await t.test("Class 12: Redirects and Canonicalization - resolves redirected canonical property ID and dual caches", async () => {
-    const fetcher = require("../search-fetcher.js");
+    const fetcher = require("../src/shared/search-fetcher.js");
     const fakeStorage = new Map();
     const mockStorage = {
       get: (keys, cb) => {
@@ -1410,7 +1410,7 @@ test("page-bridge and extract currency exports", async (t) => {
   });
 
   await t.test("Class 11: Multi-Unit Hierarchy Pruning - ignores child unit rules when inspecting property level", () => {
-    const fetcher = require("../search-fetcher.js");
+    const fetcher = require("../src/shared/search-fetcher.js");
     const html = `
       <html>
         <script id="__APOLLO_STATE__">
@@ -1443,7 +1443,7 @@ test("page-bridge and extract currency exports", async (t) => {
   });
 
   await t.test("Class 15: Split Apollo Entities - extracts bare fee and bare weight under explicit PetPolicy nodes", () => {
-    const fetcher = require("../search-fetcher.js");
+    const fetcher = require("../src/shared/search-fetcher.js");
     const html = `
       <html>
         <script id="__APOLLO_STATE__">

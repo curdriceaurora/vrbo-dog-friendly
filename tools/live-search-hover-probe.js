@@ -3,7 +3,7 @@ const path = require("path");
 const fs = require("fs");
 
 async function runLiveSearchHover() {
-  const extensionPath = path.join(__dirname, "..");
+  const extensionPath = path.join(__dirname, "..", "src");
   
   console.log("Launching browser with Vrbow extension...");
   const context = await chromium.launchPersistentContext("", {

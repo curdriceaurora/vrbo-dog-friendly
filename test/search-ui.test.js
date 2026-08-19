@@ -3,7 +3,7 @@
 
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createSearchFetchQueue, parseListingHtml } = require("../search-fetcher.js");
+const { createSearchFetchQueue, parseListingHtml } = require("../src/shared/search-fetcher.js");
 
 test("search-fetcher request lifecycle & cancellation", async (t) => {
   await t.test("aborts active fetch requests on queue.dispose()", async () => {
@@ -174,7 +174,7 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
   });
 
   await t.test("canonical policy model normalizes weights, fees, deposits, and schemaVersion 1", () => {
-    const extract = require("../extract.js");
+    const extract = require("../src/shared/extract.js");
     const sampleRawPolicy = {
       found: true,
       petsAllowed: true,
@@ -210,7 +210,7 @@ test("search-fetcher request lifecycle & cancellation", async (t) => {
   });
 
   await t.test("future filtering readiness: conservative missing-value semantics", () => {
-    const extract = require("../extract.js");
+    const extract = require("../src/shared/extract.js");
     const partialRaw = {
       found: true,
       petsAllowed: null,
@@ -539,7 +539,7 @@ let __test = null;
 function installHarness() {
   if (__test) return __test;
 
-  const realFetcher = require("../search-fetcher.js");
+  const realFetcher = require("../src/shared/search-fetcher.js");
 
   globalThis.document = mockDocument;
   globalThis.location = { href: SEARCH_URL_A };
@@ -599,7 +599,8 @@ function installHarness() {
   globalThis.setInterval = () => ({ mockInterval: true });
   globalThis.clearInterval = () => {};
 
-  globalThis.VDPExtract = require("../extract.js");
+  globalThis.VDPExtract = require("../src/shared/extract.js");
+  globalThis.VdpFormatters = require("../src/shared/formatters.js");
   globalThis.VdpSearchFetcher = {
     ...realFetcher,
     createSearchFetchQueue(options = {}) {
@@ -638,7 +639,7 @@ function installHarness() {
   };
 
   storageData.set("vrbow_enable_search_badging", true);
-  __test = require("../content.js").__test;
+  __test = require("../src/content/content.js").__test;
   return __test;
 }
 
@@ -1107,7 +1108,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     // Comments stripped: this asserts on live rules, and the rule below is
     // explained by a comment that necessarily names the old selector.
     const css = require("node:fs")
-      .readFileSync(require("node:path").join(__dirname, "..", "content.css"), "utf8")
+      .readFileSync(require("node:path").join(__dirname, "..", "src", "content", "content.css"), "utf8")
       .replace(/\/\*[\s\S]*?\*\//g, "");
     assert.match(
       css,

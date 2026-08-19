@@ -234,7 +234,7 @@ function launchChrome(port) {
       // Honoured by Chromium and Chrome for Testing, silently ignored by
       // branded Chrome 137+. The canary rides along so we can tell
       // "browser won't load extensions" from "our manifest is broken".
-      `--load-extension=${ROOT},${writeCanaryExtension()}`,
+      `--load-extension=${path.join(ROOT, "src")},${writeCanaryExtension()}`,
       "--no-first-run",
       "--no-default-browser-check",
       "--window-size=1280,900",
@@ -317,7 +317,14 @@ function connect(wsUrl) {
   return { ws, ready, send, once, close: () => ws.close() };
 }
 
-const readScript = (f) => fs.readFileSync(path.join(ROOT, f), "utf8");
+const SCRIPT_PATHS = {
+  "page-bridge.js": path.join(ROOT, "src", "content", "page-bridge.js"),
+  "extract.js": path.join(ROOT, "src", "shared", "extract.js"),
+  "search-fetcher.js": path.join(ROOT, "src", "shared", "search-fetcher.js"),
+  "formatters.js": path.join(ROOT, "src", "shared", "formatters.js"),
+  "content.js": path.join(ROOT, "src", "content", "content.js"),
+};
+const readScript = (f) => fs.readFileSync(SCRIPT_PATHS[f] || path.join(ROOT, f), "utf8");
 
 // Read the rendered panel out of the shared DOM.
 const PANEL_EXPR = `(() => {
@@ -479,7 +486,7 @@ async function checkListing(port, url, settleMs) {
         expression: `globalThis.chrome = { storage: { local: { set(o, cb) { cb && cb(); }, get(k, cb) { cb && cb({}); }, remove(k, cb) { cb && cb(); } } }, runtime: { onMessage: { addListener() {} } } };`,
       });
 
-      for (const file of ["extract.js", "search-fetcher.js", "content.js"]) {
+      for (const file of ["extract.js", "search-fetcher.js", "formatters.js", "content.js"]) {
         const out = await cdp.send("Runtime.evaluate", { contextId: executionContextId, expression: readScript(file) });
         if (out.exceptionDetails) {
           return { url, ok: false, mode, failures: [`${file} threw: ${out.exceptionDetails.exception?.description?.split("\n")[0]}`] };

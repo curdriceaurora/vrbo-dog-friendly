@@ -2,7 +2,7 @@ const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
-const EXTENSION_ROOT = path.join(__dirname, "..");
+const EXTENSION_ROOT = path.join(__dirname, "..", "src");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=Seattle&house_rules_group=pets_allowed";
 
 // Realistic Vrbo search card structure with card-wide anchor overlay (.uitk-card-link)

@@ -2,7 +2,7 @@ const { chromium } = require("@playwright/test");
 const path = require("path");
 
 async function testHitTesting() {
-  const extensionPath = path.join(__dirname, "..");
+  const extensionPath = path.join(__dirname, "..", "src");
   const context = await chromium.launchPersistentContext("", {
     headless: false,
     args: [

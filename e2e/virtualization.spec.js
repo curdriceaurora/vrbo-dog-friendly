@@ -2,7 +2,7 @@ const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
-const EXTENSION_ROOT = path.join(__dirname, "..");
+const EXTENSION_ROOT = path.join(__dirname, "..", "src");
 const SEARCH_URL = "https://www.vrbo.com/Hotel-Search?destination=LakeTahoe&house_rules_group=pets_allowed";
 const LISTING_C_URL = "https://www.vrbo.com/3000003";
 
