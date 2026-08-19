@@ -8,6 +8,7 @@
       ext = require("./extract.js");
     } catch {}
     const api = factory(ext);
+    api.__factory = factory;
     module.exports = api;
     if (typeof globalThis !== "undefined") globalThis.VdpSiteRegistry = api;
   } else {

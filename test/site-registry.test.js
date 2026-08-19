@@ -252,18 +252,12 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
       delete globalThis.VDPExtract;
       delete globalThis.VdpExtract;
 
-      // Force site-registry to load with empty extractModule
-      delete require.cache[require.resolve("../src/shared/site-registry.js")];
-      require.cache[require.resolve("../src/shared/extract.js")] = { exports: {} };
-      const standaloneRegistry = require("../src/shared/site-registry.js");
+      const standaloneRegistry = siteRegistry.__factory(null);
       const v = standaloneRegistry.getSiteForHostname("vrbo.com");
       assert.equal(v.getPropertyId("https://www.vrbo.com/123456"), "123456");
       assert.equal(v.getPropertyId("https://www.vrbo.com/pdp/p9999"), "9999");
       assert.equal(v.getPropertyId("https://www.vrbo.com/search"), null);
     } finally {
-      delete require.cache[require.resolve("../src/shared/extract.js")];
-      delete require.cache[require.resolve("../src/shared/site-registry.js")];
-      require("../src/shared/site-registry.js");
       globalThis.VdpSearchFetcher = origSearchFetcher;
       globalThis.VDPExtract = origExtract;
       globalThis.VdpExtract = origVdpExtract;
