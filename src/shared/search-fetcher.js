@@ -1269,6 +1269,21 @@
     try {
       const u = new URL(urlStr, baseUrl);
       if (u.protocol !== "https:") return null;
+
+      const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
+        (typeof require === "function" ? require("./site-registry.js") : null);
+      if (siteRegistry) {
+        const site = siteRegistry.getSiteForUrl(u.href);
+        if (!site || !site.isListingUrl(u.href)) return null;
+        const propId = site.getPropertyId(u.href);
+        if (!propId) return null;
+        return {
+          propertyId: propId,
+          navigationUrl: u.href,
+          fetchUrl: `https://www.vrbo.com${u.pathname}`,
+        };
+      }
+
       if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
 
       const propId = extractPropertyIdFromUrl(urlStr, baseUrl);

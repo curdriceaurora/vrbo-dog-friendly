@@ -40,18 +40,26 @@
   const { getSentences, isPetRelated, buildCorpus, extractPolicy } = globalThis.VDPExtract;
   const { escapeHtml } = globalThis.VdpFormatters;
 
+  function getSiteRegistry() {
+    if (globalThis.VdpSiteRegistry) return globalThis.VdpSiteRegistry;
+    if (typeof console !== "undefined" && typeof console.warn === "function") {
+      console.warn("[vrbow] VdpSiteRegistry is unavailable; check script load order");
+    }
+    return null;
+  }
+
   function getListingIdFromUrl(urlStr) {
-    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
     return site ? site.getPropertyId(urlStr || location.href) : null;
   }
 
   function isListingUrl(urlStr) {
-    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
     return site ? site.isListingUrl(urlStr || location.href) : false;
   }
 
   function isSearchUrl(urlStr) {
-    const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr || location.href);
+    const site = getSiteRegistry()?.getSiteForUrl(urlStr || location.href);
     return site ? site.isSearchUrl(urlStr || location.href) : false;
   }
 
@@ -1081,16 +1089,10 @@
     try {
       const u = new URL(urlStr, location.href);
       if (u.protocol !== "https:") return null;
-      if (!/^(www\.)?vrbo\.com$/i.test(u.hostname)) return null;
-      const propId = getListingIdFromUrl(u.href);
+      const site = getSiteRegistry()?.getSiteForUrl(u.href);
+      if (!site || !site.isListingUrl(u.href)) return null;
+      const propId = site.getPropertyId(u.href);
       if (!propId) return null;
-      if (
-        !/^\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
-        !/^\/pdp(\/lo)?\/\d+[a-z0-9]*\/?$/i.test(u.pathname) &&
-        !/^\/vacation-rentals?(\/p)?\/?p?\d+[a-z0-9]*\/?$/i.test(u.pathname)
-      ) {
-        return null;
-      }
       return {
         propertyId: propId,
         navigationUrl: u.href,

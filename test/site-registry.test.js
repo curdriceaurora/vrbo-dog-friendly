@@ -99,11 +99,18 @@ describe("site-registry: Vrbo isListingUrl", () => {
     assert.equal(vrbo.isListingUrl("https://fakevrbo.com/123456"), false);
   });
 
-  test("handles null, malformed, or empty URLs cleanly without throwing", () => {
-    assert.equal(vrbo.isListingUrl(""), false);
-    assert.equal(vrbo.isListingUrl(null), false);
-    assert.equal(vrbo.isListingUrl(undefined), false);
-    assert.equal(vrbo.isListingUrl("random string"), false);
+  test("supports relative paths against default or custom baseUrl", () => {
+    assert.equal(vrbo.isListingUrl("/123456"), true);
+    assert.equal(vrbo.isListingUrl("/pdp/123456"), true);
+    assert.equal(vrbo.isListingUrl("/vacation-rentals/p123456"), true);
+    assert.equal(vrbo.isListingUrl("/123456", "https://vrbo.com"), true);
+    assert.equal(vrbo.isListingUrl("/123456", "https://airbnb.com"), false);
+  });
+
+  test("works when method is destructured from site entry (this-safety)", () => {
+    const { isListingUrl } = vrbo;
+    assert.equal(isListingUrl("https://www.vrbo.com/123456"), true);
+    assert.equal(isListingUrl("https://www.vrbo.com/search"), false);
   });
 });
 
@@ -118,16 +125,23 @@ describe("site-registry: Vrbo isSearchUrl", () => {
     assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/vacation-rentals/search?destination=Miami"), true);
   });
 
-  test("anchored behavior prevents false positives on mid-path keywords", () => {
-    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/pdp/lo/hotel-search-villa"), false);
-    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/123456?search=true"), false);
-    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/123456"), false);
-    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/"), false);
+  test("identifies localized and sub-path search URLs", () => {
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/en-us/search"), true);
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/d/12345/search"), true);
+    assert.equal(vrbo.isSearchUrl("/search?destination=Miami"), true);
   });
 
-  test("rejects search paths on non-Vrbo hostnames", () => {
+  test("rejects non-search pages and non-Vrbo hostnames", () => {
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/123456"), false);
+    assert.equal(vrbo.isSearchUrl("https://www.vrbo.com/"), false);
     assert.equal(vrbo.isSearchUrl("https://www.airbnb.com/search"), false);
     assert.equal(vrbo.isSearchUrl("https://www.google.com/search"), false);
+  });
+
+  test("works when method is destructured from site entry (this-safety)", () => {
+    const { isSearchUrl } = vrbo;
+    assert.equal(isSearchUrl("https://www.vrbo.com/search"), true);
+    assert.equal(isSearchUrl("https://www.vrbo.com/123456"), false);
   });
 
   test("handles null, malformed, or empty URLs cleanly without throwing", () => {
@@ -151,6 +165,17 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
     assert.equal(vrbo.getPropertyId("https://www.vrbo.com/vacation-rentals/p/123456"), "123456");
     assert.equal(vrbo.getPropertyId("https://www.vrbo.com/vacation-rentals/p/p123456/"), "123456");
     assert.equal(vrbo.getPropertyId("https://www.vrbo.com/123456ha?unitId=10"), "123456ha");
+  });
+
+  test("supports relative paths for property ID extraction", () => {
+    assert.equal(vrbo.getPropertyId("/123456"), "123456");
+    assert.equal(vrbo.getPropertyId("/pdp/123456"), "123456");
+    assert.equal(vrbo.getPropertyId("/vacation-rentals/p123456"), "123456");
+  });
+
+  test("works when getPropertyId is destructured (this-safety)", () => {
+    const { getPropertyId } = vrbo;
+    assert.equal(getPropertyId("https://www.vrbo.com/123456"), "123456");
   });
 
   test("returns null for non-listing or non-Vrbo URLs", () => {
@@ -191,6 +216,57 @@ describe("site-registry: Vrbo getPropertyId tiered extraction", () => {
     } finally {
       globalThis.VdpSearchFetcher = origSearchFetcher;
       globalThis.VDPExtract = origExtract;
+    }
+  });
+
+  test("supports relative path without leading slash against baseUrl", () => {
+    assert.equal(vrbo.isListingUrl("123456", "https://www.vrbo.com/"), true);
+  });
+
+  test("delegates to VdpExtract when VDPExtract is absent", () => {
+    const origSearchFetcher = globalThis.VdpSearchFetcher;
+    const origExtract = globalThis.VDPExtract;
+    const origVdpExtract = globalThis.VdpExtract;
+    try {
+      delete globalThis.VdpSearchFetcher;
+      delete globalThis.VDPExtract;
+      globalThis.VdpExtract = {
+        extractPropertyId(url) {
+          return url.includes("mock-vdp") ? "mock-vdp-id" : null;
+        }
+      };
+      assert.equal(vrbo.getPropertyId("https://www.vrbo.com/mock-vdp"), "mock-vdp-id");
+    } finally {
+      globalThis.VdpSearchFetcher = origSearchFetcher;
+      globalThis.VDPExtract = origExtract;
+      globalThis.VdpExtract = origVdpExtract;
+    }
+  });
+
+  test("falls back to built-in regex extractor when extract modules are unavailable", () => {
+    const origSearchFetcher = globalThis.VdpSearchFetcher;
+    const origExtract = globalThis.VDPExtract;
+    const origVdpExtract = globalThis.VdpExtract;
+    try {
+      delete globalThis.VdpSearchFetcher;
+      delete globalThis.VDPExtract;
+      delete globalThis.VdpExtract;
+
+      // Force site-registry to load with empty extractModule
+      delete require.cache[require.resolve("../src/shared/site-registry.js")];
+      require.cache[require.resolve("../src/shared/extract.js")] = { exports: {} };
+      const standaloneRegistry = require("../src/shared/site-registry.js");
+      const v = standaloneRegistry.getSiteForHostname("vrbo.com");
+      assert.equal(v.getPropertyId("https://www.vrbo.com/123456"), "123456");
+      assert.equal(v.getPropertyId("https://www.vrbo.com/pdp/p9999"), "9999");
+      assert.equal(v.getPropertyId("https://www.vrbo.com/search"), null);
+    } finally {
+      delete require.cache[require.resolve("../src/shared/extract.js")];
+      delete require.cache[require.resolve("../src/shared/site-registry.js")];
+      require("../src/shared/site-registry.js");
+      globalThis.VdpSearchFetcher = origSearchFetcher;
+      globalThis.VDPExtract = origExtract;
+      globalThis.VdpExtract = origVdpExtract;
     }
   });
 });

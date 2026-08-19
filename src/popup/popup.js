@@ -85,8 +85,16 @@ function withActiveTab(cb) {
   });
 }
 
+function getSiteRegistry() {
+  if (globalThis.VdpSiteRegistry) return globalThis.VdpSiteRegistry;
+  if (typeof console !== "undefined" && typeof console.warn === "function") {
+    console.warn("[vrbow] VdpSiteRegistry is unavailable; check script load order");
+  }
+  return null;
+}
+
 function isSearchUrl(urlStr) {
-  const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr);
+  const site = getSiteRegistry()?.getSiteForUrl(urlStr);
   return site ? site.isSearchUrl(urlStr) : false;
 }
 
@@ -99,7 +107,7 @@ function renderSearchPageNotice() {
 }
 
 function isListingUrl(urlStr) {
-  const site = globalThis.VdpSiteRegistry?.getSiteForUrl(urlStr);
+  const site = getSiteRegistry()?.getSiteForUrl(urlStr);
   return site ? site.isListingUrl(urlStr) : false;
 }
 

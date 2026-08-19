@@ -252,6 +252,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
           <div id="content"></div>
         </div>
         <script src="/formatters.js"></script>
+        <script src="/extract.js"></script>
         <script src="/site-registry.js"></script>
         <script src="/popup.js"></script>
       </body>
