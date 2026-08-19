@@ -197,6 +197,111 @@
       .trim();
   }
 
+  // ---------- pattern definitions (hoisted to module scope) ----------
+
+  // "No pets" etc., but NOT when it's actually a conditional restriction
+  // like "no pets over 30 lbs" / "no pets without prior approval" —
+  // those mean pets ARE allowed, just with a condition.
+  //
+  // The fee/deposit/charge exclusions matter just as much: "No pet fee"
+  // is a dog-FRIENDLY statement, and without them it matched here and
+  // rendered "Pets are not allowed" on a free, pet-welcoming listing.
+  const NOT_ALLOWED_RE = new RegExp(
+    `\\bno\\s+${PET}\\b(?!\\s*(?:over|above|larger|bigger|heavier|weighing|without|unless|except|fee|fees|deposit|deposits|charge|charges|surcharge))` +
+      `|\\b${PET}\\s+(?:(?:are|is)\\s+)?not\\s+(?:allowed|permitted)\\b(?!\\s*(?:over|above|without|unless|except))` +
+      `|\\b(?:pet|dog)[-\\s]?free\\b`,
+    "i"
+  );
+  const ALLOWED_RE = new RegExp(
+    `\\b${PET}\\s+(?:(?:are|is)\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b` +
+    `|\\b(?:dog|pet)[-\\s]?friendly\\b` +
+    `|\\b(?:allows?|permits?|welcomes?|accepts?)\\s+(?:up\\s+to\\s+)?(?:${NUM}\\s+)?${PET}\\b`,
+    "i"
+  );
+
+  const MAX_DOGS_RE = [
+    new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b`, "i"),
+    new RegExp(`\\b${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
+    new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))(?:\\s*total)?\\b`, "i"),
+    // "Two Dogs up to 50lbs welcome", "2 dogs (under 50 lbs)", "2 dogs, 50 lbs max" —
+    // the count leads and the qualifier or weight clause follows. Bounded
+    // to the same sentence and 40 characters so it stays a local claim.
+    new RegExp(`\\b${NUM}\\s+${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?|under|less than|up to|max(?:imum)?|lbs?|pounds?|pds?|kg|weight|limit)\\b)`, "i"),
+    // "Pets allowed: dogs (limit 2 total)" — count without a repeated noun.
+    new RegExp(`\\blimit(?:ed)?\\s*(?:to\\s*)?${NUM}\\s*total\\b`, "i"),
+  ];
+
+  const WEIGHT_RE = [
+    new RegExp(`\\b(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\s*(?:per (?:dog|pet)|each|max(?:imum)?|or (?:less|under)|weight limit)\\b`, "i"),
+    new RegExp(`\\bweight(?:\\s+limit)?\\s*(?:of|is|:|<|<=|≤)?\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
+    new RegExp(`\\b(?:up to|under|less than|max(?:imum)?(?:\\s+of)?|<|<=|≤)\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
+    new RegExp(`\\bcombined weight of\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
+  ];
+
+  // "pre-registered" is the most common phrasing of this rule, so the
+  // inflections have to be part of the alternative itself — a bare
+  // "pre-?register" can't match it, since the \b lands on the "ed".
+  const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
+
+  const TIERED_FEE_RE = new RegExp(
+    `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:(?:is|are)\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:(?:is|are)\\s+)?free))` +
+    `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:(?:is|are)\\s+)?` +
+    `${CUR}?\\s?${AMT}\\s*(?:each)?(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`,
+    "i"
+  );
+
+  const FEE_RE = [
+    new RegExp(`\\b(?:a\\s+)?(?:${CUR}\\s?${AMT}|${AMT}\\s?${CUR}|${AMT})\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:for\\s+(?:the\\s+)?(?:whole\\s+trip|entire\\s+stay|stay)|(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?)?`, "i"),
+    new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+    new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
+    new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
+    new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
+    new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
+  ];
+  const RELAXED_MAX_DOGS_RE = [
+    new RegExp(`^(?:max(?:imum)?|limit)?:?\\s*${NUM}(?:\\s*(?:pets?|dogs?))?$`, "i"),
+  ];
+
+  const RELAXED_WEIGHT_RE = [
+    new RegExp(`^(?:weight(?:\\s+limit)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
+    new RegExp(`^(?:max(?:imum)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
+  ];
+
+  const RELAXED_FEE_RE = [
+    new RegExp(`^(?:fee:?\\s*)?${CUR}\\s?${AMT}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
+    new RegExp(`^${AMT}\\s?${CUR}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
+    new RegExp(`^(?:pet|dog)?\\s*fee:?\\s*${CUR}\\s?${AMT}`, "i"),
+  ];
+
+  const UNPRICED_FEE_RE = /\b(there\s+is\s+(?:a\s+)?(?:one[-\s]?time\s+|non[-\s]?refundable\s+)?(?:pet|dog)\s+fee|(?:pet|dog)\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged|due|applicable|assessed)|(?:pet|dog)\s+fees?\s+apply|the\s+(?:pet|dog)\s+fee\s+paid|(?:subject\s+to|requires?|incurs?)\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?(?:pet|dog)\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
+  const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
+  const DEPOSIT_RE = [
+    new RegExp(`${CUR}\\s?${AMT}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),
+    new RegExp(`${AMT}\\s?${CUR}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),
+    new RegExp(`(?:pet|dog)\\s*deposit\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}`, "i"),
+    new RegExp(`(?:pet|dog)\\s*deposit\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}`, "i"),
+  ];
+
+  function normalizeFeePhrasing(text) {
+    if (!text || typeof text !== "string") return text;
+    return text
+      .replace(/\bper\s+each\s+(pet|dog)s?\b/gi, "per $1")
+      .replace(/\beach\s+(pet|dog)s?\b/gi, "per $1");
+  }
+
+  function firstMatch(patterns, s) {
+    for (const re of patterns) {
+      const m = s.match(re);
+      if (m) return m;
+    }
+    return null;
+  }
+
   // ---------- extraction ----------
 
   function extractPolicy(rawEntries) {
@@ -234,94 +339,6 @@
       entries,
     };
 
-    // "No pets" etc., but NOT when it's actually a conditional restriction
-    // like "no pets over 30 lbs" / "no pets without prior approval" —
-    // those mean pets ARE allowed, just with a condition.
-    //
-    // The fee/deposit/charge exclusions matter just as much: "No pet fee"
-    // is a dog-FRIENDLY statement, and without them it matched here and
-    // rendered "Pets are not allowed" on a free, pet-welcoming listing.
-    const NOT_ALLOWED_RE = new RegExp(
-      `\\bno\\s+${PET}\\b(?!\\s*(?:over|above|larger|bigger|heavier|weighing|without|unless|except|fee|fees|deposit|deposits|charge|charges|surcharge))` +
-        `|\\b${PET}\\s+(?:(?:are|is)\\s+)?not\\s+(?:allowed|permitted)\\b(?!\\s*(?:over|above|without|unless|except))` +
-        `|\\b(?:pet|dog)[-\\s]?free\\b`,
-      "i"
-    );
-    const ALLOWED_RE = new RegExp(
-      `\\b${PET}\\s+(?:(?:are|is)\\s+)?(?:allowed|permitted|welcome|ok(?:ay)?)\\b` +
-      `|\\b(?:dog|pet)[-\\s]?friendly\\b` +
-      `|\\b(?:allows?|permits?|welcomes?|accepts?)\\s+(?:up\\s+to\\s+)?(?:${NUM}\\s+)?${PET}\\b`,
-      "i"
-    );
-
-    const MAX_DOGS_RE = [
-      new RegExp(`\\b(?:up to|maximum(?:\\s+of)?|max\\.?|no more than|limit(?:ed)? to|limit of|allows?|permits?|welcomes?|accepts?)\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b`, "i"),
-      new RegExp(`\\b${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\s*(?:max(?:imum)?|allowed|permitted|welcome|ok(?:ay)?|total)\\b`, "i"),
-      new RegExp(`\\blimit\\s*${NUM}\\s*${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))(?:\\s*total)?\\b`, "i"),
-      // "Two Dogs up to 50lbs welcome", "2 dogs (under 50 lbs)", "2 dogs, 50 lbs max" —
-      // the count leads and the qualifier or weight clause follows. Bounded
-      // to the same sentence and 40 characters so it stays a local claim.
-      new RegExp(`\\b${NUM}\\s+${PET}(?!\\s*(?:fee|fees|deposit|deposits|charge|charges|surcharge|rate|rent))\\b(?=[^.]{0,40}\\b(?:welcome|allowed|permitted|ok(?:ay)?|under|less than|up to|max(?:imum)?|lbs?|pounds?|pds?|kg|weight|limit)\\b)`, "i"),
-      // "Pets allowed: dogs (limit 2 total)" — count without a repeated noun.
-      new RegExp(`\\blimit(?:ed)?\\s*(?:to\\s*)?${NUM}\\s*total\\b`, "i"),
-    ];
-
-    const WEIGHT_RE = [
-      new RegExp(`\\b(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\s*(?:per (?:dog|pet)|each|max(?:imum)?|or (?:less|under)|weight limit)\\b`, "i"),
-      new RegExp(`\\bweight(?:\\s+limit)?\\s*(?:of|is|:|<|<=|≤)?\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
-      new RegExp(`\\b(?:up to|under|less than|max(?:imum)?(?:\\s+of)?|<|<=|≤)\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
-      new RegExp(`\\bcombined weight of\\s*(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}\\b`, "i"),
-    ];
-
-    // "pre-registered" is the most common phrasing of this rule, so the
-    // inflections have to be part of the alternative itself — a bare
-    // "pre-?register" can't match it, since the \b lands on the "ed".
-    const PREREG_RE = /\b(pre-?register(?:ed|ation|s)?|register(?:ed|ation)?\s+(?:your|the)?\s*pets?|must\s+be\s+(?:pre-?)?registered|registration\s+(?:is\s+)?required|must\s+be\s+declared|declare\s+(?:your|the)?\s*pets?|declaration\s+(?:is\s+)?required|include\s+(?:your\s+)?pets?\s+(?:when|in\s+(?:your\s+)?(?:booking|reservation|inquiry|message|count|telling))|tell\s+us\s+(?:about\s+)?(?:your\s+)?pets?|notify\s+(?:the\s+)?(?:host|owner|property|management)|please\s+notify|let\s+us\s+know|inform\s+(?:the\s+)?(?:host|owner|property)|advance\s+notice|prior\s+(?:approval|permission|notice)|contact\s+(?:the\s+)?(?:host|owner|property)\s+(?:before|prior to)|must\s+be\s+approved|approval\s+(?:is\s+)?required)\b/i;
-
-    const TIERED_FEE_RE = new RegExp(
-      `(?:(?:one|1|first|1st)\\s+${PET}\\s+(?:(?:is|are)\\s+)?(?:allowed\\s+(?:at\\s+)?no\\s+(?:additional\\s+)?(?:cost|fee|charge)|(?:(?:is|are)\\s+)?free))` +
-      `[,;\\s]+(?:each\\s+)?(?:subsequent|additional|extra|further|other|2nd|second)\\s+${PET}\\s+(?:(?:is|are)\\s+)?` +
-      `${CUR}?\\s?${AMT}\\s*(?:each)?(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`,
-      "i"
-    );
-
-    const FEE_RE = [
-      new RegExp(`\\b(?:a\\s+)?(?:${CUR}\\s?${AMT}|${AMT}\\s?${CUR}|${AMT})\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:pet|dog)\\s*fee(?:\\s*(?:for\\s+(?:the\\s+)?(?:whole\\s+trip|entire\\s+stay|stay)|(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?)?`, "i"),
-      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s?${CUR}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${CUR}\\s?${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:one[-\\s]?time|non[-\\s]?refundable)?\\s*(?:\\+\\s*tax\\s*)?(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<target>pet|dog|each)(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:/|per\\s*)(?<time>night|stay|day)(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?`, "i"),
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:flat|total)?\\s*(?:fee)?\\s*(?:per\\s+stay)?\\s*(?:for\\s+(?:the\\s+)?(?:maximum|all|up\\s+to\\s+\\d+)?\\s*(?:allowed\\s+)?(?:pets?|dogs?))`, "i"),
-      new RegExp(`(?:(?:pet|dog|additional|extra)\\s+)?fee(?:\\s*(?:of|is|:))?\\s*${AMT}\\s*(?:(?:/|per\\s*)(?<target>pet|dog|each))?\\s*(?:(?:/|per\\s*)(?<time>night|stay|day))?`, "i"),
-    ];
-    const RELAXED_MAX_DOGS_RE = [
-      new RegExp(`^(?:max(?:imum)?|limit)?:?\\s*${NUM}(?:\\s*(?:pets?|dogs?))?$`, "i"),
-    ];
-
-    const RELAXED_WEIGHT_RE = [
-      new RegExp(`^(?:weight(?:\\s+limit)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
-      new RegExp(`^(?:max(?:imum)?:?\\s*)?(?<amt>\\d{1,3})\\s*${WEIGHT_UNIT}$`, "i"),
-    ];
-
-    const RELAXED_FEE_RE = [
-      new RegExp(`^(?:fee:?\\s*)?${CUR}\\s?${AMT}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
-      new RegExp(`^${AMT}\\s?${CUR}(?:\\s*(?:/|per\\s*)(?<target>pet|dog|each))?(?:\\s*(?:/|per\\s*)(?<time>night|stay|day))?$`, "i"),
-      new RegExp(`^(?:pet|dog)?\\s*fee:?\\s*${CUR}\\s?${AMT}`, "i"),
-    ];
-
-    const UNPRICED_FEE_RE = /\b(there\s+is\s+(?:a\s+)?(?:one[-\s]?time\s+|non[-\s]?refundable\s+)?(?:pet|dog)\s+fee|(?:pet|dog)\s+fee\s+(?:is\s+)?(?:paid|applies|required|charged|due|applicable|assessed)|(?:pet|dog)\s+fees?\s+apply|the\s+(?:pet|dog)\s+fee\s+paid|(?:subject\s+to|requires?|incurs?)\s+(?:a\s+)?(?:pet|dog)\s+fee|(?:additional\s+)?(?:pet|dog)\s+fee\s+applies|fee\s+applies\s+for\s+pets?)\b/i;
-    const NO_FEE_RE = new RegExp(`\\bno\\s+(?:additional\\s+)?(?:pet|dog)\\s*(?:fee|charge)s?\\b|\\b${PET}\\s+(?:stay\\s+)?free\\b`, "i");
-    const DEPOSIT_RE = [
-      new RegExp(`${CUR}\\s?${AMT}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),
-      new RegExp(`${AMT}\\s?${CUR}\\s*(?:refundable\\s*)?(?:pet|dog)\\s*deposit`, "i"),
-      new RegExp(`(?:pet|dog)\\s*deposit\\s*(?:of|is|:)?\\s*${CUR}\\s?${AMT}`, "i"),
-      new RegExp(`(?:pet|dog)\\s*deposit\\s*(?:of|is|:)?\\s*${AMT}\\s?${CUR}`, "i"),
-    ];
-
     function record(field, snippetField, sourceField, altField, value, entry, sameAs) {
       const eq = sameAs || ((a, b) => a === b);
       if (result[field] === null) {
@@ -331,14 +348,6 @@
       } else if (!eq(result[field], value) && !result[altField].some((a) => eq(a.value, value))) {
         result[altField].push({ value, snippet: entry.text, source: entry.source });
       }
-    }
-
-    function firstMatch(patterns, s) {
-      for (const re of patterns) {
-        const m = s.match(re);
-        if (m) return m;
-      }
-      return null;
     }
 
     for (const entry of entries) {
@@ -357,13 +366,6 @@
           result.petsAllowedSource = entry.source;
           usedForField = true;
         }
-      }
-
-      function normalizeFeePhrasing(text) {
-        if (!text || typeof text !== "string") return text;
-        return text
-          .replace(/\bper\s+each\s+(pet|dog)s?\b/gi, "per $1")
-          .replace(/\beach\s+(pet|dog)s?\b/gi, "per $1");
       }
 
       const feeNormalized = normalizeFeePhrasing(s);
@@ -850,7 +852,9 @@
       if (/^pets?$/i.test(nextHeader)) explicitPet = true;
     }
 
-    for (const [k, v] of Object.entries(node)) {
+    for (const k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      const v = node[k];
       if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim().length > 0) {
         out.push({
           header: nextHeader || "Listing Data",

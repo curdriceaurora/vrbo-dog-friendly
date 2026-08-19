@@ -42,6 +42,38 @@
     return node;
   }
 
+  function findApolloRoot(state, id) {
+    if (!state || !id || typeof state !== "object") return null;
+    const strId = String(id);
+    const candidates = [
+      `PropertyInfo:${strId}`,
+      `propertyInfo:${strId}`,
+      `Property:${strId}`,
+      `property:${strId}`,
+    ];
+    for (const key of candidates) {
+      if (state[key]) return { key, root: state[key] };
+    }
+    const lowerId = strId.toLowerCase();
+    const lowerCandidates = [
+      `PropertyInfo:${lowerId}`,
+      `propertyInfo:${lowerId}`,
+      `Property:${lowerId}`,
+      `property:${lowerId}`,
+    ];
+    for (const key of lowerCandidates) {
+      if (state[key]) return { key, root: state[key] };
+    }
+    for (const k in state) {
+      if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
+      const lowerKey = k.toLowerCase();
+      if (lowerKey === `propertyinfo:${lowerId}` || lowerKey === `property:${lowerId}`) {
+        return { key: k, root: state[k] };
+      }
+    }
+    return null;
+  }
+
   // Walk the full property object, collecting every leaf string found
   // under a "value"/"text" key, tagged with the nearest enclosing
   // header text (e.g. "Pets", "House Rules", "About this property").
@@ -74,7 +106,9 @@
       if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
     }
 
-    for (const [k, v] of Object.entries(node)) {
+    for (const k in node) {
+      if (!Object.prototype.hasOwnProperty.call(node, k)) continue;
+      const v = node[k];
       if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim() && v.trim().length > 1) {
         out.push({ header: nextHeader, section: nextSection || nextHeader, text: v.trim() });
       } else if (v && typeof v === "object") {
@@ -98,10 +132,9 @@
     const currentId = getListingIdFromUrl();
     if (!currentId) return null;
 
-    const infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${currentId.toLowerCase()}`);
-    if (!infoKey) return null;
-    const root = state[infoKey];
-    if (!root) return null;
+    const match = findApolloRoot(state, currentId);
+    if (!match || !match.root) return null;
+    const { key: infoKey, root } = match;
 
     const out = [];
     walkCollect(state, root, null, null, out, new Set(), 0);
@@ -138,10 +171,9 @@
     const ids = Array.isArray(propertyIds) ? propertyIds.filter((id) => typeof id === "string" && id) : [];
     const results = {};
     for (const id of ids.slice(0, 40)) {
-      const infoKey = Object.keys(state).find((k) => k.toLowerCase() === `propertyinfo:${id.toLowerCase()}`);
-      if (!infoKey) continue;
-      const root = state[infoKey];
-      if (!root) continue;
+      const match = findApolloRoot(state, id);
+      if (!match || !match.root) continue;
+      const root = match.root;
       const out = [];
       walkCollect(state, root, null, null, out, new Set(), 0);
       const seen = new Set();
