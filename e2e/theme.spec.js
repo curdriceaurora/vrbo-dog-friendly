@@ -1,6 +1,7 @@
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail");
 
 const fixtures = path.join(__dirname, "..", "test", "fixtures");
 const fixtureUrl = (name) => pathToFileURL(path.join(fixtures, name)).href;
@@ -64,6 +65,10 @@ const EXPECTED_COLORS = {
     controlBorder: "rgb(138, 143, 148)"
   }
 };
+
+test.beforeEach(async ({ context, page }) => {
+  await installNetworkGuard(context, page);
+});
 
 for (const scheme of ["light", "dark"]) {
   test.describe(`${scheme} theme`, () => {
@@ -214,6 +219,7 @@ test("updates search badges and tooltips dynamically on live prefers-color-schem
 test("8.2.5: supports forced-colors active mode with visible boundaries and operable focus controls", async ({ browser }) => {
   const context = await browser.newContext({ forcedColors: "active" });
   const page = await context.newPage();
+  const guard = await installNetworkGuard(context, page);
 
   // 1. Listing Panel & Search Badges in Forced Colors
   await page.goto(fixtureUrl("panel-theme.html"));
@@ -258,6 +264,7 @@ test("8.2.5: supports forced-colors active mode with visible boundaries and oper
   await rescan.focus();
   await expect(rescan).toHaveCSS("outline-style", "solid");
 
+  await guard.assertNoLeakedRequests(page);
   await context.close();
 });
 

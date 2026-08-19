@@ -996,6 +996,7 @@
         pendingEnqueues.delete(propertyId);
         if (cached && cached.status === "ok") {
           enqueuedOrActive.delete(propertyId);
+          highPriorityIds.delete(propertyId);
           notify(propertyId, cached);
           return;
         }

@@ -812,8 +812,6 @@
           activeQueue.setCached(propId, fast).finally(() => {
             if (searchQueue && searchQueue === activeQueue && document.querySelector(`[data-vdp-prop-id="${propId}"]`)) {
               activeQueue.enqueue(propId, url, priority);
-              searchStats.dispatched++;
-              sampleQueueDepth("dispatch");
             }
           });
           return;
@@ -1599,7 +1597,7 @@
         // dropped. The search -> listing branch below still disposes outright.
         pruneStaleSearchCards();
         chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
-          if (data && data.vrbow_enable_search_badging === true) initSearchManager();
+          if (!data || data.vrbow_enable_search_badging !== false) initSearchManager();
         });
       } else if (isListingUrl(location.href)) {
         cleanupSearchManager();

@@ -1,6 +1,7 @@
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const { expect, test } = require("@playwright/test");
+const { installNetworkGuard } = require("./guardrail");
 
 const FIXTURES = path.join(__dirname, "..", "test", "fixtures");
 const TARGET_STYLESHEETS = new Set(["tokens.css", "content.css", "popup.css"]);
@@ -38,6 +39,7 @@ test("exercises 100% of production theme rules across color schemes and forced c
     for (const fixture of ["panel-theme.html", "popup-theme.html"]) {
       const context = await browser.newContext(contextConfig);
       const page = await context.newPage();
+      const guard = await installNetworkGuard(context, page);
       await page.coverage.startCSSCoverage({ resetOnNavigation: false });
       await page.goto(pathToFileURL(path.join(FIXTURES, fixture)).href);
 
@@ -122,6 +124,7 @@ test("exercises 100% of production theme rules across color schemes and forced c
         current.ranges.push(...entry.ranges);
         aggregate.set(filename, current);
       }
+      await guard.assertNoLeakedRequests(page);
       await context.close();
     }
   }

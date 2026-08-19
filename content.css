@@ -182,10 +182,7 @@
 }
 
 /* Elevate container hosting badge above full-card anchor overlays */
-[data-vdp-prop-id] :has(> .vdp-search-badge),
-[data-vdp-prop-id] .uitk-card-content,
-[data-vdp-prop-id] [data-stid*="content"],
-[data-vdp-prop-id] [data-stid*="price"] {
+[data-vdp-prop-id] :has(> .vdp-search-badge) {
   position: relative !important;
   z-index: 2 !important;
   pointer-events: auto !important;
