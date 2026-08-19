@@ -45,6 +45,9 @@
     if (extract && typeof extract.walkApolloNode === "function") {
       return extract.walkApolloNode(state, node, headerCtx, sectionCtx, out, visited, depth, isExplicitPetContext);
     }
+    if (typeof console !== "undefined" && typeof console.warn === "function") {
+      console.warn("[vrbow] extract.walkApolloNode is unavailable; check script load order");
+    }
   }
 
   /**

@@ -773,12 +773,18 @@
   // Read-only devtools hook. Returns a copy; nothing here is persisted or sent.
   globalThis.__vdpSearchStats = getSearchStats;
 
+  /**
+   * Checks whether another live (connected) card DOM element currently shares
+   * this property ID, lazily sweeping any detached/recycled nodes encountered
+   * during iteration (deleting current elements in Set iteration is well-defined).
+   */
   function anotherCardHasPropId(propId, exceptCard) {
     if (!propId) return false;
     const set = cardsByPropertyId.get(propId);
     if (!set || set.size === 0) return false;
     let hasAnother = false;
     for (const node of set) {
+      // Lazy sweep: prune detached nodes so they don't linger across SPA re-renders
       if (!node || !node.isConnected) {
         set.delete(node);
       } else if (node !== exceptCard) {
