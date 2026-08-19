@@ -48,8 +48,6 @@
     const candidates = [
       `PropertyInfo:${strId}`,
       `propertyInfo:${strId}`,
-      `Property:${strId}`,
-      `property:${strId}`,
     ];
     for (const key of candidates) {
       if (state[key]) return { key, root: state[key] };
@@ -58,8 +56,6 @@
     const lowerCandidates = [
       `PropertyInfo:${lowerId}`,
       `propertyInfo:${lowerId}`,
-      `Property:${lowerId}`,
-      `property:${lowerId}`,
     ];
     for (const key of lowerCandidates) {
       if (state[key]) return { key, root: state[key] };
@@ -67,7 +63,7 @@
     for (const k in state) {
       if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
       const lowerKey = k.toLowerCase();
-      if (lowerKey === `propertyinfo:${lowerId}` || lowerKey === `property:${lowerId}`) {
+      if (lowerKey === `propertyinfo:${lowerId}`) {
         return { key: k, root: state[k] };
       }
     }

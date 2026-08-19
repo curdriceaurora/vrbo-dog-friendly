@@ -242,7 +242,7 @@
         const isToggle = TOGGLE_TEXT_RE.test(label);
         const isAriaFalse = el.getAttribute("aria-expanded") === "false";
         if (!isToggle && !isAriaFalse) return false;
-        if (isAriaFalse && !inRelevantSection(el)) return false;
+        if (!isToggle && isAriaFalse && !inRelevantSection(el)) return false;
         if (!(el.offsetParent !== null || el.getClientRects().length > 0)) return false;
         return true;
       });
@@ -1837,6 +1837,7 @@
         getTrackedSearchCards: () => trackedSearchCards,
         getSearchCardObserver: () => searchCardObserver,
         SEARCH_SCAN_THROTTLE_MS,
+        expandCollapsedSections,
       },
     };
   }

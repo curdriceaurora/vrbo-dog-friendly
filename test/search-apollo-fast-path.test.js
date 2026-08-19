@@ -204,6 +204,19 @@ test("8.1.1 one property's graph cannot populate another property's badge", () =
   assert.equal(both.results["111"].items.some((it) => it.text.includes("Dogs welcome")), true);
 });
 
+test("8.1.1 findApolloRoot only matches PropertyInfo: keys, not generic Property: entities", () => {
+  // A "Property:111" entity with no matching "PropertyInfo:111" record. The
+  // O(1) lookup added in perf/pipeline-hotspots-and-lru-cache must not widen
+  // matching to accept this — Property: entities are a different Apollo
+  // shape than PropertyInfo:, and resolving one would walk the wrong node.
+  const bridge = loadBridge({
+    "Property:111": { name: "A generic property entity, not the PropertyInfo shape" },
+  });
+
+  const payload = bridge.request(["111"], 1);
+  assert.equal(payload.results["111"], undefined, "a bare Property: key must not resolve the fast path");
+});
+
 test("8.1.1 resolveSearchApolloRecord returns null for records with no concrete policy", () => {
   assert.equal(resolveSearchApolloRecord(null, "x"), null);
   assert.equal(resolveSearchApolloRecord({ propertyId: "x", items: [] }, "x"), null);
