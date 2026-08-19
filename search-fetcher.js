@@ -37,6 +37,7 @@
   const PAUSE_ON_CHALLENGE_MS = 30000; // 30s backoff if 429 or challenge encountered
   const DEFAULT_COOLDOWN_MS = 30000; // 30s cooldown for terminal states
   const DEFAULT_MAX_MEMORY_ENTRIES = 250; // Cap on in-memory LRU cache entries
+  const DEFAULT_IDLE_TIMEOUT_MS = 1000; // Mandatory fallback timeout for requestIdleCallback
 
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
@@ -369,6 +370,27 @@
     const maxMemoryEntries = typeof options.maxMemoryEntries === "number"
       ? options.maxMemoryEntries
       : DEFAULT_MAX_MEMORY_ENTRIES;
+    const idleCallbackTimeoutMs = typeof options.idleCallbackTimeoutMs === "number"
+      ? options.idleCallbackTimeoutMs
+      : DEFAULT_IDLE_TIMEOUT_MS;
+    const requestIdleCallbackFn = typeof options.requestIdleCallbackFn === "function"
+      ? options.requestIdleCallbackFn
+      : (typeof globalThis.requestIdleCallback === "function"
+          ? globalThis.requestIdleCallback.bind(globalThis)
+          : ((fn, opts) => {
+              const start = Date.now();
+              return setTimeout(() => {
+                fn({
+                  didTimeout: Boolean(opts && typeof opts.timeout === "number" && (Date.now() - start) >= opts.timeout),
+                  timeRemaining: () => Math.max(0, 50 - (Date.now() - start)),
+                });
+              }, 0);
+            }));
+    const cancelIdleCallbackFn = typeof options.cancelIdleCallbackFn === "function"
+      ? options.cancelIdleCallbackFn
+      : (typeof globalThis.cancelIdleCallback === "function"
+          ? globalThis.cancelIdleCallback.bind(globalThis)
+          : ((id) => clearTimeout(id)));
 
     const memoryCache = new Map();
     const terminalCooldowns = new Map(); // propertyId -> { data, expiresAt, allowBypass }
@@ -394,6 +416,8 @@
     let isProcessing = false;
     let pausedUntil = 0;
     let isDisposed = false;
+    let idleHandle = null;
+    let scrollPaused = false;
     // Two trackers, not three. lastDispatchAt is written by every dispatch (both classes),
     // so it is always at least as recent as a dedicated high-priority tracker would be.
     let lastDispatchAt = 0;
@@ -432,6 +456,38 @@
       }, ms);
       scheduledTimers.add(timer);
       return timer;
+    }
+
+    function scheduleProcessQueue() {
+      if (isDisposed) return;
+
+      // High-priority cut-through: cancel pending idle callback and dispatch synchronously
+      if (highPriorityIds.size > 0) {
+        if (idleHandle !== null) {
+          cancelIdleCallbackFn(idleHandle);
+          idleHandle = null;
+        }
+        processQueue();
+        return;
+      }
+
+      // Coalesce duplicate idle dispatches
+      if (idleHandle !== null) return;
+
+      idleHandle = requestIdleCallbackFn(() => {
+        idleHandle = null;
+        if (!isDisposed) {
+          processQueue();
+        }
+      }, { timeout: idleCallbackTimeoutMs });
+    }
+
+    function setScrollPaused(paused) {
+      const wasPaused = scrollPaused;
+      scrollPaused = Boolean(paused);
+      if (wasPaused && !scrollPaused && !isDisposed) {
+        scheduleProcessQueue();
+      }
     }
 
     function subscribe(propertyId, callback) {
@@ -711,6 +767,13 @@
           if (nextIndex === -1) nextIndex = 0;
           const candidate = queue[nextIndex];
 
+          // SCROLL GATE: normal items break the loop without touching any other state
+          // (ladder, pausedUntil, lastNonSuccessAt are all untouched); high-priority
+          // items (user hover) proceed unimpeded regardless of scroll state.
+          if (!isHighPriority && scrollPaused) {
+            break;
+          }
+
           // Resolutions that issue no network request are settled before the pacing gate,
           // so a skipped item never consumes a dispatch slot's worth of delay.
 
@@ -758,7 +821,7 @@
             .finally(() => {
               activeRequests.delete(nextItem.propertyId);
               enqueuedOrActive.delete(nextItem.propertyId);
-              if (!isDisposed) processQueue();
+              if (!isDisposed) scheduleProcessQueue();
             });
         }
       } finally {
@@ -983,7 +1046,7 @@
         }
 
         queue.push({ propertyId, url, priority });
-        processQueue();
+        scheduleProcessQueue();
       });
     }
 
@@ -1024,7 +1087,7 @@
 
     function onVisibilityChange() {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        processQueue();
+        scheduleProcessQueue();
       }
     }
 
@@ -1043,6 +1106,10 @@
         clearTimeout(t);
       }
       scheduledTimers.clear();
+      if (idleHandle !== null) {
+        cancelIdleCallbackFn(idleHandle);
+        idleHandle = null;
+      }
       if (pauseTimer) {
         clearTimeout(pauseTimer);
         pauseTimer = null;
@@ -1067,6 +1134,8 @@
       clearQueue,
       dispose,
       subscribe,
+      setScrollPaused,
+      isScrollPaused: () => scrollPaused,
       getQueueLength: () => queue.length,
       // Items staged by enqueue() whose async getCached() has not resolved yet, so
       // they are not in `queue` and not yet counted by getQueueLength(). #23's gate
