@@ -1116,8 +1116,12 @@
 
   /**
    * Extract numeric/alphanumeric property ID from a Vrbo listing URL or path.
+   * Delegates to shared pure extractor in extract.js.
    */
   function extractPropertyIdFromUrl(urlStr, baseUrl = "https://www.vrbo.com") {
+    if (extract && typeof extract.extractPropertyId === "function") {
+      return extract.extractPropertyId(urlStr, baseUrl);
+    }
     if (!urlStr || typeof urlStr !== "string") return null;
     try {
       const u = new URL(urlStr, baseUrl);

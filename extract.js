@@ -786,19 +786,18 @@
   /**
    * Universal Vrbo property ID extractor from URL strings or pathnames.
    */
-  function extractPropertyId(urlOrPath) {
+  function extractPropertyId(urlOrPath, baseUrl = "https://www.vrbo.com") {
     if (!urlOrPath || typeof urlOrPath !== "string") return null;
     let path = urlOrPath;
     try {
-      if (path.startsWith("http://") || path.startsWith("https://")) {
-        path = new URL(urlOrPath).pathname;
-      }
+      const u = new URL(urlOrPath, baseUrl);
+      path = u.pathname;
     } catch {}
     const m = /(?:\/pdp(?:\/lo)?\/|\/vacation-rentals?(?:\/p)?\/p?|\/)(p?\d+[a-z0-9]*)(?:\/|\?|$)/i.exec(path);
     if (!m) return null;
     let id = m[1];
     if (/^p\d+/i.test(id)) id = id.slice(1);
-    return id;
+    return id || null;
   }
 
   /**

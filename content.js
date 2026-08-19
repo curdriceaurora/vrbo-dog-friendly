@@ -705,10 +705,13 @@
   }
 
   function untrackCardPropId(propId, card) {
-    if (!propId || !card) return;
+    if (!propId) return;
     const set = cardsByPropertyId.get(propId);
     if (set) {
-      set.delete(card);
+      if (card) set.delete(card);
+      for (const node of set) {
+        if (!node || !node.isConnected) set.delete(node);
+      }
       if (set.size === 0) cardsByPropertyId.delete(propId);
     }
   }
@@ -774,10 +777,16 @@
     if (!propId) return false;
     const set = cardsByPropertyId.get(propId);
     if (!set || set.size === 0) return false;
+    let hasAnother = false;
     for (const node of set) {
-      if (node !== exceptCard && node.isConnected) return true;
+      if (!node || !node.isConnected) {
+        set.delete(node);
+      } else if (node !== exceptCard) {
+        hasAnother = true;
+      }
     }
-    return false;
+    if (set.size === 0) cardsByPropertyId.delete(propId);
+    return hasAnother;
   }
 
   // 8.1.1 Search-page Apollo fast path: before any listing-page request,
@@ -1128,15 +1137,16 @@
         }
       }
       if (!anotherCardHasPropId(propId, card)) {
-        if (searchQueue.remove(propId)) {
-          searchStats.prunedStale++;
-          sampleQueueDepth("prune-stale");
-        }
+        searchQueue.remove(propId);
         discoveredSearchPropIds.delete(propId);
       }
       untrackCardPropId(propId, card);
       trackedSearchCards.delete(propId);
       pruned++;
+    }
+    if (pruned) {
+      searchStats.prunedStale += pruned;
+      sampleQueueDepth("prune-stale");
     }
     return pruned;
   }
