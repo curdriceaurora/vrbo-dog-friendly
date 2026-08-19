@@ -692,6 +692,26 @@
   // owns it. This is the ledger I7's prune walks: a tracked id whose node has
   // left the DOM is stale work that must be dropped.
   const trackedSearchCards = new Map(); // propertyId -> card element
+  const cardsByPropertyId = new Map(); // propertyId -> Set<card element> for O(1) duplicate checks
+
+  function trackCardPropId(propId, card) {
+    if (!propId || !card) return;
+    let set = cardsByPropertyId.get(propId);
+    if (!set) {
+      set = new Set();
+      cardsByPropertyId.set(propId, set);
+    }
+    set.add(card);
+  }
+
+  function untrackCardPropId(propId, card) {
+    if (!propId || !card) return;
+    const set = cardsByPropertyId.get(propId);
+    if (set) {
+      set.delete(card);
+      if (set.size === 0) cardsByPropertyId.delete(propId);
+    }
+  }
 
   // I9: mutation-driven scans run on a leading-edge throttle. The first scan of
   // a burst runs synchronously (card binding must not lag a re-render), the rest
@@ -699,6 +719,15 @@
   const SEARCH_SCAN_THROTTLE_MS = 250;
   let lastSearchScanAt = 0;
   let searchScanThrottleTimer = null;
+
+  // Static query selector for search cards across desktop/mobile Vrbo layouts
+  const CARD_SELECTORS_QUERY = [
+    '[data-stid="property-card"]',
+    '[data-stid="lodging-card-responsive"]',
+    '[data-testid="property-card"]',
+    'article[data-stid*="card"]',
+    'div[data-stid*="property-card"]',
+  ].join(", ");
 
   // Instrumentation for #23's gating condition. LOCAL ONLY: these are in-memory
   // counters, readable from the devtools console of this isolated world via
@@ -743,14 +772,10 @@
 
   function anotherCardHasPropId(propId, exceptCard) {
     if (!propId) return false;
-    let nodes;
-    try {
-      nodes = document.querySelectorAll(`[data-vdp-prop-id="${propId}"]`);
-    } catch {
-      return false;
-    }
-    for (const node of nodes) {
-      if (node !== exceptCard) return true;
+    const set = cardsByPropertyId.get(propId);
+    if (!set || set.size === 0) return false;
+    for (const node of set) {
+      if (node !== exceptCard && node.isConnected) return true;
     }
     return false;
   }
@@ -768,7 +793,11 @@
   function requestSearchApolloData() {
     if (!discoveredSearchPropIds.size) return null;
     const requestId = ++searchApolloRequestId;
-    const propertyIds = Array.from(discoveredSearchPropIds).slice(0, 40);
+    const propertyIds = [];
+    for (const id of discoveredSearchPropIds) {
+      propertyIds.push(id);
+      if (propertyIds.length === 40) break;
+    }
     try {
       window.dispatchEvent(new CustomEvent("vdp-search-apollo-request", { detail: { propertyIds, requestId } }));
     } catch (e) {
@@ -1000,6 +1029,7 @@
     hideTooltip();
     discoveredSearchPropIds.clear();
     trackedSearchCards.clear();
+    cardsByPropertyId.clear();
     if (searchScanThrottleTimer) {
       clearTimeout(searchScanThrottleTimer);
       searchScanThrottleTimer = null;
@@ -1098,15 +1128,15 @@
         }
       }
       if (!anotherCardHasPropId(propId, card)) {
-        searchQueue.remove(propId);
+        if (searchQueue.remove(propId)) {
+          searchStats.prunedStale++;
+          sampleQueueDepth("prune-stale");
+        }
         discoveredSearchPropIds.delete(propId);
       }
+      untrackCardPropId(propId, card);
       trackedSearchCards.delete(propId);
       pruned++;
-    }
-    if (pruned) {
-      searchStats.prunedStale += pruned;
-      sampleQueueDepth("prune-stale");
     }
     return pruned;
   }
@@ -1114,15 +1144,7 @@
   function scanSearchCards() {
     if (!isSearchUrl(location.href)) return;
     searchStats.scans++;
-    const cardSelectors = [
-      '[data-stid="property-card"]',
-      '[data-stid="lodging-card-responsive"]',
-      '[data-testid="property-card"]',
-      'article[data-stid*="card"]',
-      'div[data-stid*="property-card"]',
-    ];
-
-    const cards = document.querySelectorAll(cardSelectors.join(", "));
+    const cards = document.querySelectorAll(CARD_SELECTORS_QUERY);
     for (const card of cards) {
       bindSearchCard(card);
     }
@@ -1147,6 +1169,7 @@
       card.setAttribute("data-vdp-nav-url", navigationUrl);
       card.setAttribute("data-vdp-url", fetchUrl);
       trackedSearchCards.set(propId, card);
+      trackCardPropId(propId, card);
       return;
     }
 
@@ -1164,6 +1187,7 @@
     // queued item too, unless some other live card still displays it.
     if (prevId && prevId !== propId) {
       if (trackedSearchCards.get(prevId) === card) trackedSearchCards.delete(prevId);
+      untrackCardPropId(prevId, card);
       if (searchQueue && typeof searchQueue.remove === "function" && !anotherCardHasPropId(prevId, card)) {
         if (searchQueue.remove(prevId)) {
           searchStats.prunedRecycled++;
@@ -1178,6 +1202,7 @@
     card.setAttribute("data-vdp-url", fetchUrl);
     discoveredSearchPropIds.add(propId);
     trackedSearchCards.set(propId, card);
+    trackCardPropId(propId, card);
 
     // Watch visibility for prefetching
     if (searchCardObserver) {

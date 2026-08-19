@@ -39,66 +39,11 @@
 
   /**
    * Walk Apollo graph with full __ref pointer resolution and support for header.text and value/text leaves.
+   * Delegates to shared pure extractor in extract.js.
    */
-  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited = new Set(), depth = 0, isExplicitPetContext = false) {
-    if (node == null || depth > 35) return;
-
-    if (node && typeof node === "object" && typeof node.__ref === "string") {
-      if (visited.has(node.__ref)) return;
-      visited.add(node.__ref);
-      const target = state[node.__ref];
-      if (target) walkApolloNode(state, target, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
-      return;
-    }
-
-    if (Array.isArray(node)) {
-      for (const el of node) walkApolloNode(state, el, headerCtx, sectionCtx, out, visited, depth + 1, isExplicitPetContext);
-      return;
-    }
-
-    if (typeof node !== "object") return;
-
-    // Multi-Unit Hierarchy Pruning (Class 11):
-    // Do not follow unit/room-level branches when inspecting top-level property
-    if (node.__typename && /^(?:Unit|RentalUnit|Room|LodgingUnit|RatePlan|RoomType)$/i.test(node.__typename)) {
-      return;
-    }
-
-    let nextHeader = headerCtx;
-    let nextSection = sectionCtx;
-    let explicitPet = isExplicitPetContext || Boolean(node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename));
-
-    if (node.__typename && /^(?:PetPolicy|PropertyPets|PetsAmenity)$/i.test(node.__typename)) {
-      if (!nextHeader || nextHeader === "Listing Data") nextHeader = "Pets";
-      if (!nextSection || nextSection === "Rules") nextSection = "House Rules / Policies";
-    }
-
-    const headerText = typeof node.header === "object" ? node.header?.text : (typeof node.header === "string" ? node.header : "");
-    if (typeof headerText === "string" && headerText.trim()) {
-      nextHeader = headerText.trim();
-      if (/house rules|polic|important information/i.test(nextHeader)) nextSection = "House Rules / Policies";
-      else if (/about this property|about this space|about this listing/i.test(nextHeader)) nextSection = "About this property";
-      else if (!nextSection) nextSection = nextHeader;
-      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
-    }
-    if (typeof node.sectionName === "string" && node.sectionName.trim()) {
-      nextHeader = node.sectionName.trim();
-      if (/house rules|polic/i.test(nextHeader)) nextSection = "House Rules / Policies";
-      if (/^pets?$/i.test(nextHeader)) explicitPet = true;
-    }
-
-    for (const [k, v] of Object.entries(node)) {
-      if ((k === "value" || k === "text" || k === "body" || k === "description") && typeof v === "string" && v.trim().length > 0) {
-        out.push({
-          header: nextHeader || "Listing Data",
-          section: nextSection || nextHeader || "Rules",
-          text: v.trim(),
-          isDedicatedPetsHeader: explicitPet,
-          explicitPetContext: explicitPet,
-        });
-      } else if (v && typeof v === "object") {
-        walkApolloNode(state, v, nextHeader, nextSection, out, visited, depth + 1, explicitPet);
-      }
+  function walkApolloNode(state, node, headerCtx, sectionCtx, out, visited, depth, isExplicitPetContext) {
+    if (extract && typeof extract.walkApolloNode === "function") {
+      return extract.walkApolloNode(state, node, headerCtx, sectionCtx, out, visited, depth, isExplicitPetContext);
     }
   }
 
