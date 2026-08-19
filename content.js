@@ -723,6 +723,30 @@
   let lastSearchScanAt = 0;
   let searchScanThrottleTimer = null;
 
+  // #18: mount priority for the badge, most to least preferred. This MUST be
+  // tried one selector at a time. A single querySelector() with all three joined
+  // by commas returns the first match in DOCUMENT ORDER, not the first selector
+  // that matches — so on a card whose price element precedes its content column,
+  // the badge lands in the narrow price box. That was invisible while the badge
+  // was inline-flex and sized to its own text; once width is a percentage, the
+  // container becomes the layout.
+  const BADGE_CONTAINER_SELECTORS = [
+    ".uitk-card-content",
+    '[data-stid*="content"]',
+    '[data-stid*="price"]',
+  ];
+
+  // Falls back to the card itself, which is wider than the content column rather
+  // than narrower — a badge spanning the whole card is an acceptable degradation,
+  // an overflowing one is not.
+  function resolveBadgeContainer(card) {
+    for (const selector of BADGE_CONTAINER_SELECTORS) {
+      const match = card.querySelector(selector);
+      if (match) return match;
+    }
+    return card;
+  }
+
   // Static query selector for search cards across desktop/mobile Vrbo layouts
   const CARD_SELECTORS_QUERY = [
     '[data-stid="property-card"]',
@@ -743,13 +767,22 @@
   function createEmptySearchStats() {
     return {
       scans: 0,
-      dispatched: 0, // Counts post-dwell card enqueue requests passed to the queue engine
+      // Enqueue CALLS handed to the queue engine, not network requests. A call that
+      // resolves from cache issues no fetch, so this is an upper bound on traffic.
+      // For the true network count read `networkRequests` below.
+      enqueued: 0,
+      // Queue items actually withdrawn by remove() on viewport exit. This is I8b's
+      // numerator in #23's "pruned by I8b versus dispatched" ratio.
       prunedOffscreen: 0,
+      // Queue items actually withdrawn when a node was recycled to another property.
       prunedRecycled: 0,
+      // CARDS dropped from tracking on an SPA re-render. Counted per card, not per
+      // queue withdrawal, so it is NOT comparable to the two counters above.
       prunedStale: 0,
       lastQueueDepth: 0,
       maxQueueDepth: 0,
-      depthSamples: [], // [{ t, depth, reason }], bounded ring
+      depthSamples: [], // [{ t, depth, staged, reason }], bounded ring
+      depthSamplesDropped: 0, // Samples evicted by the ring; nonzero means truncated history
     };
   }
 
@@ -759,15 +792,35 @@
 
   function sampleQueueDepth(reason) {
     if (!searchQueue || typeof searchQueue.getQueueLength !== "function") return;
-    const depth = searchQueue.getQueueLength();
+    // enqueue() stages an item behind an async getCached() before pushing it to the
+    // queue array, so getQueueLength() alone undercounts by whatever is still
+    // staging — and under sustained scroll, which is the regime #23 gates on, that
+    // is exactly when the staged population is nonzero. Record both.
+    const queued = searchQueue.getQueueLength();
+    const staged = typeof searchQueue.getPendingCount === "function"
+      ? searchQueue.getPendingCount()
+      : 0;
+    const depth = queued + staged;
     searchStats.lastQueueDepth = depth;
     if (depth > searchStats.maxQueueDepth) searchStats.maxQueueDepth = depth;
-    searchStats.depthSamples.push({ t: Date.now(), depth, reason });
-    if (searchStats.depthSamples.length > MAX_DEPTH_SAMPLES) searchStats.depthSamples.shift();
+    searchStats.depthSamples.push({ t: Date.now(), depth, staged, reason });
+    if (searchStats.depthSamples.length > MAX_DEPTH_SAMPLES) {
+      searchStats.depthSamples.shift();
+      searchStats.depthSamplesDropped++;
+    }
   }
 
   function getSearchStats() {
-    return { ...searchStats, depthSamples: searchStats.depthSamples.slice() };
+    return {
+      ...searchStats,
+      // Read through to the queue's own session counter: the number of requests
+      // actually put on the wire. This is the denominator #23's gate needs, and it
+      // is not the same as `enqueued`.
+      networkRequests: searchQueue && typeof searchQueue.getSessionCount === "function"
+        ? searchQueue.getSessionCount()
+        : 0,
+      depthSamples: searchStats.depthSamples.slice(),
+    };
   }
 
   // Read-only devtools hook. Returns a copy; nothing here is persisted or sent.
@@ -873,8 +926,8 @@
     }
     if (searchQueue && searchQueue === activeQueue) {
       activeQueue.enqueue(propId, url, priority);
-      searchStats.dispatched++;
-      sampleQueueDepth("dispatch");
+      searchStats.enqueued++;
+      sampleQueueDepth("enqueue");
     }
   }
 
@@ -1239,13 +1292,20 @@
       badge.dataset.vdpText = "Checking pet policy...";
       badge.textContent = "⏳ Checking pet policy...";
 
-      const targetContainer = card.querySelector('[data-stid*="price"], [data-stid*="content"], .uitk-card-content') || card;
+      const targetContainer = resolveBadgeContainer(card);
       if (targetContainer !== card) {
         targetContainer.style.position = "relative";
         targetContainer.style.zIndex = "2";
         targetContainer.style.pointerEvents = "auto";
       }
-      targetContainer.appendChild(badge);
+      // #18: the badge goes in a slot the extension owns, not straight into
+      // Vrbo's container. width: 100% on the badge would only behave if that
+      // container happened to be a block; the slot makes the badge's width
+      // independent of whether the host is block, flex-row, flex-column or grid.
+      const slot = document.createElement("div");
+      slot.className = "vdp-badge-slot";
+      slot.appendChild(badge);
+      targetContainer.appendChild(slot);
 
       // Dynamic handlers read card data attributes at event time
       badge.addEventListener("click", (e) => {

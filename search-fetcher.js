@@ -1035,6 +1035,10 @@
       dispose,
       subscribe,
       getQueueLength: () => queue.length,
+      // Items staged by enqueue() whose async getCached() has not resolved yet, so
+      // they are not in `queue` and not yet counted by getQueueLength(). #23's gate
+      // reads queue depth under sustained scroll, where this population is nonzero.
+      getPendingCount: () => pendingEnqueues.size,
       getActiveCount: () => activeRequests.size,
       getSessionCount: () => sessionRequestsCount,
       getMaxObservedConcurrency: () => maxObservedConcurrency,

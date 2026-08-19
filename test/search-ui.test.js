@@ -661,6 +661,26 @@ function makeCard(id, href) {
   return card;
 }
 
+// #18: the layout no fixture covered. A price sub-element sits AHEAD of the
+// content column in document order, which is what makes a selector-list
+// querySelector resolve to the wrong box.
+function makePriceFirstCard(id, href) {
+  const card = mockDocument.createElement("div");
+  card.setAttribute("data-stid", "property-card");
+  card.setAttribute("id", id);
+  const price = mockDocument.createElement("div");
+  price.setAttribute("data-stid", "price-summary");
+  card.appendChild(price);
+  const content = mockDocument.createElement("div");
+  content.classList.add("uitk-card-content");
+  const anchor = mockDocument.createElement("a");
+  anchor.setAttribute("href", href);
+  content.appendChild(anchor);
+  card.appendChild(content);
+  mockDocument.body.appendChild(card);
+  return card;
+}
+
 function recycleCard(card, href) {
   card.querySelector("a[href]").setAttribute("href", href);
 }
@@ -697,14 +717,14 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
 
     // Card is off-screen.
     fireIntersection([{ card, inView: false }]);
-    const dispatchedBefore = __test.getSearchStats().dispatched;
+    const enqueuedBefore = __test.getSearchStats().enqueued;
 
     recycleCard(card, listingUrlFor("2000002"));
     __test.scanSearchCards();
 
     assert.equal(card.getAttribute("data-vdp-prop-id"), "2000002", "re-binding still happens off-screen");
     assert.equal(spies.enqueue.length, 0, "off-screen recycle must not enqueue");
-    assert.equal(__test.getSearchStats().dispatched, dispatchedBefore, "no dispatch for an off-screen recycle");
+    assert.equal(__test.getSearchStats().enqueued, enqueuedBefore, "no enqueue for an off-screen recycle");
 
     // Same card, now on-screen.
     fireIntersection([{ card, inView: true }]);
@@ -717,7 +737,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
       ["3000003"],
       "in-view recycle enqueues exactly the new property"
     );
-    assert.equal(__test.getSearchStats().dispatched, dispatchedBefore + 1);
+    assert.equal(__test.getSearchStats().enqueued, enqueuedBefore + 1);
   });
 
   await t.test("I4b: dwell timers are jittered one-sided, never below the 400 ms floor", async () => {
@@ -929,7 +949,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     freshSearchPage({ minDelayMs: 5000 });
 
     const zero = __test.getSearchStats();
-    assert.equal(zero.dispatched, 0);
+    assert.equal(zero.enqueued, 0);
     assert.equal(zero.prunedOffscreen, 0);
     assert.equal(zero.prunedRecycled, 0);
     assert.equal(zero.prunedStale, 0);
@@ -951,7 +971,7 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     ]);
     await sleep(700);
 
-    assert.equal(__test.getSearchStats().dispatched, 3, "one dispatch per dwell-gated card");
+    assert.equal(__test.getSearchStats().enqueued, 3, "one enqueue per dwell-gated card");
     assert.ok(__test.getSearchStats().maxQueueDepth >= 1, "queue depth is sampled over time");
     assert.ok(__test.getSearchStats().depthSamples.length >= 3);
     assert.ok(
@@ -985,15 +1005,175 @@ test("search card orchestration: recycle gate, dwell jitter, scan throttle, and 
     assert.deepEqual(
       {
         scans: afterReset.scans,
-        dispatched: afterReset.dispatched,
+        enqueued: afterReset.enqueued,
         prunedOffscreen: afterReset.prunedOffscreen,
         prunedRecycled: afterReset.prunedRecycled,
         prunedStale: afterReset.prunedStale,
         maxQueueDepth: afterReset.maxQueueDepth,
         depthSamples: afterReset.depthSamples.length,
       },
-      { scans: 0, dispatched: 0, prunedOffscreen: 0, prunedRecycled: 0, prunedStale: 0, maxQueueDepth: 0, depthSamples: 0 },
+      { scans: 0, enqueued: 0, prunedOffscreen: 0, prunedRecycled: 0, prunedStale: 0, maxQueueDepth: 0, depthSamples: 0 },
       "counters are queue-scoped and reset with it"
     );
+  });
+
+  // #23 gates on measured queue pressure, so the counters that answer it have to
+  // mean what they say. These are the three ways the pre-existing set could not.
+  // #18: querySelector with a selector list returns the first match in DOCUMENT
+  // ORDER, not the first selector that matches. A card whose price element
+  // precedes its content column therefore mounts the badge in the narrow price
+  // box, which only stayed invisible while the badge was inline-flex.
+  await t.test("#18: the badge mounts in the content column even when a price element precedes it", async () => {
+    freshSearchPage({ minDelayMs: 5000 });
+
+    const card = makePriceFirstCard("card-price-first", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+
+    const badge = badgeOf(card);
+    assert.ok(badge, "the card is bound and badged");
+
+    const price = card.querySelector('[data-stid="price-summary"]');
+    const content = card.querySelector(".uitk-card-content");
+    assert.equal(
+      price.querySelector(".vdp-search-badge"),
+      null,
+      "the badge must not mount inside the price sub-element"
+    );
+    assert.ok(
+      content.querySelector(".vdp-search-badge"),
+      "the badge belongs to the content column, whose width it is meant to match"
+    );
+  });
+
+  // #18: width: 100% on the badge only behaves in a block parent; in a flex-row
+  // parent it overflows. The slot decouples the badge from whatever the host
+  // container happens to be.
+  await t.test("#18: the badge sits in a block-level slot, not directly in the host container", async () => {
+    freshSearchPage({ minDelayMs: 5000 });
+
+    const card = makePriceFirstCard("card-slotted", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+
+    const badge = badgeOf(card);
+    const slot = badge.parentNode;
+    assert.ok(
+      slot.classList.contains("vdp-badge-slot"),
+      "the badge's direct parent is the slot the extension owns"
+    );
+    assert.equal(
+      slot.parentNode,
+      card.querySelector(".uitk-card-content"),
+      "and the slot is what mounts into the resolved container"
+    );
+
+    // The extra level must stay invisible to every descendant lookup in the
+    // orchestration paths, which is how recycling finds an existing badge.
+    assert.equal(card.querySelector(".vdp-search-badge"), badge);
+  });
+
+  // #18: the elevation that wins hit-testing over .uitk-card-link is applied in
+  // two places — inline by content.js and by a rule in content.css. Introducing
+  // the slot moves what `:has(> .vdp-search-badge)` matches, so the two can
+  // silently drift onto different nodes. At full width that failure spans the
+  // whole card instead of a small pill.
+  await t.test("#18: the CSS elevation rule and the inline elevation target the same node", async () => {
+    freshSearchPage({ minDelayMs: 5000 });
+
+    const card = makePriceFirstCard("card-elevated", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+
+    const badge = badgeOf(card);
+    const slot = badge.parentNode;
+    const host = slot.parentNode;
+
+    assert.equal(host.style.zIndex, "2", "content.js elevates the resolved container");
+    assert.equal(host.style.position, "relative", "and positions it so the z-index applies");
+
+    // The stylesheet must elevate that same container. `:has(> .vdp-search-badge)`
+    // now resolves to the slot, one level too low, so the rule has to select on
+    // the slot instead.
+    // Comments stripped: this asserts on live rules, and the rule below is
+    // explained by a comment that necessarily names the old selector.
+    const css = require("node:fs")
+      .readFileSync(require("node:path").join(__dirname, "..", "content.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.match(
+      css,
+      /\[data-vdp-prop-id\]\s+:has\(>\s*\.vdp-badge-slot\)/,
+      "the elevation rule selects the slot's parent, matching the inline style"
+    );
+    assert.doesNotMatch(
+      css,
+      /:has\(>\s*\.vdp-search-badge\)/,
+      "the pre-slot selector would elevate the slot rather than the container"
+    );
+  });
+
+  await t.test("#23 gate: enqueue calls, network requests, and staged depth are distinguishable", async () => {
+    freshSearchPage({ minDelayMs: 5000 });
+    hangingIds.add("1000001");
+
+    const cardA = makeCard("card-a", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardA, inView: true }]);
+    await sleep(700);
+
+    const stats = __test.getSearchStats();
+    assert.equal(stats.enqueued, 1, "one enqueue call");
+    assert.equal(
+      stats.networkRequests,
+      __test.getSearchQueue().getSessionCount(),
+      "networkRequests reads through to the queue's own session counter"
+    );
+
+    // An enqueue that resolves from cache issues no fetch, so the two counters
+    // must diverge. Without this, #23's pruned-vs-dispatched ratio uses an
+    // inflated denominator and understates how well I8b is working.
+    const enqueuedBefore = stats.enqueued;
+    const networkBefore = stats.networkRequests;
+    await __test.getSearchQueue().setCached("7000007", {
+      status: "ok",
+      propertyId: "7000007",
+      policy: { petsAllowed: true, maxDogs: 2, schemaVersion: 1 },
+      ts: Date.now(),
+    });
+    const cardCached = makeCard("card-cached", listingUrlFor("7000007"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardCached, inView: true }]);
+    await sleep(700);
+
+    const after = __test.getSearchStats();
+    assert.equal(after.enqueued, enqueuedBefore + 1, "the cache hit still counts as an enqueue call");
+    assert.equal(after.networkRequests, networkBefore, "but it puts no request on the wire");
+  });
+
+  await t.test("#23 gate: depth samples include items still staging behind getCached()", async () => {
+    // enqueue() stages synchronously but pushes to the queue array only after its
+    // getCached() promise settles, so an item sits in the staging map for at least
+    // a microtask. getQueueLength() alone cannot see it during that window.
+    freshSearchPage({ minDelayMs: 5000 });
+    hangingIds.add("1000001");
+
+    const cardA = makeCard("card-a", listingUrlFor("1000001"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardA, inView: true }]);
+    await sleep(700);
+
+    const queue = __test.getSearchQueue();
+    assert.equal(typeof queue.getPendingCount, "function", "the queue exposes its staged count");
+
+    const cardB = makeCard("card-b", listingUrlFor("2000002"));
+    __test.scanSearchCards();
+    fireIntersection([{ card: cardB, inView: true }]);
+    await sleep(700);
+
+    const staged = __test.getSearchStats().depthSamples.filter((s) => s.staged > 0);
+    assert.ok(
+      staged.length >= 1,
+      "at least one sample must have caught an item mid-staging, or the undercount is back"
+    );
+    for (const s of __test.getSearchStats().depthSamples) {
+      assert.ok(s.depth >= s.staged, `sample depth ${s.depth} must include its ${s.staged} staged items`);
+    }
   });
 });
