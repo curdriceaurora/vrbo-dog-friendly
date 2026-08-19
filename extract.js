@@ -141,7 +141,29 @@
 
   // Longer symbols first so "AU$50" isn't read as a bare "$" match.
   const CUR = "(?<cur>AU\\$|NZ\\$|CA\\$|US\\$|A\\$|\\$|€|£|USD|EUR|GBP|AUD|NZD)";
-  const AMT = "(?<amt>\\d{1,4}(?:[.,]\\d{2})?)";
+  // Three shapes, tried in this order so the more specific ones aren't
+  // shadowed by the plain-number fallback:
+  //   1. US-style thousands grouping, optional cents: "1,000", "12,500.00", "1,234,567"
+  //   2. European decimal comma, no thousands grouping: "50,00", "50,45"
+  //   3. Plain amount, period decimal or none: "50", "999", "1250.50"
+  // A bare `\d{1,4}(?:[.,]\d{2})?` can't tell "1,000" (thousands) apart from
+  // "50,00" (decimal) — it happily eats a lone "," as either — and even when
+  // it does match "1,000" whole, a leading `\b` upstream of this group can't
+  // anchor right after the "$" in "$1,000" (both the space before and the
+  // "$" are non-word characters), so the engine backtracks past "1," entirely
+  // and matches the bare "000" instead. Disambiguating by digit-group shape
+  // here removes that ambiguity before the surrounding `\b` ever gets a
+  // chance to go looking for a fallback match.
+  //
+  // The decimal-comma shape has to come before the plain fallback, not
+  // after: alternation tries branches left-to-right and stops at the first
+  // one that lets the rest of the surrounding pattern succeed, so whenever
+  // nothing mandatory follows the amount (e.g. "€50,45." with only
+  // optional suffix groups left in the pattern), a plain `\d+` tried first
+  // would already satisfy the rest of the match on "50" alone and the
+  // engine would never backtrack to try the fuller ",45" alternative.
+  const AMT =
+    "(?<amt>\\d{1,3}(?:,\\d{3})+(?:\\.\\d{2})?|\\d+,\\d{2}|\\d+(?:\\.\\d{2})?)";
 
   function toNumber(numStr) {
     const lower = String(numStr).toLowerCase();
@@ -153,9 +175,15 @@
 
   function formatMoney(cur, amt) {
     const symbol = CURRENCY_DISPLAY[String(cur).toUpperCase()] || cur;
-    // European listings write "50,00 €" — normalize the decimal comma so
-    // the panel doesn't show a value that reads as a thousands separator.
-    return `${symbol}${String(amt).replace(",", ".")}`;
+    const amtStr = String(amt);
+    // The AMT pattern's two comma shapes mean opposite things, so a blind
+    // comma->period replace can't handle both: a European decimal comma
+    // ("50,00", exactly two trailing digits and nothing else) normalizes to
+    // a period; anything else with a comma is a US-style thousands
+    // separator ("1,000", "12,500.00", "1,234,567") and the comma is just
+    // dropped so downstream numeric parsing sees a plain integer/decimal.
+    const normalized = /^\d+,\d{2}$/.test(amtStr) ? amtStr.replace(",", ".") : amtStr.replace(/,/g, "");
+    return `${symbol}${normalized}`;
   }
 
   function isMetricUnit(unit) {
