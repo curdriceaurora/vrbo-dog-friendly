@@ -41,9 +41,6 @@
   let locationChangeListener = null;
 
   function isContextValid() {
-    if (typeof globalThis !== "undefined" && globalThis.__vdpTestInvalidated) {
-      return false;
-    }
     try {
       if (typeof chrome !== "undefined" && chrome.runtime) {
         // Accessing runtime.id throws if the context is invalidated.
@@ -56,11 +53,6 @@
       return false;
     }
   }
-
-  // Hook for testing context invalidation in E2E environments
-  window.addEventListener("vdp-test-trigger-invalidation", () => {
-    globalThis.__vdpTestInvalidated = true;
-  });
 
   function cleanupOrphanedScript() {
     if (isOrphaned) return;
@@ -99,6 +91,8 @@
     } catch (e) {
       if (e.message && e.message.includes("Extension context invalidated")) {
         cleanupOrphanedScript();
+      } else {
+        console.warn("vrbow: unexpected error in safeStorageSet", e);
       }
     }
   }
@@ -119,6 +113,8 @@
     } catch (e) {
       if (e.message && e.message.includes("Extension context invalidated")) {
         cleanupOrphanedScript();
+      } else {
+        console.warn("vrbow: unexpected error in safeStorageGet", e);
       }
     }
   }
@@ -137,6 +133,8 @@
         } catch (e) {
           if (e.message && e.message.includes("Extension context invalidated")) {
             cleanupOrphanedScript();
+          } else {
+            console.warn(`vrbow: unexpected error in safe storage wrapper (${m})`, e);
           }
         }
       };
@@ -2254,6 +2252,8 @@
   } catch (e) {
     if (e.message && e.message.includes("Extension context invalidated")) {
       cleanupOrphanedScript();
+    } else {
+      console.warn("vrbow: unexpected error registering storage.onChanged listener", e);
     }
   }
 
@@ -2273,12 +2273,21 @@
           }
         });
         return true;
+      } else if (msg?.type === "vdp-test-trigger-invalidation") {
+        // Test-only hook for simulating orphaned-script cleanup in E2E specs.
+        // Reachable only via chrome.tabs.sendMessage from another extension
+        // context (e.g. the popup) — ordinary page JS has no access to this
+        // channel, unlike a window-dispatched CustomEvent would.
+        cleanupOrphanedScript();
+        sendResponse({ ok: true });
       }
       return true;
     });
   } catch (e) {
     if (e.message && e.message.includes("Extension context invalidated")) {
       cleanupOrphanedScript();
+    } else {
+      console.warn("vrbow: unexpected error registering runtime.onMessage listener", e);
     }
   }
 
