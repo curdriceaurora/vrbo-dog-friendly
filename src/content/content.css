@@ -13,6 +13,15 @@
   color: var(--vdp-color-text);
   overflow: hidden;
   border: 1px solid var(--vdp-color-border);
+  box-sizing: border-box;
+}
+
+#vdp-panel.vdp-beside {
+  width: 340px;
+}
+
+#vdp-panel.vdp-beside .vdp-row {
+  grid-template-columns: 104px 16px 1fr 8px 84px;
 }
 
 #vdp-panel .vdp-header {

@@ -412,7 +412,47 @@
 
   // ---------- rendering ----------
 
+  let panelResizeListener = null;
+
+  function updatePanelPosition(panel, isInitial) {
+    if (!panel || !panel.isConnected) return;
+    const renderer = document.querySelector('[data-stid="lodging-infosite-template-api-renderer"]');
+    const BESIDE_WIDTH = 340;
+    const MIN_BESIDE_MARGIN = 350; // allows 340px panel to comfortably fit on 1920px viewports (360px margin)
+
+    if (renderer) {
+      const rect = renderer.getBoundingClientRect();
+      const freeSpaceRight = window.innerWidth - rect.right;
+
+      if (freeSpaceRight >= MIN_BESIDE_MARGIN) {
+        const gap = Math.max(10, Math.min(16, Math.floor((freeSpaceRight - BESIDE_WIDTH) / 2)));
+        panel.style.left = `${Math.round(rect.right + gap)}px`;
+        panel.style.right = "auto";
+        panel.classList.add("vdp-beside");
+        if (isInitial) {
+          panel.classList.remove("vdp-collapsed");
+          const header = panel.querySelector(".vdp-header");
+          if (header) header.setAttribute("aria-expanded", "true");
+        }
+        return;
+      }
+    }
+
+    panel.style.left = "auto";
+    panel.style.right = "16px";
+    panel.classList.remove("vdp-beside");
+    if (isInitial) {
+      panel.classList.add("vdp-collapsed");
+      const header = panel.querySelector(".vdp-header");
+      if (header) header.setAttribute("aria-expanded", "false");
+    }
+  }
+
   function removePanel() {
+    if (panelResizeListener) {
+      window.removeEventListener("resize", panelResizeListener);
+      panelResizeListener = null;
+    }
     const existing = document.getElementById(PANEL_ID);
     if (existing) existing.remove();
   }
@@ -676,7 +716,7 @@
     }
 
     panel.innerHTML = `
-      <div class="vdp-header vdp-tone-${headlineTone}">
+      <div class="vdp-header vdp-tone-${headlineTone}" tabindex="0" role="button" aria-expanded="true" aria-label="Toggle dog policy details">
         <span class="vdp-title">${headline}</span>
         <div class="vdp-header-btns">
           <button type="button" class="vdp-rescan" title="Rescan page">↻</button>
@@ -690,8 +730,17 @@
     `;
 
     document.documentElement.appendChild(panel);
+    updatePanelPosition(panel, true);
 
-    panel.querySelector(".vdp-close").addEventListener("click", () => panel.remove());
+    if (panelResizeListener) {
+      window.removeEventListener("resize", panelResizeListener);
+    }
+    panelResizeListener = () => {
+      updatePanelPosition(panel, false);
+    };
+    window.addEventListener("resize", panelResizeListener);
+
+    panel.querySelector(".vdp-close").addEventListener("click", () => removePanel());
     panel.querySelector(".vdp-rescan").addEventListener("click", () => scan(true));
     panel.querySelectorAll(".vdp-jump").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -708,10 +757,15 @@
     }
 
     const header = panel.querySelector(".vdp-header");
-    header.addEventListener("click", (e) => {
+    const toggleCollapse = (e) => {
       if (e.target.closest("button")) return;
+      if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
+      if (e.type === "keydown") e.preventDefault();
       panel.classList.toggle("vdp-collapsed");
-    });
+      header.setAttribute("aria-expanded", panel.classList.contains("vdp-collapsed") ? "false" : "true");
+    };
+    header.addEventListener("click", toggleCollapse);
+    header.addEventListener("keydown", toggleCollapse);
   }
 
   // ---------- scan orchestration ----------

@@ -65,6 +65,12 @@ test("exercises 100% of production theme rules across color schemes and forced c
         await tooltipLink.focus();
 
         await page.locator("#vdp-panel").evaluate((panel) => {
+          panel.classList.add("vdp-beside");
+          getComputedStyle(panel).width;
+          for (const row of panel.querySelectorAll(".vdp-row")) {
+            getComputedStyle(row).gridTemplateColumns;
+          }
+          panel.classList.remove("vdp-beside");
           panel.classList.add("vdp-collapsed");
           const header = panel.querySelector(".vdp-header");
           header.className = "vdp-header vdp-tone-bad";
