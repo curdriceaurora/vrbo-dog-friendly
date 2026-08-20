@@ -420,15 +420,19 @@
     if (!panel || !panel.isConnected) return;
     const renderer = document.querySelector('[data-stid="lodging-infosite-template-api-renderer"]');
     const BESIDE_WIDTH = 340;
-    const MIN_BESIDE_MARGIN = 350; // allows 340px panel to comfortably fit on 1920px viewports (360px margin)
+    // Hysteresis deadband: require >=350px margin to enter beside mode,
+    // but only drop back to constrained mode if margin falls below 340px (panel width).
+    const BESIDE_ENTER_MARGIN = 350;
+    const BESIDE_EXIT_MARGIN = 340;
 
     let isBeside = false;
     let gap = 16;
     if (renderer) {
       const rect = renderer.getBoundingClientRect();
       const freeSpaceRight = window.innerWidth - rect.right;
+      const threshold = lastPanelMode === "beside" ? BESIDE_EXIT_MARGIN : BESIDE_ENTER_MARGIN;
 
-      if (freeSpaceRight >= MIN_BESIDE_MARGIN) {
+      if (freeSpaceRight >= threshold) {
         isBeside = true;
         gap = Math.max(10, Math.min(16, Math.floor((freeSpaceRight - BESIDE_WIDTH) / 2)));
         panel.style.left = `${Math.round(rect.right + gap)}px`;

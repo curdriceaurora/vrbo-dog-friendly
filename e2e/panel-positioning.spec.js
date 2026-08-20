@@ -230,4 +230,61 @@ test.describe("Issue #44: listing panel responsive positioning", () => {
       await context.close();
     }
   });
+
+  test("hysteresis deadband prevents mode flapping around the boundary", async () => {
+    const context = await chromium.launchPersistentContext("", {
+      channel: "chromium",
+      headless: true,
+      viewport: { width: 1440, height: 900 },
+      args: [
+        `--disable-extensions-except=${EXTENSION_ROOT}`,
+        `--load-extension=${EXTENSION_ROOT}`
+      ]
+    });
+
+    try {
+      const page = await context.newPage();
+      const guard = await installNetworkGuard(context, page);
+
+      await page.route("https://www.vrbo.com/5442123*", (route) => route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: LISTING_HTML
+      }));
+
+      await page.goto(LISTING_URL);
+
+      const panel = page.locator("#vdp-panel");
+      await expect(panel).toBeVisible({ timeout: 6000 });
+      await expect(panel).toHaveClass(/vdp-collapsed/);
+
+      // 1890px width -> (1890-1200)/2 = 345px margin (inside 340..350 deadband).
+      // Approaching from constrained (<350px): stays constrained
+      await page.setViewportSize({ width: 1890, height: 900 });
+      await expect(panel).not.toHaveClass(/vdp-beside/);
+      await expect(panel).toHaveClass(/vdp-collapsed/);
+
+      // 1920px width -> (1920-1200)/2 = 360px margin (>=350px enter threshold).
+      // Switches to beside mode
+      await page.setViewportSize({ width: 1920, height: 900 });
+      await expect(panel).toHaveClass(/vdp-beside/);
+      await expect(panel).not.toHaveClass(/vdp-collapsed/);
+
+      // Shrink back to 1890px (345px margin >= 340px exit threshold).
+      // Approaching from beside: stays beside!
+      await page.setViewportSize({ width: 1890, height: 900 });
+      await expect(panel).toHaveClass(/vdp-beside/);
+      await expect(panel).not.toHaveClass(/vdp-collapsed/);
+
+      // Shrink below 340px margin -> 1870px width (335px margin < 340px).
+      // Drops to constrained mode
+      await page.setViewportSize({ width: 1870, height: 900 });
+      await expect(panel).not.toHaveClass(/vdp-beside/);
+      await expect(panel).toHaveClass(/vdp-collapsed/);
+
+      await guard.assertNoLeakedRequests(page);
+    } finally {
+      await context.close();
+    }
+  });
 });
