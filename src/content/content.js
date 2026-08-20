@@ -389,49 +389,37 @@
   // never does. So walk text nodes and skip those subtrees.
   const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], #vdp-panel';
 
-  // Local fallback if the registry is unavailable — mirrors Vrbo's own
-  // adapter values in site-registry.js exactly. The site-specific version
-  // lives in the registry (getPdpSectionConfig) rather than hardcoded here
-  // so a second site's differently-shaped PDP can supply its own selectors
-  // and categories, the same way search-card detection already routes
-  // through the registry instead of being Vrbo-only (see getSearchCardSelector
-  // above).
-  const DEFAULT_PDP_SECTION_CLOSE_MATCHERS = [
-    { selector: '#reviews, [id*="reviews" i], [data-stid*="reviews" i], [data-stid*="ratings-and-reviews"], [class*="reviews-" i], [class*="reviews " i], [class$="reviews" i], [data-section-type*="review" i]', label: "Guest reviews", shortLabel: "Reviews" },
-    { selector: '[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]', label: "House Rules / Policies", shortLabel: "House Rules" },
-    { selector: '[data-stid*="about" i], [class*="about" i], [id*="about" i]', label: "About this property", shortLabel: "About" },
-    { selector: '[data-stid*="amenit" i], [class*="amenit" i], [id*="amenit" i]', label: "Property amenities", shortLabel: "Amenities" },
-    { selector: '[data-stid*="host" i], [class*="host" i], [id*="host" i]', label: "About the host", shortLabel: "Host" },
-    { selector: '[data-stid*="faq" i], [class*="faq" i], [id*="faq" i], [data-stid*="qna" i]', label: "Questions & answers", shortLabel: "Q&A" },
-  ];
-  const DEFAULT_PDP_SECTION_HEADING_CATEGORIES = [
-    { pattern: /review|rating/i, label: "Guest reviews", shortLabel: "Reviews" },
-    { pattern: /house rules|polic/i, label: "House Rules / Policies", shortLabel: "House Rules" },
-    { pattern: /about this property|about this space|description/i, label: "About this property", shortLabel: "About" },
-    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
-    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
-  ];
-  const DEFAULT_PDP_SECTION_LABEL_CATEGORIES = [
-    { pattern: /review/i, label: "Guest reviews", shortLabel: "Reviews" },
-    { pattern: /house-rules|policies/i, label: "House Rules / Policies", shortLabel: "House Rules" },
-    { pattern: /about/i, label: "About this property", shortLabel: "About" },
-    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
-    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
-  ];
-  const DEFAULT_PDP_FALLBACK_SECTION_LABEL = "Listing details";
-  const DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL = "Listing";
-
+  // The site-specific categories live in site-registry.js's
+  // getPdpSectionConfig (getSearchCardSelector above follows the same
+  // registry-first pattern) so a second site's differently-shaped PDP can
+  // supply its own selectors instead of content.js being Vrbo-only.
+  //
+  // No local copy of Vrbo's ~20-entry category tables here: manifest.json
+  // loads shared/site-registry.js before content/content.js in the same
+  // content-script bundle, so getSiteRegistry() is always populated by the
+  // time this runs — reg?.getPdpSectionConfig(...) never actually falls
+  // through in production. If it somehow did (registry failed to load
+  // entirely — a state severe enough that search-card detection above is
+  // already broken too), degrading to "Listing details" for every section
+  // is a reasonable floor, not a second source of truth to keep in sync.
+  //
+  // Resolved once and cached: the site adapter is determined by hostname,
+  // which cannot change over one content-script instance's lifetime (an
+  // in-page SPA navigation changes the URL path, never the domain), so
+  // there's nothing to invalidate the cache on.
+  let cachedPdpSectionConfig = null;
   function getPdpSectionConfig() {
-    const reg = getSiteRegistry();
-    return (
-      reg?.getPdpSectionConfig(location.href) || {
-        closeMatchers: DEFAULT_PDP_SECTION_CLOSE_MATCHERS,
-        headingCategories: DEFAULT_PDP_SECTION_HEADING_CATEGORIES,
-        labelCategories: DEFAULT_PDP_SECTION_LABEL_CATEGORIES,
-        fallbackLabel: DEFAULT_PDP_FALLBACK_SECTION_LABEL,
-        fallbackShortLabel: DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL,
-      }
-    );
+    if (!cachedPdpSectionConfig) {
+      const reg = getSiteRegistry();
+      cachedPdpSectionConfig = reg?.getPdpSectionConfig(location.href) || {
+        closeMatchers: [],
+        headingCategories: [],
+        labelCategories: [],
+        fallbackLabel: "Listing details",
+        fallbackShortLabel: "Listing",
+      };
+    }
+    return cachedPdpSectionConfig;
   }
 
   function findSectionHeadingForElement(element) {
@@ -554,9 +542,16 @@
 
   const DEFAULT_PDP_CONTENT_COLUMN_SELECTOR = '[data-stid="lodging-infosite-template-api-renderer"]';
 
+  // Resolved once and cached, same reasoning as getPdpSectionConfig above —
+  // this runs on every unthrottled window resize tick via updatePanelPosition,
+  // and the site adapter can't change within one content-script instance.
+  let cachedPdpContentColumnSelector = null;
   function getPdpContentColumnSelector() {
-    const reg = getSiteRegistry();
-    return reg?.getPdpContentColumnSelector(location.href) || DEFAULT_PDP_CONTENT_COLUMN_SELECTOR;
+    if (!cachedPdpContentColumnSelector) {
+      const reg = getSiteRegistry();
+      cachedPdpContentColumnSelector = reg?.getPdpContentColumnSelector(location.href) || DEFAULT_PDP_CONTENT_COLUMN_SELECTOR;
+    }
+    return cachedPdpContentColumnSelector;
   }
 
   function updatePanelPosition(panel, isInitial) {
@@ -645,20 +640,27 @@
   // there instead of a second hardcoded table that could drift out of
   // sync with it, and that a second site's differently-named sections
   // wouldn't be covered by anyway.
+  // Resolved once and cached, same reasoning as getPdpSectionConfig above —
+  // this runs once per row rendered (every "Max dogs"/"Weight limit"/etc.
+  // jump link), and its source config is itself invariant per page.
+  let cachedShortSectionLabelLookup = null;
   function shortSectionLabelLookup() {
-    const { closeMatchers, headingCategories, labelCategories, fallbackLabel, fallbackShortLabel } =
-      getPdpSectionConfig();
-    const lookup = {
-      // Not a PDP section name — extract.js's buildCorpus() falls back to
-      // this literal string when a DOM-scanned sentence carries no source
-      // at all, regardless of which site's page it came from.
-      "visible page text": "Page text",
-      [fallbackLabel.toLowerCase()]: fallbackShortLabel,
-    };
-    for (const { label, shortLabel } of [...closeMatchers, ...headingCategories, ...labelCategories]) {
-      lookup[label.toLowerCase()] = shortLabel;
+    if (!cachedShortSectionLabelLookup) {
+      const { closeMatchers, headingCategories, labelCategories, fallbackLabel, fallbackShortLabel } =
+        getPdpSectionConfig();
+      const lookup = {
+        // Not a PDP section name — extract.js's buildCorpus() falls back to
+        // this literal string when a DOM-scanned sentence carries no source
+        // at all, regardless of which site's page it came from.
+        "visible page text": "Page text",
+        [fallbackLabel.toLowerCase()]: fallbackShortLabel,
+      };
+      for (const { label, shortLabel } of [...closeMatchers, ...headingCategories, ...labelCategories]) {
+        lookup[label.toLowerCase()] = shortLabel;
+      }
+      cachedShortSectionLabelLookup = lookup;
     }
-    return lookup;
+    return cachedShortSectionLabelLookup;
   }
   function shortSourceLabel(source) {
     if (!source) return "";

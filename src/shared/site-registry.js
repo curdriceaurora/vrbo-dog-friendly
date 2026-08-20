@@ -258,24 +258,29 @@
     return urlStr;
   }
 
+  // Every getter below accepts either a URL/hostname string (resolved
+  // through the registry) or an already-resolved site object directly —
+  // callers that already have the site (e.g. iterating SITES) skip the
+  // redundant lookup. Centralized here instead of six separate copies of
+  // the same ternary.
+  function resolveSite(urlOrHostnameOrSite) {
+    return typeof urlOrHostnameOrSite === "string"
+      ? (getSiteForUrl(urlOrHostnameOrSite) || getSiteForHostname(urlOrHostnameOrSite))
+      : urlOrHostnameOrSite;
+  }
+
   function getSearchCardSelector(urlOrHostname) {
-    const site = typeof urlOrHostname === "string"
-      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
-      : urlOrHostname;
+    const site = resolveSite(urlOrHostname);
     return site?.searchCardSelector || DEFAULT_SEARCH_CARD_SELECTOR;
   }
 
   function getCardContentSelector(urlOrHostname) {
-    const site = typeof urlOrHostname === "string"
-      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
-      : urlOrHostname;
+    const site = resolveSite(urlOrHostname);
     return site?.cardContentSelector || DEFAULT_CARD_CONTENT_SELECTORS;
   }
 
   function getPdpContentColumnSelector(urlOrHostname) {
-    const site = typeof urlOrHostname === "string"
-      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
-      : urlOrHostname;
+    const site = resolveSite(urlOrHostname);
     return site?.pdpContentColumnSelector || DEFAULT_PDP_CONTENT_COLUMN_SELECTOR;
   }
 
@@ -283,9 +288,7 @@
   // always consumed together by findSectionHeadingForElement /
   // shortSourceLabel.
   function getPdpSectionConfig(urlOrHostname) {
-    const site = typeof urlOrHostname === "string"
-      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
-      : urlOrHostname;
+    const site = resolveSite(urlOrHostname);
     return {
       closeMatchers: site?.pdpSectionCloseMatchers || DEFAULT_PDP_SECTION_CLOSE_MATCHERS,
       headingCategories: site?.pdpSectionHeadingCategories || DEFAULT_PDP_SECTION_HEADING_CATEGORIES,
@@ -296,9 +299,7 @@
   }
 
   function getCacheKey(urlOrSite, propertyId) {
-    const site = typeof urlOrSite === "string"
-      ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
-      : urlOrSite;
+    const site = resolveSite(urlOrSite);
     if (site && typeof site.getCacheKey === "function") {
       return site.getCacheKey(propertyId);
     }
@@ -306,9 +307,7 @@
   }
 
   function parseListingData(urlOrSite, html, propertyIdOrUrl, canonicalIdOrPropId, canonicalId) {
-    const site = typeof urlOrSite === "string"
-      ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
-      : urlOrSite;
+    const site = resolveSite(urlOrSite);
 
     let urlStr = typeof urlOrSite === "string" ? urlOrSite : "";
     let propertyId = propertyIdOrUrl;
