@@ -411,7 +411,7 @@
 /* Floating Hover & Focus Policy Tooltip */
 .vdp-search-tooltip {
   position: fixed;
-  width: 300px;
+  width: 290px;
   max-width: calc(100vw - 32px);
   background: var(--vdp-color-surface);
   border-radius: 12px;
@@ -512,7 +512,7 @@
 .vdp-tooltip-notes.vdp-tone-warn {
   background: var(--vdp-policy-warning-surface);
   color: var(--vdp-policy-warning-text);
-  border-left: 2px solid var(--vdp-color-border);
+  border-left: 2px solid var(--vdp-policy-warning-text);
 }
 
 .vdp-tooltip-footer {

@@ -1727,7 +1727,7 @@
         if (p.fee?.text) {
           addRow("Pet fee", p.fee.text, "vdp-tone-warn");
         } else {
-          addRow("Pet fee", "", "vdp-tone-warn", ["1st dog free", "Subsequent fee applies"]);
+          addRow("Pet fee", "", "vdp-tone-warn", ["1st dog free", "subsequent fee applies"]);
         }
         rowsAdded++;
       } else if (p.fee && p.fee.amount !== null) {
@@ -1829,7 +1829,7 @@
     searchTooltipEl.style.display = "block";
     const rect = badge.getBoundingClientRect();
     const tooltipHeight = searchTooltipEl.offsetHeight || 180;
-    const tooltipWidth = 300;
+    const tooltipWidth = 290;
 
     let top = rect.bottom + 4;
     if (top + tooltipHeight > window.innerHeight - 10) {
