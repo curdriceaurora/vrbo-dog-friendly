@@ -89,10 +89,9 @@ test("exercises 100% of production theme rules across color schemes and forced c
           document.body.appendChild(warnBadge);
           getComputedStyle(warnBadge).backgroundColor;
 
-          const finalTooltipRow = document.createElement("div");
-          finalTooltipRow.className = "vdp-tooltip-row";
-          document.getElementById("vdp-search-tooltip").appendChild(finalTooltipRow);
-          getComputedStyle(finalTooltipRow).borderBottomStyle;
+          for (const row of document.querySelectorAll(".vdp-tooltip-row")) {
+            getComputedStyle(row).borderTopStyle;
+          }
         });
       } else {
         const button = page.locator("#rescan");

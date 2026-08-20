@@ -469,11 +469,10 @@
   justify-content: space-between;
   align-items: center;
   padding: 4px 0;
-  border-bottom: 1px solid var(--vdp-color-border-subtle);
 }
 
-.vdp-tooltip-row:last-child {
-  border-bottom: none;
+.vdp-tooltip-row + .vdp-tooltip-row {
+  border-top: 1px solid var(--vdp-color-border-subtle);
 }
 
 .vdp-tooltip-label {
@@ -591,8 +590,8 @@
     outline-offset: 2px;
   }
 
-  .vdp-tooltip-row {
-    border-bottom: 1px solid CanvasText;
+  .vdp-tooltip-row + .vdp-tooltip-row {
+    border-top: 1px solid CanvasText;
   }
 
   .vdp-tooltip-notes {
