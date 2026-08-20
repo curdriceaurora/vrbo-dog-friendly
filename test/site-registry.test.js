@@ -339,6 +339,57 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
     );
   });
 
+  test("vrbo site adapter provides PDP content-column selector and section config", () => {
+    assert.ok(vrbo.pdpContentColumnSelector.includes("lodging-infosite-template-api-renderer"));
+    assert.equal(siteRegistry.getPdpContentColumnSelector("https://www.vrbo.com/123456"), vrbo.pdpContentColumnSelector);
+
+    const config = siteRegistry.getPdpSectionConfig("https://www.vrbo.com/123456");
+    assert.ok(Array.isArray(config.closeMatchers) && config.closeMatchers.length > 0);
+    assert.ok(Array.isArray(config.headingCategories) && config.headingCategories.length > 0);
+    assert.ok(Array.isArray(config.labelCategories) && config.labelCategories.length > 0);
+    assert.equal(config.fallbackLabel, "Listing details");
+    assert.equal(config.fallbackShortLabel, "Listing");
+    const houseRules = config.closeMatchers.find((m) => m.label === "House Rules / Policies");
+    assert.ok(houseRules);
+    assert.equal(houseRules.shortLabel, "House Rules");
+  });
+
+  test("a registered site can supply its own PDP content-column selector and section config, overriding Vrbo's", () => {
+    const customSite = {
+      id: "airbnb-pdp-test",
+      matchesHostname: (h) => /airbnb\.com$/i.test(h),
+      isListingUrl: (u) => /airbnb\.com\/rooms/i.test(u),
+      isSearchUrl: () => false,
+      pdpContentColumnSelector: '[data-testid="pdp-main-content"]',
+      pdpSectionCloseMatchers: [
+        { selector: '[data-testid="house-rules-section"]', label: "House Rules", shortLabel: "Rules" },
+      ],
+      pdpSectionHeadingCategories: [{ pattern: /house rules/i, label: "House Rules", shortLabel: "Rules" }],
+      pdpSectionLabelCategories: [{ pattern: /house-rules/i, label: "House Rules", shortLabel: "Rules" }],
+      pdpFallbackSectionLabel: "Airbnb listing",
+      pdpFallbackSectionShortLabel: "Listing",
+    };
+    siteRegistry.registerSite(customSite);
+    try {
+      assert.equal(
+        siteRegistry.getPdpContentColumnSelector("https://www.airbnb.com/rooms/123"),
+        '[data-testid="pdp-main-content"]'
+      );
+      const config = siteRegistry.getPdpSectionConfig("https://www.airbnb.com/rooms/123");
+      assert.equal(config.closeMatchers.length, 1);
+      assert.equal(config.closeMatchers[0].label, "House Rules");
+      assert.equal(config.fallbackLabel, "Airbnb listing");
+
+      // Vrbo's own config is untouched by another site being registered.
+      assert.equal(
+        siteRegistry.getPdpContentColumnSelector("https://www.vrbo.com/123456"),
+        vrbo.pdpContentColumnSelector
+      );
+    } finally {
+      siteRegistry.unregisterSite("airbnb-pdp-test");
+    }
+  });
+
   test("registry getCacheKey creates site-qualified cache keys", () => {
     assert.equal(siteRegistry.getCacheKey("https://www.vrbo.com/123456", "123456"), "vrbow_cache_123456");
     assert.equal(vrbo.getCacheKey("9999"), "vrbow_cache_9999");

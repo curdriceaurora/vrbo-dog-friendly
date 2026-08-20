@@ -26,6 +26,57 @@
     '[data-stid*="price"]',
   ];
 
+  // ---------- PDP (listing detail page) DOM layout ----------
+  // Search-page selectors above route through the registry already; these
+  // cover the *listing* page's own DOM shape instead — the anchor the panel
+  // positions itself beside (#44), and the section categorization the DOM
+  // text-scan fallback uses to label where a pet-policy snippet came from
+  // (findSectionHeadingForElement in content.js). Both were Vrbo-specific
+  // literals inline in content.js until this pass; a second site supplies
+  // its own values here instead of content.js falling back to Vrbo's DOM
+  // forever. Defaults below are exactly Vrbo's prior hardcoded behavior,
+  // so this refactor changes nothing for Vrbo itself.
+  const DEFAULT_PDP_CONTENT_COLUMN_SELECTOR = '[data-stid="lodging-infosite-template-api-renderer"]';
+
+  // Fast path: does `element` sit inside a container whose selector alone
+  // identifies the section, with no heading text involved?
+  // `shortLabel` is what the panel's compact per-row jump link renders
+  // (content.js's shortSourceLabel) — kept alongside the full `label` here,
+  // one definition per section, instead of a second lookup table content.js
+  // would otherwise have to keep in sync with these strings by hand.
+  const DEFAULT_PDP_SECTION_CLOSE_MATCHERS = [
+    { selector: '#reviews, [id*="reviews" i], [data-stid*="reviews" i], [data-stid*="ratings-and-reviews"], [class*="reviews-" i], [class*="reviews " i], [class$="reviews" i], [data-section-type*="review" i]', label: "Guest reviews", shortLabel: "Reviews" },
+    { selector: '[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]', label: "House Rules / Policies", shortLabel: "House Rules" },
+    { selector: '[data-stid*="about" i], [class*="about" i], [id*="about" i]', label: "About this property", shortLabel: "About" },
+    { selector: '[data-stid*="amenit" i], [class*="amenit" i], [id*="amenit" i]', label: "Property amenities", shortLabel: "Amenities" },
+    { selector: '[data-stid*="host" i], [class*="host" i], [id*="host" i]', label: "About the host", shortLabel: "Host" },
+    { selector: '[data-stid*="faq" i], [class*="faq" i], [id*="faq" i], [data-stid*="qna" i]', label: "Questions & answers", shortLabel: "Q&A" },
+  ];
+
+  // Fallback path: walk ancestors looking for a heading element's text.
+  const DEFAULT_PDP_SECTION_HEADING_CATEGORIES = [
+    { pattern: /review|rating/i, label: "Guest reviews", shortLabel: "Reviews" },
+    { pattern: /house rules|polic/i, label: "House Rules / Policies", shortLabel: "House Rules" },
+    { pattern: /about this property|about this space|description/i, label: "About this property", shortLabel: "About" },
+    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
+    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
+  ];
+
+  // Same ancestor walk, but categorizing an aria-label/data-stid/id instead
+  // of heading text — deliberately narrower patterns (e.g. bare "about"
+  // rather than "about this property|about this space|description") since
+  // these attribute values tend to be single tokens, not full sentences.
+  const DEFAULT_PDP_SECTION_LABEL_CATEGORIES = [
+    { pattern: /review/i, label: "Guest reviews", shortLabel: "Reviews" },
+    { pattern: /house-rules|policies/i, label: "House Rules / Policies", shortLabel: "House Rules" },
+    { pattern: /about/i, label: "About this property", shortLabel: "About" },
+    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
+    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
+  ];
+
+  const DEFAULT_PDP_FALLBACK_SECTION_LABEL = "Listing details";
+  const DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL = "Listing";
+
   const cachedExtractor =
     extractModule && typeof extractModule.extractPropertyId === "function" ? extractModule : null;
 
@@ -151,6 +202,12 @@
     parseListingData: vrboParseListingData,
     searchCardSelector: DEFAULT_SEARCH_CARD_SELECTOR,
     cardContentSelector: DEFAULT_CARD_CONTENT_SELECTORS,
+    pdpContentColumnSelector: DEFAULT_PDP_CONTENT_COLUMN_SELECTOR,
+    pdpSectionCloseMatchers: DEFAULT_PDP_SECTION_CLOSE_MATCHERS,
+    pdpSectionHeadingCategories: DEFAULT_PDP_SECTION_HEADING_CATEGORIES,
+    pdpSectionLabelCategories: DEFAULT_PDP_SECTION_LABEL_CATEGORIES,
+    pdpFallbackSectionLabel: DEFAULT_PDP_FALLBACK_SECTION_LABEL,
+    pdpFallbackSectionShortLabel: DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL,
   };
 
   const SITES = [vrboSite];
@@ -213,6 +270,29 @@
       ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
       : urlOrHostname;
     return site?.cardContentSelector || DEFAULT_CARD_CONTENT_SELECTORS;
+  }
+
+  function getPdpContentColumnSelector(urlOrHostname) {
+    const site = typeof urlOrHostname === "string"
+      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
+      : urlOrHostname;
+    return site?.pdpContentColumnSelector || DEFAULT_PDP_CONTENT_COLUMN_SELECTOR;
+  }
+
+  // Bundled rather than five near-identical getters: all five pieces are
+  // always consumed together by findSectionHeadingForElement /
+  // shortSourceLabel.
+  function getPdpSectionConfig(urlOrHostname) {
+    const site = typeof urlOrHostname === "string"
+      ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
+      : urlOrHostname;
+    return {
+      closeMatchers: site?.pdpSectionCloseMatchers || DEFAULT_PDP_SECTION_CLOSE_MATCHERS,
+      headingCategories: site?.pdpSectionHeadingCategories || DEFAULT_PDP_SECTION_HEADING_CATEGORIES,
+      labelCategories: site?.pdpSectionLabelCategories || DEFAULT_PDP_SECTION_LABEL_CATEGORIES,
+      fallbackLabel: site?.pdpFallbackSectionLabel || DEFAULT_PDP_FALLBACK_SECTION_LABEL,
+      fallbackShortLabel: site?.pdpFallbackSectionShortLabel || DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL,
+    };
   }
 
   function getCacheKey(urlOrSite, propertyId) {
@@ -281,6 +361,8 @@
     decorateFetchUrl,
     getSearchCardSelector,
     getCardContentSelector,
+    getPdpContentColumnSelector,
+    getPdpSectionConfig,
     getCacheKey,
     parseListingData,
     registerSite,

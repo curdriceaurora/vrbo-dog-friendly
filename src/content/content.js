@@ -389,26 +389,57 @@
   // never does. So walk text nodes and skip those subtrees.
   const DOM_EXCLUDE = 'label, form, button, select, textarea, input, nav, header, footer, script, style, [role="dialog"], [role="navigation"], [role="menu"], #vdp-panel';
 
-  function findSectionHeadingForElement(element) {
-    if (!element) return "Listing details";
+  // Local fallback if the registry is unavailable — mirrors Vrbo's own
+  // adapter values in site-registry.js exactly. The site-specific version
+  // lives in the registry (getPdpSectionConfig) rather than hardcoded here
+  // so a second site's differently-shaped PDP can supply its own selectors
+  // and categories, the same way search-card detection already routes
+  // through the registry instead of being Vrbo-only (see getSearchCardSelector
+  // above).
+  const DEFAULT_PDP_SECTION_CLOSE_MATCHERS = [
+    { selector: '#reviews, [id*="reviews" i], [data-stid*="reviews" i], [data-stid*="ratings-and-reviews"], [class*="reviews-" i], [class*="reviews " i], [class$="reviews" i], [data-section-type*="review" i]', label: "Guest reviews", shortLabel: "Reviews" },
+    { selector: '[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]', label: "House Rules / Policies", shortLabel: "House Rules" },
+    { selector: '[data-stid*="about" i], [class*="about" i], [id*="about" i]', label: "About this property", shortLabel: "About" },
+    { selector: '[data-stid*="amenit" i], [class*="amenit" i], [id*="amenit" i]', label: "Property amenities", shortLabel: "Amenities" },
+    { selector: '[data-stid*="host" i], [class*="host" i], [id*="host" i]', label: "About the host", shortLabel: "Host" },
+    { selector: '[data-stid*="faq" i], [class*="faq" i], [id*="faq" i], [data-stid*="qna" i]', label: "Questions & answers", shortLabel: "Q&A" },
+  ];
+  const DEFAULT_PDP_SECTION_HEADING_CATEGORIES = [
+    { pattern: /review|rating/i, label: "Guest reviews", shortLabel: "Reviews" },
+    { pattern: /house rules|polic/i, label: "House Rules / Policies", shortLabel: "House Rules" },
+    { pattern: /about this property|about this space|description/i, label: "About this property", shortLabel: "About" },
+    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
+    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
+  ];
+  const DEFAULT_PDP_SECTION_LABEL_CATEGORIES = [
+    { pattern: /review/i, label: "Guest reviews", shortLabel: "Reviews" },
+    { pattern: /house-rules|policies/i, label: "House Rules / Policies", shortLabel: "House Rules" },
+    { pattern: /about/i, label: "About this property", shortLabel: "About" },
+    { pattern: /amenit/i, label: "Property amenities", shortLabel: "Amenities" },
+    { pattern: /host/i, label: "About the host", shortLabel: "Host" },
+  ];
+  const DEFAULT_PDP_FALLBACK_SECTION_LABEL = "Listing details";
+  const DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL = "Listing";
 
-    if (element.closest('#reviews, [id*="reviews" i], [data-stid*="reviews" i], [data-stid*="ratings-and-reviews"], [class*="reviews-" i], [class*="reviews " i], [class$="reviews" i], [data-section-type*="review" i]')) {
-      return "Guest reviews";
-    }
-    if (element.closest('[data-stid*="house-rules" i], [class*="house-rules" i], [id*="house-rules" i], [data-stid*="policies" i], [id*="policies" i]')) {
-      return "House Rules / Policies";
-    }
-    if (element.closest('[data-stid*="about" i], [class*="about" i], [id*="about" i]')) {
-      return "About this property";
-    }
-    if (element.closest('[data-stid*="amenit" i], [class*="amenit" i], [id*="amenit" i]')) {
-      return "Property amenities";
-    }
-    if (element.closest('[data-stid*="host" i], [class*="host" i], [id*="host" i]')) {
-      return "About the host";
-    }
-    if (element.closest('[data-stid*="faq" i], [class*="faq" i], [id*="faq" i], [data-stid*="qna" i]')) {
-      return "Questions & answers";
+  function getPdpSectionConfig() {
+    const reg = getSiteRegistry();
+    return (
+      reg?.getPdpSectionConfig(location.href) || {
+        closeMatchers: DEFAULT_PDP_SECTION_CLOSE_MATCHERS,
+        headingCategories: DEFAULT_PDP_SECTION_HEADING_CATEGORIES,
+        labelCategories: DEFAULT_PDP_SECTION_LABEL_CATEGORIES,
+        fallbackLabel: DEFAULT_PDP_FALLBACK_SECTION_LABEL,
+        fallbackShortLabel: DEFAULT_PDP_FALLBACK_SECTION_SHORT_LABEL,
+      }
+    );
+  }
+
+  function findSectionHeadingForElement(element) {
+    const { closeMatchers, headingCategories, labelCategories, fallbackLabel } = getPdpSectionConfig();
+    if (!element) return fallbackLabel;
+
+    for (const { selector, label } of closeMatchers) {
+      if (element.closest(selector)) return label;
     }
 
     let curr = element;
@@ -417,25 +448,21 @@
       if (heading && heading !== element && !heading.contains(element)) {
         const text = heading.textContent?.trim();
         if (text && text.length > 2 && text.length < 50) {
-          if (/review|rating/i.test(text)) return "Guest reviews";
-          if (/house rules|polic/i.test(text)) return "House Rules / Policies";
-          if (/about this property|about this space|description/i.test(text)) return "About this property";
-          if (/amenit/i.test(text)) return "Property amenities";
-          if (/host/i.test(text)) return "About the host";
+          for (const { pattern, label } of headingCategories) {
+            if (pattern.test(text)) return label;
+          }
           return text;
         }
       }
-      const label = curr.getAttribute("aria-label") || curr.getAttribute("data-stid") || curr.id;
-      if (label) {
-        if (/review/i.test(label)) return "Guest reviews";
-        if (/house-rules|policies/i.test(label)) return "House Rules / Policies";
-        if (/about/i.test(label)) return "About this property";
-        if (/amenit/i.test(label)) return "Property amenities";
-        if (/host/i.test(label)) return "About the host";
+      const attrLabel = curr.getAttribute("aria-label") || curr.getAttribute("data-stid") || curr.id;
+      if (attrLabel) {
+        for (const { pattern, label } of labelCategories) {
+          if (pattern.test(attrLabel)) return label;
+        }
       }
     }
 
-    return "Listing details";
+    return fallbackLabel;
   }
 
   const QUICK_PET_CHECK = /\b(pets?|dogs?|canines?)\b/i;
@@ -525,9 +552,16 @@
   let lastPanelMode = null; // 'beside' | 'constrained' | null
   let lastUserCollapsed = null; // boolean | null
 
+  const DEFAULT_PDP_CONTENT_COLUMN_SELECTOR = '[data-stid="lodging-infosite-template-api-renderer"]';
+
+  function getPdpContentColumnSelector() {
+    const reg = getSiteRegistry();
+    return reg?.getPdpContentColumnSelector(location.href) || DEFAULT_PDP_CONTENT_COLUMN_SELECTOR;
+  }
+
   function updatePanelPosition(panel, isInitial) {
     if (!panel || !panel.isConnected) return;
-    const renderer = document.querySelector('[data-stid="lodging-infosite-template-api-renderer"]');
+    const renderer = document.querySelector(getPdpContentColumnSelector());
     const BESIDE_WIDTH = 340;
     // Hysteresis deadband: require >=350px margin to enter beside mode,
     // but only drop back to constrained mode if margin falls below 340px (panel width).
@@ -605,24 +639,32 @@
   // text-scan fallback (findSectionHeadingForElement) only ever returns
   // one of a handful of coarse section names, so there's no ">" to split
   // on and the full name ("House Rules / Policies", 23 chars) would blow
-  // right past the jump-link's column budget. Map those known coarse
-  // names down to the same short form the Apollo "Section > Header" path
-  // would have produced for an equivalent header.
-  const SHORT_SECTION_LABELS = {
-    "house rules / policies": "House Rules",
-    "about this property": "About",
-    "property amenities": "Amenities",
-    "about the host": "Host",
-    "questions & answers": "Q&A",
-    "guest reviews": "Reviews",
-    "listing details": "Listing",
-    "visible page text": "Page text",
-  };
+  // right past the jump-link's column budget. Those coarse names carry
+  // their own shortLabel right alongside label in the registry's PDP
+  // section config (see getPdpSectionConfig) — build the lookup from
+  // there instead of a second hardcoded table that could drift out of
+  // sync with it, and that a second site's differently-named sections
+  // wouldn't be covered by anyway.
+  function shortSectionLabelLookup() {
+    const { closeMatchers, headingCategories, labelCategories, fallbackLabel, fallbackShortLabel } =
+      getPdpSectionConfig();
+    const lookup = {
+      // Not a PDP section name — extract.js's buildCorpus() falls back to
+      // this literal string when a DOM-scanned sentence carries no source
+      // at all, regardless of which site's page it came from.
+      "visible page text": "Page text",
+      [fallbackLabel.toLowerCase()]: fallbackShortLabel,
+    };
+    for (const { label, shortLabel } of [...closeMatchers, ...headingCategories, ...labelCategories]) {
+      lookup[label.toLowerCase()] = shortLabel;
+    }
+    return lookup;
+  }
   function shortSourceLabel(source) {
     if (!source) return "";
     const parts = source.split(">").map((p) => p.trim()).filter(Boolean);
     const last = parts.length ? parts[parts.length - 1] : source.trim();
-    return SHORT_SECTION_LABELS[last.toLowerCase()] || last;
+    return shortSectionLabelLookup()[last.toLowerCase()] || last;
   }
 
   // `value` is always escaped. Today every caller passes a literal or a
