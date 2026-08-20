@@ -955,6 +955,26 @@
 
   // ---------- scan orchestration ----------
 
+  // Vrbo's structured PDP data arrives via the vdp-apollo-data event from
+  // page-bridge.js (a MAIN-world bridge, needed because window.__APOLLO_STATE__
+  // isn't reachable from the isolated world). Airbnb's data is plain DOM
+  // text content instead (#data-deferred-state-0), readable directly from
+  // this world with no bridge — so its adapter exposes a synchronous
+  // getPdpStructuredPayload() rather than needing an event listener.
+  // Resolved fresh on every call, never cached: unlike the PDP DOM
+  // selectors/section-config (invariant for one content-script instance's
+  // lifetime), this is the actual page content and must reflect whatever
+  // the current listing's page just rendered.
+  function getStructuredPdpPayload() {
+    const reg = getSiteRegistry();
+    const site = reg?.getSiteForUrl?.(location.href);
+    if (site && typeof site.getPdpStructuredPayload === "function") {
+      const payload = site.getPdpStructuredPayload();
+      if (payload) return payload;
+    }
+    return latestApolloPayload;
+  }
+
   async function scan(force) {
     // Don't drop a scan request that lands while one is in flight. The
     // expand pass can hold the lock for a couple of seconds, and the
@@ -985,11 +1005,11 @@
       // on item count alone reported "No dog policy details detected" on
       // exactly those listings. A forced rescan always expands, since the
       // user asking for one is asking us to look harder.
-      let entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      let entries = buildCorpus(getStructuredPdpPayload(), collectDomPetSentences());
       if (!entries.length || force) {
         await expandCollapsedSections();
         if (location.href !== startUrl) return;
-        entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+        entries = buildCorpus(getStructuredPdpPayload(), collectDomPetSentences());
       }
       if (location.href !== startUrl) return;
       const rawPolicy = extractPolicy(entries);
