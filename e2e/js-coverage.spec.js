@@ -343,7 +343,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   const panel = listingPage.locator("#vdp-panel");
   await expect(panel).toBeVisible({ timeout: 5000 });
-  await expect(panel).toContainText("Dog-friendly");
+  await expect(panel).toContainText("Dog policy");
 
   // Toggle collapsed and expanded
   await panel.locator(".vdp-header").click();
