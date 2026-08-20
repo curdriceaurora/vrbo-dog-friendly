@@ -259,6 +259,28 @@
     }
   }
 
+  // getCanonicalFetchUrl / decorateFetchUrl / getCacheKey exist for
+  // symmetry with the registry's site-adapter interface, but have no live
+  // caller today: they only matter to the search-fetcher queue's
+  // background-prefetch path, which only runs when isSearchUrl can be
+  // true somewhere — and isSearchUrl is always false here (see above).
+  // Kept rather than omitted so the shape stays complete for whenever
+  // Airbnb search-results support is scoped as its own follow-up, instead
+  // of these having to be reconstructed from scratch at that point.
+  //
+  // pdpContentColumnSelector / pdpSection* are deliberately NOT declared
+  // here — this issue's scope is PDP data extraction only (see
+  // isSearchUrl above and #12's own scope notes on search-results being
+  // out of scope). Leaving them undefined means the registry's
+  // getPdpContentColumnSelector/getPdpSectionConfig fall back to their
+  // Vrbo-shaped DEFAULT_* values (site-registry.js) for Airbnb pages too
+  // — those Vrbo-specific data-stid selectors simply never match
+  // Airbnb's DOM, so this degrades harmlessly to the generic
+  // ancestor-heading walk and constrained-mode panel positioning
+  // (confirmed by e2e/airbnb-listing.spec.js), not a deliberate Airbnb
+  // layout choice. Fine for v1; a real Airbnb-specific PDP layout (if the
+  // panel-beside-gallery positioning from #44 is ever wanted here too)
+  // is its own follow-up.
   const airbnbSite = {
     id: "airbnb",
     name: "Airbnb",

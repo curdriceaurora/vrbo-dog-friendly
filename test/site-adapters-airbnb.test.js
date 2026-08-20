@@ -102,6 +102,54 @@ describe("airbnb adapter: URL matching and property id extraction", () => {
     assert.equal(airbnbSite.getPropertyId("https://www.vrbo.com/rooms/42406610"), null);
     assert.equal(airbnbSite.getPropertyId("https://www.airbnb.com/s/San-Diego/homes"), null);
   });
+
+  test("isListingUrl/getPropertyId accept a relative path resolved against a baseUrl (the site-registry.js call convention)", () => {
+    const baseUrl = "https://www.airbnb.com/";
+    assert.equal(airbnbSite.isListingUrl("/rooms/42406610", baseUrl), true);
+    assert.equal(airbnbSite.getPropertyId("/rooms/42406610", baseUrl), "42406610");
+  });
+
+  test("isListingUrl/getPropertyId fail closed (false/null, no throw) on a genuinely malformed URL", () => {
+    assert.doesNotThrow(() => airbnbSite.isListingUrl("not a url at all"));
+    assert.equal(airbnbSite.isListingUrl("not a url at all"), false);
+    assert.equal(airbnbSite.getPropertyId("not a url at all"), null);
+  });
+
+  test("getCanonicalFetchUrl normalizes to the bare airbnb.com origin + path, and returns null off-site", () => {
+    assert.equal(
+      airbnbSite.getCanonicalFetchUrl("https://www.airbnb.com/rooms/42406610?check_in=2026-01-01"),
+      "https://www.airbnb.com/rooms/42406610"
+    );
+    assert.equal(airbnbSite.getCanonicalFetchUrl("https://www.vrbo.com/123456"), null);
+  });
+
+  test("decorateFetchUrl is a passthrough today (no query-param decoration needed, unlike Vrbo's)", () => {
+    const url = "https://www.airbnb.com/rooms/42406610?foo=bar";
+    assert.equal(airbnbSite.decorateFetchUrl(url), url);
+  });
+
+  test("registering the adapter self-registers airbnbSite with the shared site registry", () => {
+    // A fresh require of both modules, with VdpSiteRegistry populated
+    // *before* the adapter loads — mirrors manifest.json's real script
+    // order (site-registry.js, then sites/airbnb/adapter.js) — is needed
+    // to actually exercise the self-registration branch; the module-level
+    // require at the top of this file already ran with no registry
+    // present, so re-requiring from cache wouldn't re-run that branch.
+    delete require.cache[require.resolve("../src/sites/airbnb/adapter.js")];
+    const savedRegistry = globalThis.VdpSiteRegistry;
+    try {
+      globalThis.VdpSiteRegistry = require("../src/shared/site-registry.js");
+      require("../src/sites/airbnb/adapter.js");
+      const registered = globalThis.VdpSiteRegistry.getSiteForHostname("www.airbnb.com");
+      assert.ok(registered, "adapter.js did not self-register with VdpSiteRegistry on load");
+      assert.equal(registered.id, "airbnb");
+    } finally {
+      globalThis.VdpSiteRegistry.unregisterSite?.("airbnb");
+      globalThis.VdpSiteRegistry = savedRegistry;
+      delete require.cache[require.resolve("../src/sites/airbnb/adapter.js")];
+      require("../src/sites/airbnb/adapter.js"); // restore the module-level `adapter`/`airbnbSite` bindings used by every other test in this file
+    }
+  });
 });
 
 describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => {

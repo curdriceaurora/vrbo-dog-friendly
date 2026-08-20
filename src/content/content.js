@@ -991,12 +991,8 @@
   // the current listing's page just rendered.
   function getStructuredPdpPayload() {
     const reg = getSiteRegistry();
-    const site = reg?.getSiteForUrl?.(location.href);
-    if (site && typeof site.getPdpStructuredPayload === "function") {
-      const payload = site.getPdpStructuredPayload();
-      if (payload) return payload;
-    }
-    return latestApolloPayload;
+    const payload = reg?.getPdpStructuredPayload?.(location.href);
+    return payload || latestApolloPayload;
   }
 
   async function scan(force) {

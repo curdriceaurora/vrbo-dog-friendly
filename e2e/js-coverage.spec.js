@@ -4,7 +4,7 @@ const { expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 
 const ROOT = path.join(__dirname, "..");
-const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js"]);
+const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js", "adapter.js"]);
 
 function calculateExecutionMask(text, functionEntries) {
   if (!text || text.length === 0) return new Uint8Array(0);
@@ -24,7 +24,7 @@ function calculateExecutionMask(text, functionEntries) {
   return bytes;
 }
 
-test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, and page-bridge.js", async ({ browser }) => {
+test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, page-bridge.js, and the airbnb adapter", async ({ browser }) => {
   const aggregate = new Map();
   const context = await browser.newContext();
   const guard = await installNetworkGuard(context);
@@ -37,6 +37,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   const formattersJs = fs.readFileSync(path.join(ROOT, "src", "shared", "formatters.js"), "utf8");
   const contentJs = fs.readFileSync(path.join(ROOT, "src", "content", "content.js"), "utf8");
   const popupJs = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.js"), "utf8");
+  const airbnbAdapterJs = fs.readFileSync(path.join(ROOT, "src", "sites", "airbnb", "adapter.js"), "utf8");
   const tokensCss = fs.readFileSync(path.join(ROOT, "src", "content", "tokens.css"), "utf8");
   const contentCss = fs.readFileSync(path.join(ROOT, "src", "content", "content.css"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.css"), "utf8");
@@ -49,6 +50,20 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   await context.route("https://www.vrbo.com/content.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: contentJs }));
   await context.route("https://www.vrbo.com/popup.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: popupJs }));
   await context.route("https://www.vrbo.com/formatters.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: formattersJs }));
+
+  // Airbnb's manifest.json content-script bundle (shared/site-registry.js,
+  // sites/airbnb/adapter.js, shared/extract.js, shared/search-fetcher.js,
+  // shared/formatters.js, content/content.js — no page-bridge.js, unlike
+  // Vrbo's bundle, since Airbnb's data is DOM-reachable directly). Routed
+  // separately at the airbnb.com origin even where the file content is
+  // identical to the vrbo.com routes above, since Playwright routes match
+  // full URLs, not just paths.
+  await context.route("https://www.airbnb.com/site-registry.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: siteRegistryJs }));
+  await context.route("https://www.airbnb.com/adapter.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: airbnbAdapterJs }));
+  await context.route("https://www.airbnb.com/extract.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: extractJs }));
+  await context.route("https://www.airbnb.com/search-fetcher.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: searchFetcherJs }));
+  await context.route("https://www.airbnb.com/formatters.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: formattersJs }));
+  await context.route("https://www.airbnb.com/content.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: contentJs }));
 
   // Route mock listing fetch responses
   await context.route("https://www.vrbo.com/100001*", (r) => r.fulfill({
@@ -210,6 +225,100 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
     </body>
   </html>`;
 
+  // 2b. Airbnb listing page scenario — no page-bridge.js (manifest.json
+  // omits it for airbnb.com; the adapter reads #data-deferred-state-0
+  // directly instead of an Apollo-state window global). Payload shape
+  // mirrors e2e/airbnb-listing.spec.js's real-extension test — small and
+  // synthetic here since this test's job is coverage of the script paths
+  // actually exercised by a real page visit, not re-verifying parsing
+  // correctness (already covered against the real captured fixtures in
+  // test/site-adapters-airbnb.test.js).
+  const airbnbNiobeClientData = [
+    [
+      "StaysPdpSections:{}",
+      {
+        data: {
+          presentation: {
+            stayProductDetailPage: {
+              sections: {
+                sections: [
+                  {
+                    sectionComponentType: "POLICIES_DEFAULT",
+                    section: {
+                      __typename: "PoliciesSection",
+                      houseRulesSections: [
+                        {
+                          __typename: "GeneralListContentSection",
+                          title: "During your stay",
+                          items: [{ __typename: "BasicListItem", title: "Pets allowed" }],
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    sectionComponentType: "WHAT_COUNTS_AS_A_PET",
+                    section: {
+                      __typename: "GeneralContentSection",
+                      html: { __typename: "Html", htmlText: "Service animals aren’t pets, so there’s no need to add them here." },
+                    },
+                  },
+                  {
+                    sectionComponentType: "PDP_DESCRIPTION_MODAL",
+                    section: {
+                      __typename: "GeneralListContentSection",
+                      items: [
+                        {
+                          __typename: "BasicListItem",
+                          html: { __typename: "Html", htmlText: "Pet's are considered (Pet Fee: $40/Night)" },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        },
+        variables: {},
+      },
+    ],
+  ];
+
+  const airbnbListingHtml = `<!doctype html>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8">
+      <style>${tokensCss}\n${contentCss}</style>
+      <script id="data-deferred-state-0" type="application/json">${JSON.stringify({ niobeClientData: airbnbNiobeClientData })}</script>
+      <script>
+        window.chrome = {
+          storage: {
+            local: {
+              store: {},
+              get(k, cb) { cb({}); },
+              set(k, cb) { cb && cb(); }
+            }
+          },
+          runtime: {
+            sendMessage(msg, cb) { cb && cb({}); },
+            onMessage: {
+              listeners: [],
+              addListener(fn) { this.listeners.push(fn); }
+            }
+          }
+        };
+      </script>
+    </head>
+    <body>
+      <script src="/site-registry.js"></script>
+      <script src="/adapter.js"></script>
+      <script src="/extract.js"></script>
+      <script src="/search-fetcher.js"></script>
+      <script src="/formatters.js"></script>
+      <script src="/content.js"></script>
+    </body>
+  </html>`;
+
   // 3. Popup scenario creator
   function createPopupHtml(tabUrl, policyResponse, lastError = null) {
     return `<!doctype html>
@@ -264,6 +373,10 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   await context.route("https://www.vrbo.com/123456*", (route) => {
     route.fulfill({ status: 200, contentType: "text/html", body: listingHtml });
+  });
+
+  await context.route("https://www.airbnb.com/rooms/42406610*", (route) => {
+    route.fulfill({ status: 200, contentType: "text/html", body: airbnbListingHtml });
   });
 
   function collectCoverage(entries) {
@@ -369,6 +482,26 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   await listingPage.close();
 
   // -------------------------------------------------------------------------
+  // Execute Airbnb Listing Flow (sites/airbnb/adapter.js browser-path
+  // coverage — the manifest's real airbnb.com content-script bundle, not
+  // just a Node-level require)
+  // -------------------------------------------------------------------------
+  const airbnbPage = await context.newPage();
+  await airbnbPage.coverage.startJSCoverage();
+  await airbnbPage.goto("https://www.airbnb.com/rooms/42406610");
+
+  const airbnbPanel = airbnbPage.locator("#vdp-panel");
+  await expect(airbnbPanel).toBeVisible({ timeout: 5000 });
+  await expect(airbnbPanel).toContainText("Dog policy");
+  // Exercises the buried-fee extraction path (getPdpStructuredPayload's
+  // full walk, not just the toggle) rather than the sparse-state branch,
+  // for maximal coverage of the adapter's walker.
+  await expect(airbnbPanel).toContainText("Fee");
+
+  collectCoverage(await airbnbPage.coverage.stopJSCoverage());
+  await airbnbPage.close();
+
+  // -------------------------------------------------------------------------
   // Execute Popup Flows across All Policy Branches
   // -------------------------------------------------------------------------
   const popupScenarios = [
@@ -443,7 +576,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   console.log("8.2.4 Browser-Path JavaScript Coverage Report");
   console.log("===============================================================================");
 
-  for (const script of ["content.js", "popup.js", "page-bridge.js"]) {
+  for (const script of ["content.js", "popup.js", "page-bridge.js", "adapter.js"]) {
     const cov = aggregate.get(script);
     let covered = 0;
     if (cov && cov.mask) {
