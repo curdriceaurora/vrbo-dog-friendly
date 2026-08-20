@@ -345,11 +345,12 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   await expect(panel).toBeVisible({ timeout: 5000 });
   await expect(panel).toContainText("Dog policy");
 
-  // Toggle collapsed and expanded
-  await panel.locator(".vdp-header").click();
+  // Toggle expanded and collapsed (starts collapsed by default on constrained viewports)
   await expect(panel).toHaveClass(/vdp-collapsed/);
   await panel.locator(".vdp-header").click();
   await expect(panel).not.toHaveClass(/vdp-collapsed/);
+  await panel.locator(".vdp-header").click();
+  await expect(panel).toHaveClass(/vdp-collapsed/);
 
   // Exercise popup message listeners in content script
   await listingPage.evaluate(() => {
