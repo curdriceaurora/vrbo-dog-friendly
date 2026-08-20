@@ -97,7 +97,7 @@ for (const scheme of ["light", "dark"]) {
 
       const panel = page.locator("#vdp-panel");
       await expect(panel).toBeVisible({ timeout: 8_000 });
-      await expect(panel).toContainText("Dog-friendly");
+      await expect(panel).toContainText("Dog policy");
       await expect(panel).toContainText("Max dogs");
       await expect(panel).toContainText("50 lbs");
       await expect(panel).toContainText("$150");

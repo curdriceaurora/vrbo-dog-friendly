@@ -77,12 +77,16 @@
    long or multi-clause values grows taller rows against this same column
    budget rather than widening the panel.
    label(116) -> gutter(30, empty) -> value(1fr, dominant) -> gap(8, empty)
-   -> source(64). The label is right-aligned so its edge sits flush on the
+   -> source(96). The label is right-aligned so its edge sits flush on the
    gutter regardless of word length, instead of the gutter appearing to
-   drift depending on how short the label happens to be. */
+   drift depending on how short the label happens to be. Source is sized
+   to fit the longest of shortSourceLabel's short forms ("House Rules")
+   without ellipsis; it was still 64px — a track from when the panel
+   itself was 280px wide — until the panel grew to 400px in #37 without
+   the source column claiming any of that extra width. */
 #vdp-panel .vdp-row {
   display: grid;
-  grid-template-columns: 116px 30px 1fr 8px 64px;
+  grid-template-columns: 116px 30px 1fr 8px 96px;
   align-items: baseline;
   padding: 10px 0;
 }
@@ -257,7 +261,7 @@
    informative rather than the bare word "source". Rows with no snippet
    to jump to render no button at all, so the column is simply blank.
    Truncation is done here by real rendered width (max-width tied to the
-   64px source track + ellipsis), not by guessing a character count in
+   96px source track + ellipsis), not by guessing a character count in
    JS — the full label is still available via the button's title. */
 #vdp-panel .vdp-jump {
   grid-column: 5;

@@ -421,10 +421,29 @@
   // formatSourceLabel in extract.js) — for the compact per-row jump link
   // we only want the lowest-level, linkable label (the header the
   // snippet actually lives under), not the full hierarchy.
+  //
+  // Several sources never get a distinct header at all: the DOM
+  // text-scan fallback (findSectionHeadingForElement) only ever returns
+  // one of a handful of coarse section names, so there's no ">" to split
+  // on and the full name ("House Rules / Policies", 23 chars) would blow
+  // right past the jump-link's column budget. Map those known coarse
+  // names down to the same short form the Apollo "Section > Header" path
+  // would have produced for an equivalent header.
+  const SHORT_SECTION_LABELS = {
+    "house rules / policies": "House Rules",
+    "about this property": "About",
+    "property amenities": "Amenities",
+    "about the host": "Host",
+    "questions & answers": "Q&A",
+    "guest reviews": "Reviews",
+    "listing details": "Listing",
+    "visible page text": "Page text",
+  };
   function shortSourceLabel(source) {
     if (!source) return "";
     const parts = source.split(">").map((p) => p.trim()).filter(Boolean);
-    return parts.length ? parts[parts.length - 1] : source.trim();
+    const last = parts.length ? parts[parts.length - 1] : source.trim();
+    return SHORT_SECTION_LABELS[last.toLowerCase()] || last;
   }
 
   // `value` is always escaped. Today every caller passes a literal or a
@@ -508,16 +527,19 @@
       }
     }
 
+    // Title stays a static "Dog policy" across every state — matching the
+    // search tooltip's header, which never changes text either — so the
+    // panel and tooltip read as the same widget. Status is conveyed by
+    // headlineTone (the header's background color) and the row/body
+    // content below, not by swapping the title itself.
+    headline = "Dog policy";
     if (policy.petsAllowed === false) {
-      headline = "🚫 Pets are not allowed";
       headlineTone = "bad";
       rowsHtml = row("Policy", "No pets allowed", "bad", raw.petsAllowedSnippet, raw.petsAllowedSource);
     } else if (!raw.found && !policy.restrictionsFound) {
-      headline = "🐾 No dog policy details detected";
       headlineTone = "unknown";
       rowsHtml = `<div class="vdp-empty">This page didn't mention pets/dogs in its listing data or visible text. Try Rescan after the page fully loads, or check House Rules manually.</div>`;
     } else {
-      headline = policy.petsAllowed === true ? "🐾 Dog-friendly" : "🐾 Dog policy found";
       headlineTone = policy.petsAllowed === true ? "good" : "unknown";
 
       const notes = raw.otherNotes || [];

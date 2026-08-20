@@ -181,7 +181,7 @@ test("8.1.5: exercises card recycling, out-of-order response isolation, and SPA 
     // On listing page, search badges and tooltips should be cleaned up, and listing panel attached
     const panel = page.locator("#vdp-panel");
     await expect(panel).toBeVisible({ timeout: 6_000 });
-    await expect(panel).toContainText("Dog-friendly");
+    await expect(panel).toContainText("Dog policy");
     await expect(page.locator(".vdp-search-badge")).toHaveCount(0);
 
     // Navigate back to search page
