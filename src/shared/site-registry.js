@@ -80,14 +80,19 @@
   const cachedExtractor =
     extractModule && typeof extractModule.extractPropertyId === "function" ? extractModule : null;
 
-  function parseUrl(urlStr, baseUrl) {
+  // defaultOrigin lets a caller outside this module (a site adapter, e.g.
+  // sites/airbnb/adapter.js) reuse this exact parsing logic with its own
+  // site's origin as the root-relative-path fallback, instead of keeping
+  // a second copy of this same three-branch try/catch with a different
+  // hardcoded origin.
+  function parseUrl(urlStr, baseUrl, defaultOrigin) {
     if (!urlStr || typeof urlStr !== "string") return null;
     try {
       if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlStr)) {
         return new URL(urlStr);
       }
       if (urlStr.startsWith("/")) {
-        return new URL(urlStr, baseUrl || "https://www.vrbo.com");
+        return new URL(urlStr, baseUrl || defaultOrigin || "https://www.vrbo.com");
       }
       if (baseUrl) {
         return new URL(urlStr, baseUrl);
@@ -384,6 +389,7 @@
   }
 
   return {
+    parseUrl,
     getSiteForUrl,
     getSiteForHostname,
     isListingUrl,

@@ -19,34 +19,50 @@
 // experimental feature — not part of this adapter. isSearchUrl always
 // returns false so no search-page code path ever activates for Airbnb.
 
+// registryModule is shared/site-registry.js, passed in the same way
+// site-registry.js itself receives extract.js — a real module dependency,
+// not a globalThis lookup deferred to call time, so this adapter's own
+// functions don't depend on load order beyond "site-registry.js loaded
+// before this file" (already required by manifest.json either way).
+// Reuses its parseUrl instead of keeping a second copy of the same
+// three-branch URL-parsing/error-swallowing logic with a different
+// hardcoded default origin.
 (function (root, factory) {
-  const api = factory();
   if (typeof module !== "undefined" && module.exports) {
+    let registryModule = null;
+    try {
+      registryModule = require("../../shared/site-registry.js");
+    } catch {}
+    const api = factory(registryModule);
     module.exports = api;
-  }
-  if (typeof globalThis !== "undefined") {
-    globalThis.VdpAirbnbAdapter = api;
+    if (typeof globalThis !== "undefined") {
+      globalThis.VdpAirbnbAdapter = api;
+      if (globalThis.VdpSiteRegistry && typeof globalThis.VdpSiteRegistry.registerSite === "function") {
+        globalThis.VdpSiteRegistry.registerSite(api.airbnbSite);
+      }
+    }
+  } else {
+    const api = factory(root.VdpSiteRegistry);
+    root.VdpAirbnbAdapter = api;
     // Self-register with the shared registry as soon as both are loaded.
     // manifest.json lists shared/site-registry.js before this file, so the
     // registry is always present here in the real extension; guarded for
     // any context (e.g. a future bundler) that might load this alone.
-    if (globalThis.VdpSiteRegistry && typeof globalThis.VdpSiteRegistry.registerSite === "function") {
-      globalThis.VdpSiteRegistry.registerSite(api.airbnbSite);
+    if (root.VdpSiteRegistry && typeof root.VdpSiteRegistry.registerSite === "function") {
+      root.VdpSiteRegistry.registerSite(api.airbnbSite);
     }
   }
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (registryModule) {
   "use strict";
 
+  // Delegates to site-registry.js's parseUrl with Airbnb's own default
+  // origin. Falls back to null (not a local reimplementation) if the
+  // registry module genuinely isn't available — as unreachable in
+  // practice as the other "registry unavailable" cases already accepted
+  // elsewhere in this codebase (manifest.json guarantees load order).
   function parseUrl(urlStr, baseUrl) {
-    if (!urlStr || typeof urlStr !== "string") return null;
-    try {
-      if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlStr)) return new URL(urlStr);
-      if (urlStr.startsWith("/")) return new URL(urlStr, baseUrl || "https://www.airbnb.com");
-      if (baseUrl) return new URL(urlStr, baseUrl);
-      return null;
-    } catch {
-      return null;
-    }
+    if (!registryModule || typeof registryModule.parseUrl !== "function") return null;
+    return registryModule.parseUrl(urlStr, baseUrl, "https://www.airbnb.com");
   }
 
   function airbnbMatchesHostname(hostname) {
@@ -121,9 +137,18 @@
   // we haven't seen yet (this is exactly the gap found during #12's
   // research: the real buried-fee example sits under
   // GeneralListContentSection/PDP_DESCRIPTION_MODAL, neither of which the
-  // original issue text anticipated). A key-name allowlist degrades
-  // gracefully instead: an unfamiliar __typename is still walked and its
-  // text collected as long as the leaf key matches one of these.
+  // original issue text anticipated). Walking by leaf key name instead of
+  // __typename means an unfamiliar SECTION shape still gets its text
+  // collected as long as the leaf itself uses one of these key names —
+  // it's a narrower allowlist (4 keys vs. dozens of typenames), not a
+  // fundamentally different guarantee: a listing whose prose sits under a
+  // still-different leaf key (e.g. a hypothetical `plainText`/`subtitle`)
+  // would be silently missed the same way a __typename allowlist would
+  // miss an unfamiliar typename. Some allowlisting is unavoidable against
+  // an unversioned internal payload; expanding this set (or adding
+  // another schema-independent signal, the way readListingTitleCandidates
+  // above pairs its JSON-path reads with document.title) is the fix when
+  // a future listing's fixture turns up something this set misses.
   const LEAF_TEXT_KEYS = new Set(["htmlText", "title", "localizedString", "localizedContent"]);
 
   // Keys that are structurally never human-readable prose, so never worth
@@ -222,6 +247,27 @@
     } catch {
       // best-effort — an unexpected shape here just means no titles to
       // filter, not a failure of the actual extraction below.
+    }
+    // Additional, schema-independent signal: the rendered page's own
+    // <title>, which doesn't depend on guessing at niobeClientData's
+    // internal field names the way the two reads above do. Purely
+    // additive — can only catch more of the same noise, never regress
+    // the two candidates already verified against the real fixtures.
+    // Airbnb's real <title> is "<bare name> - Apartments for Rent in
+    // <city>... - Airbnb" (confirmed against a live capture); the bare
+    // name before the first " - " is exactly the string that leaks from
+    // pdpPresentation.title/description.name above, so this also still
+    // catches the noise if Airbnb ever restructures those specific JSON
+    // paths.
+    try {
+      if (typeof document !== "undefined" && typeof document.title === "string" && document.title.trim()) {
+        const fullTitle = document.title.trim();
+        candidates.add(fullTitle);
+        const bareName = fullTitle.split(" - ")[0].trim();
+        if (bareName) candidates.add(bareName);
+      }
+    } catch {
+      // same best-effort reasoning as above.
     }
     return candidates;
   }

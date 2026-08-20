@@ -28,9 +28,10 @@ function loadFixtureRaw(name) {
 
 // Minimal document mock: the adapter only ever calls
 // document.getElementById("data-deferred-state-0").textContent.
-function withMockDocument(rawJsonText, fn) {
+function withMockDocument(rawJsonText, fn, title = "") {
   const prevDocument = globalThis.document;
   globalThis.document = {
+    title,
     getElementById(id) {
       if (id !== "data-deferred-state-0") return null;
       return { textContent: rawJsonText };
@@ -42,6 +43,16 @@ function withMockDocument(rawJsonText, fn) {
     if (prevDocument === undefined) delete globalThis.document;
     else globalThis.document = prevDocument;
   }
+}
+
+// Collapses the loadFixtureRaw + withMockDocument + getPdpStructuredPayload
+// idiom repeated across nearly every test below into one call.
+function loadPayload(file, title = "") {
+  return withMockDocument(loadFixtureRaw(file), () => airbnbSite.getPdpStructuredPayload(), title);
+}
+
+function allFixtureFiles() {
+  return fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
 }
 
 describe("airbnb adapter: URL matching and property id extraction", () => {
@@ -179,8 +190,7 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
   });
 
   test("buried-fee fixture (Baywatch Retreat): the buried per-night/week/month pet fee text is present in the walked items", () => {
-    const raw = loadFixtureRaw("buried-fee-baywatch.json");
-    const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    const payload = loadPayload("buried-fee-baywatch.json");
     assert.ok(payload && Array.isArray(payload.items));
     const feeItem = payload.items.find((it) => /Pet Fee/i.test(it.text) && /\$40\/Night/i.test(it.text));
     assert.ok(feeItem, "expected the buried pet-fee text to appear as a walked item");
@@ -188,10 +198,8 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
   });
 
   test("WHAT_COUNTS_AS_A_PET boilerplate is excluded from every fixture, not just where it happens to appear", () => {
-    const files = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
-    for (const file of files) {
-      const raw = loadFixtureRaw(file);
-      const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    for (const file of allFixtureFiles()) {
+      const payload = loadPayload(file);
       assert.ok(payload && Array.isArray(payload.items), `${file}: expected a payload`);
       const poisoned = payload.items.find((it) => /service animals aren.t pets/i.test(it.text));
       assert.equal(poisoned, undefined, `${file}: WHAT_COUNTS_AS_A_PET boilerplate leaked into the corpus`);
@@ -199,11 +207,10 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
   });
 
   test("every real fixture parses without throwing and yields a non-empty item list", () => {
-    const files = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
+    const files = allFixtureFiles();
     assert.ok(files.length >= 5, "expected at least the 5 fixtures captured for issue #12");
     for (const file of files) {
-      const raw = loadFixtureRaw(file);
-      const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+      const payload = loadPayload(file);
       assert.ok(payload, `${file}: expected a non-null payload`);
       assert.ok(payload.items.length > 0, `${file}: expected at least one walked item`);
       for (const item of payload.items) {
@@ -215,26 +222,22 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
 
   test("toggle-only fixtures still surface a 'Pets allowed' amenity/house-rule item", () => {
     for (const file of ["toggle-only-beautiful-2br.json", "toggle-only-nyc-studio.json", "toggle-only-upstay-resort.json"]) {
-      const raw = loadFixtureRaw(file);
-      const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+      const payload = loadPayload(file);
       const allowed = payload.items.find((it) => /^pets allowed$/i.test(it.text));
       assert.ok(allowed, `${file}: expected a "Pets allowed" item`);
     }
   });
 
   test("SEO/marketing link-farm text ('Pet-friendly vacation rentals in ...') is excluded, not just filtered downstream", () => {
-    const files = fs.readdirSync(FIXTURES_DIR).filter((f) => f.endsWith(".json"));
-    for (const file of files) {
-      const raw = loadFixtureRaw(file);
-      const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    for (const file of allFixtureFiles()) {
+      const payload = loadPayload(file);
       const seoNoise = payload.items.find((it) => /pet-friendly vacation rentals in/i.test(it.text));
       assert.equal(seoNoise, undefined, `${file}: seoLinks marketing copy leaked into the walked items`);
     }
   });
 
   test("the listing's own title/name does not appear as a duplicate item, but distinct real content with the same phrase does", () => {
-    const raw = loadFixtureRaw("toggle-only-19digit-sunny-cottage.json");
-    const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    const payload = loadPayload("toggle-only-19digit-sunny-cottage.json");
     // Exact title match must be filtered out.
     const exactTitle = payload.items.find((it) => it.text === "Sunny 1 bed cottage a few blocks from dog beach!");
     assert.equal(exactTitle, undefined, "the listing's own title leaked into the walked items verbatim");
@@ -244,12 +247,51 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
     const realContent = payload.items.find((it) => /5-min walk to Dog Beach/i.test(it.text));
     assert.ok(realContent, "real neighborhood description text was incorrectly filtered along with the title");
   });
+
+  test("document.title catches a title leak even from a JSON path the two hardcoded reads don't know about", () => {
+    // Simulates Airbnb restructuring niobeClientData so the listing name
+    // shows up somewhere other than pdpPresentation.title/description.name
+    // — here, an ordinary BasicListItem inside a random content section,
+    // exactly the shape real listing prose takes. Without the
+    // document.title fallback this would leak through unfiltered; proves
+    // it's a genuine independent signal, not just re-deriving the same
+    // two JSON paths a different way.
+    const raw = JSON.stringify({
+      niobeClientData: [
+        [
+          "StaysPdpSections:{}",
+          {
+            data: {
+              presentation: {
+                stayProductDetailPage: {
+                  sections: {
+                    sections: [
+                      {
+                        sectionComponentType: "SOME_UNMODELED_SECTION",
+                        section: {
+                          __typename: "GeneralListContentSection",
+                          items: [{ __typename: "BasicListItem", title: "A Cozy Test Listing" }],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            variables: {},
+          },
+        ],
+      ],
+    });
+    const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload(), "A Cozy Test Listing - Homes for Rent in Testville - Airbnb");
+    const leaked = payload.items.find((it) => it.text === "A Cozy Test Listing");
+    assert.equal(leaked, undefined, "document.title fallback did not catch the title leak from an unmodeled JSON path");
+  });
 });
 
 describe("airbnb adapter: end-to-end extraction (getPdpStructuredPayload -> buildCorpus -> extractPolicy)", () => {
   function extractFromFixture(file) {
-    const raw = loadFixtureRaw(file);
-    const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    const payload = loadPayload(file);
     const corpus = extract.buildCorpus(payload, []);
     return extract.extractPolicy(corpus);
   }

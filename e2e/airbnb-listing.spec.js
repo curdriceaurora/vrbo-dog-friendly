@@ -1,6 +1,7 @@
 const path = require("node:path");
 const { chromium, expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
+const { TOGGLE_ONLY_PAYLOAD, BURIED_FEE_PAYLOAD } = require("./airbnb-payloads.js");
 
 const EXTENSION_ROOT = path.join(__dirname, "..", "src");
 const LISTING_URL = "https://www.airbnb.com/rooms/42406610";
@@ -23,96 +24,21 @@ function pageHtml(niobeClientData) {
 </html>`;
 }
 
-function section(sectionComponentType, sectionBody) {
-  return { sectionComponentType, section: sectionBody };
+async function launchAirbnbExtensionContext() {
+  return chromium.launchPersistentContext("", {
+    channel: "chromium",
+    headless: true,
+    viewport: { width: 1440, height: 900 },
+    args: [
+      `--disable-extensions-except=${EXTENSION_ROOT}`,
+      `--load-extension=${EXTENSION_ROOT}`,
+    ],
+  });
 }
-
-const TOGGLE_ONLY_PAYLOAD = [
-  [
-    "StaysPdpSections:{}",
-    {
-      data: {
-        presentation: {
-          stayProductDetailPage: {
-            sections: {
-              sections: [
-                section("POLICIES_DEFAULT", {
-                  __typename: "PoliciesSection",
-                  houseRulesSections: [
-                    {
-                      __typename: "GeneralListContentSection",
-                      title: "During your stay",
-                      items: [{ __typename: "BasicListItem", title: "Pets allowed" }],
-                    },
-                  ],
-                }),
-                section("WHAT_COUNTS_AS_A_PET", {
-                  __typename: "GeneralContentSection",
-                  html: { __typename: "Html", htmlText: "Service animals aren’t pets, so there’s no need to add them here." },
-                }),
-              ],
-            },
-          },
-        },
-      },
-      variables: {},
-    },
-  ],
-];
-
-const BURIED_FEE_PAYLOAD = [
-  [
-    "StaysPdpSections:{}",
-    {
-      data: {
-        presentation: {
-          stayProductDetailPage: {
-            sections: {
-              sections: [
-                section("POLICIES_DEFAULT", {
-                  __typename: "PoliciesSection",
-                  houseRulesSections: [
-                    {
-                      __typename: "GeneralListContentSection",
-                      title: "During your stay",
-                      items: [{ __typename: "BasicListItem", title: "Pets allowed" }],
-                    },
-                  ],
-                }),
-                // Real buried-fee text lives under exactly this
-                // typename/sectionComponentType combination on a live
-                // listing (Baywatch Retreat, see #12 research) — not the
-                // PoliciesSection the original issue anticipated.
-                section("PDP_DESCRIPTION_MODAL", {
-                  __typename: "GeneralListContentSection",
-                  items: [
-                    {
-                      __typename: "BasicListItem",
-                      html: { __typename: "Html", htmlText: "Pet's are considered (Pet Fee: $40/Night, $250/Wk, $300/Month)" },
-                    },
-                  ],
-                }),
-              ],
-            },
-          },
-        },
-      },
-      variables: {},
-    },
-  ],
-];
 
 test.describe("Airbnb adapter: real extension end-to-end (issue #12)", () => {
   test("toggle-only listing renders the 'Allowed, no additional restrictions listed' state, not the generic unconfirmed one", async () => {
-    const context = await chromium.launchPersistentContext("", {
-      channel: "chromium",
-      headless: true,
-      viewport: { width: 1440, height: 900 },
-      args: [
-        `--disable-extensions-except=${EXTENSION_ROOT}`,
-        `--load-extension=${EXTENSION_ROOT}`,
-      ],
-    });
+    const context = await launchAirbnbExtensionContext();
 
     try {
       const page = await context.newPage();
@@ -148,15 +74,7 @@ test.describe("Airbnb adapter: real extension end-to-end (issue #12)", () => {
   });
 
   test("buried-fee listing renders real Max dogs / Fee rows, not the sparse state", async () => {
-    const context = await chromium.launchPersistentContext("", {
-      channel: "chromium",
-      headless: true,
-      viewport: { width: 1440, height: 900 },
-      args: [
-        `--disable-extensions-except=${EXTENSION_ROOT}`,
-        `--load-extension=${EXTENSION_ROOT}`,
-      ],
-    });
+    const context = await launchAirbnbExtensionContext();
 
     try {
       const page = await context.newPage();

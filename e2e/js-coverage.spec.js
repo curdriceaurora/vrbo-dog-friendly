@@ -2,6 +2,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const { expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
+const { BURIED_FEE_PAYLOAD: AIRBNB_NIOBE_CLIENT_DATA } = require("./airbnb-payloads.js");
 
 const ROOT = path.join(__dirname, "..");
 const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js", "adapter.js"]);
@@ -227,69 +228,18 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   // 2b. Airbnb listing page scenario — no page-bridge.js (manifest.json
   // omits it for airbnb.com; the adapter reads #data-deferred-state-0
-  // directly instead of an Apollo-state window global). Payload shape
-  // mirrors e2e/airbnb-listing.spec.js's real-extension test — small and
-  // synthetic here since this test's job is coverage of the script paths
-  // actually exercised by a real page visit, not re-verifying parsing
-  // correctness (already covered against the real captured fixtures in
-  // test/site-adapters-airbnb.test.js).
-  const airbnbNiobeClientData = [
-    [
-      "StaysPdpSections:{}",
-      {
-        data: {
-          presentation: {
-            stayProductDetailPage: {
-              sections: {
-                sections: [
-                  {
-                    sectionComponentType: "POLICIES_DEFAULT",
-                    section: {
-                      __typename: "PoliciesSection",
-                      houseRulesSections: [
-                        {
-                          __typename: "GeneralListContentSection",
-                          title: "During your stay",
-                          items: [{ __typename: "BasicListItem", title: "Pets allowed" }],
-                        },
-                      ],
-                    },
-                  },
-                  {
-                    sectionComponentType: "WHAT_COUNTS_AS_A_PET",
-                    section: {
-                      __typename: "GeneralContentSection",
-                      html: { __typename: "Html", htmlText: "Service animals aren’t pets, so there’s no need to add them here." },
-                    },
-                  },
-                  {
-                    sectionComponentType: "PDP_DESCRIPTION_MODAL",
-                    section: {
-                      __typename: "GeneralListContentSection",
-                      items: [
-                        {
-                          __typename: "BasicListItem",
-                          html: { __typename: "Html", htmlText: "Pet's are considered (Pet Fee: $40/Night)" },
-                        },
-                      ],
-                    },
-                  },
-                ],
-              },
-            },
-          },
-        },
-        variables: {},
-      },
-    ],
-  ];
-
+  // directly instead of an Apollo-state window global). Payload reused from
+  // e2e/airbnb-payloads.js (the same BURIED_FEE_PAYLOAD e2e/airbnb-listing.spec.js
+  // exercises) rather than hand-duplicated here — this test's job is
+  // coverage of the script paths actually exercised by a real page visit,
+  // not re-verifying parsing correctness (already covered against the real
+  // captured fixtures in test/site-adapters-airbnb.test.js).
   const airbnbListingHtml = `<!doctype html>
   <html lang="en">
     <head>
       <meta charset="utf-8">
       <style>${tokensCss}\n${contentCss}</style>
-      <script id="data-deferred-state-0" type="application/json">${JSON.stringify({ niobeClientData: airbnbNiobeClientData })}</script>
+      <script id="data-deferred-state-0" type="application/json">${JSON.stringify({ niobeClientData: AIRBNB_NIOBE_CLIENT_DATA })}</script>
       <script>
         window.chrome = {
           storage: {
