@@ -781,11 +781,26 @@
         !raw.deposit &&
         !notes.length;
 
-      if (isFullySparse) {
-        // Every core field came back unconfirmed — a four-row table of
-        // "Not specified" would give that absence the same structural
-        // weight as a real finding. Collapse to one muted line instead;
-        // still names exactly what was checked, just not as row markup.
+      if (isFullySparse && policy.petsAllowed === true) {
+        // A confirmed "pets allowed" with none of the four detail fields
+        // stated anywhere — the majority outcome on some sites (Airbnb:
+        // 4/6 sampled listings in issue #12's research), not an edge case.
+        // Distinct from the branch below: we DO have an answer here, we
+        // just don't have fine print — showing "unconfirmed" wording on a
+        // listing that affirmatively said yes would read as broken.
+        // vdp-tone-good is the same global tone utility used elsewhere
+        // (badges, header) — no new CSS needed, just applied in this
+        // context too.
+        rowsHtml = `<div class="vdp-unconfirmed">
+          <p class="vdp-unconfirmed-text vdp-tone-good">Allowed, no additional restrictions listed. Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
+          ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
+        </div>`;
+      } else if (isFullySparse) {
+        // Every core field came back unconfirmed AND petsAllowed itself
+        // isn't confirmed true — a four-row table of "Not specified"
+        // would give that absence the same structural weight as a real
+        // finding. Collapse to one muted line instead; still names
+        // exactly what was checked, just not as row markup.
         rowsHtml = `<div class="vdp-unconfirmed">
           <p class="vdp-unconfirmed-text">Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
           ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
