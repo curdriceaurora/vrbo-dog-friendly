@@ -413,6 +413,8 @@
   // ---------- rendering ----------
 
   let panelResizeListener = null;
+  let lastPanelMode = null; // 'beside' | 'constrained' | null
+  let lastUserCollapsed = null; // boolean | null
 
   function updatePanelPosition(panel, isInitial) {
     if (!panel || !panel.isConnected) return;
@@ -420,38 +422,62 @@
     const BESIDE_WIDTH = 340;
     const MIN_BESIDE_MARGIN = 350; // allows 340px panel to comfortably fit on 1920px viewports (360px margin)
 
+    let isBeside = false;
+    let gap = 16;
     if (renderer) {
       const rect = renderer.getBoundingClientRect();
       const freeSpaceRight = window.innerWidth - rect.right;
 
       if (freeSpaceRight >= MIN_BESIDE_MARGIN) {
-        const gap = Math.max(10, Math.min(16, Math.floor((freeSpaceRight - BESIDE_WIDTH) / 2)));
+        isBeside = true;
+        gap = Math.max(10, Math.min(16, Math.floor((freeSpaceRight - BESIDE_WIDTH) / 2)));
         panel.style.left = `${Math.round(rect.right + gap)}px`;
         panel.style.right = "auto";
         panel.classList.add("vdp-beside");
-        if (isInitial) {
-          panel.classList.remove("vdp-collapsed");
-          const header = panel.querySelector(".vdp-header");
-          if (header) header.setAttribute("aria-expanded", "true");
-        }
-        return;
       }
     }
 
-    panel.style.left = "auto";
-    panel.style.right = "16px";
-    panel.classList.remove("vdp-beside");
-    if (isInitial) {
-      panel.classList.add("vdp-collapsed");
-      const header = panel.querySelector(".vdp-header");
-      if (header) header.setAttribute("aria-expanded", "false");
+    if (!isBeside) {
+      panel.style.left = "auto";
+      panel.style.right = "16px";
+      panel.classList.remove("vdp-beside");
+    }
+
+    const currentMode = isBeside ? "beside" : "constrained";
+    const modeChanged = lastPanelMode !== currentMode;
+    lastPanelMode = currentMode;
+
+    const header = panel.querySelector(".vdp-header");
+
+    if (modeChanged) {
+      if (isBeside) {
+        panel.classList.remove("vdp-collapsed");
+        if (header) header.setAttribute("aria-expanded", "true");
+        lastUserCollapsed = false;
+      } else {
+        panel.classList.add("vdp-collapsed");
+        if (header) header.setAttribute("aria-expanded", "false");
+        lastUserCollapsed = true;
+      }
+    } else if (isInitial && lastUserCollapsed !== null) {
+      if (lastUserCollapsed) {
+        panel.classList.add("vdp-collapsed");
+        if (header) header.setAttribute("aria-expanded", "false");
+      } else {
+        panel.classList.remove("vdp-collapsed");
+        if (header) header.setAttribute("aria-expanded", "true");
+      }
     }
   }
 
-  function removePanel() {
+  function removePanel(resetSession) {
     if (panelResizeListener) {
       window.removeEventListener("resize", panelResizeListener);
       panelResizeListener = null;
+    }
+    if (resetSession) {
+      lastPanelMode = null;
+      lastUserCollapsed = null;
     }
     const existing = document.getElementById(PANEL_ID);
     if (existing) existing.remove();
@@ -762,7 +788,9 @@
       if (e.type === "keydown" && e.key !== "Enter" && e.key !== " ") return;
       if (e.type === "keydown") e.preventDefault();
       panel.classList.toggle("vdp-collapsed");
-      header.setAttribute("aria-expanded", panel.classList.contains("vdp-collapsed") ? "false" : "true");
+      const isCollapsed = panel.classList.contains("vdp-collapsed");
+      lastUserCollapsed = isCollapsed;
+      header.setAttribute("aria-expanded", isCollapsed ? "false" : "true");
     };
     header.addEventListener("click", toggleCollapse);
     header.addEventListener("keydown", toggleCollapse);
@@ -1943,7 +1971,7 @@
       hideTooltip();
 
       if (isSearchUrl(location.href)) {
-        removePanel();
+        removePanel(true);
         // I7: search -> search keeps the queue object, and with it the session
         // request budget; only the per-card state of the previous result set is
         // dropped. The search -> listing branch below still disposes outright.
@@ -1953,7 +1981,7 @@
         });
       } else if (isListingUrl(location.href)) {
         cleanupSearchManager();
-        removePanel();
+        removePanel(true);
         latestApolloPayload = null;
         harvestedDialogText = [];
         harvestedForUrl = null;
@@ -1962,7 +1990,7 @@
         setTimeout(() => scan(false), 3200);
       } else {
         cleanupSearchManager();
-        removePanel();
+        removePanel(true);
       }
     }
   }

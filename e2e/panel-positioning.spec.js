@@ -160,14 +160,70 @@ test.describe("Issue #44: listing panel responsive positioning", () => {
       const panel = page.locator("#vdp-panel");
       await expect(panel).toBeVisible({ timeout: 6000 });
       await expect(panel).not.toHaveClass(/vdp-beside/);
+      await expect(panel).toHaveClass(/vdp-collapsed/);
 
-      // Resize to wide (1920x1080)
+      // Resize to wide (1920x1080) -> transitions to beside mode, expands automatically
       await page.setViewportSize({ width: 1920, height: 1080 });
       await expect(panel).toHaveClass(/vdp-beside/);
+      await expect(panel).not.toHaveClass(/vdp-collapsed/);
 
-      // Resize back to 1440
+      const panelBox = await panel.boundingBox();
+      const renderer = page.locator('[data-stid="lodging-infosite-template-api-renderer"]');
+      const rendererBox = await renderer.boundingBox();
+      expect(panelBox.x).toBeGreaterThanOrEqual(rendererBox.x + rendererBox.width);
+
+      // Resize back to 1440 -> transitions to constrained mode, collapses automatically to clear gallery
       await page.setViewportSize({ width: 1440, height: 900 });
       await expect(panel).not.toHaveClass(/vdp-beside/);
+      await expect(panel).toHaveClass(/vdp-collapsed/);
+      await expect(panel.locator(".vdp-header")).toHaveAttribute("aria-expanded", "false");
+
+      await guard.assertNoLeakedRequests(page);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("rescan preserves user's manually expanded state within the same mode", async () => {
+    const context = await chromium.launchPersistentContext("", {
+      channel: "chromium",
+      headless: true,
+      viewport: { width: 1440, height: 900 },
+      args: [
+        `--disable-extensions-except=${EXTENSION_ROOT}`,
+        `--load-extension=${EXTENSION_ROOT}`
+      ]
+    });
+
+    try {
+      const page = await context.newPage();
+      const guard = await installNetworkGuard(context, page);
+
+      await page.route("https://www.vrbo.com/5442123*", (route) => route.fulfill({
+        status: 200,
+        contentType: "text/html",
+        body: LISTING_HTML
+      }));
+
+      await page.goto(LISTING_URL);
+
+      const panel = page.locator("#vdp-panel");
+      await expect(panel).toBeVisible({ timeout: 6000 });
+      await expect(panel).toHaveClass(/vdp-collapsed/);
+
+      // User manually clicks to expand panel
+      const header = panel.locator(".vdp-header");
+      await header.click();
+      await expect(panel).not.toHaveClass(/vdp-collapsed/);
+
+      // User triggers rescan
+      const rescanBtn = panel.locator(".vdp-rescan");
+      await rescanBtn.click();
+
+      // Verify panel remains mounted and preserves expanded state
+      await expect(panel).toBeVisible({ timeout: 6000 });
+      await expect(panel).not.toHaveClass(/vdp-collapsed/);
+      await expect(panel.locator(".vdp-header")).toHaveAttribute("aria-expanded", "true");
 
       await guard.assertNoLeakedRequests(page);
     } finally {
