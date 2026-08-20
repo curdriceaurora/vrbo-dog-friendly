@@ -198,6 +198,34 @@
     }
   }
 
+  // The listing's own title/name shows up verbatim as a leaf-text
+  // candidate from a couple of known wrapper shapes (pdpPresentation.title,
+  // description.name) — real content by the walker's own rules (a
+  // localizedString leaf), but a redundant, low-value "note" when it's
+  // just the listing repeating its own name back. Deliberately NOT
+  // excluded by skipping those keys structurally — hostInfo.overview.title
+  // has the exact same object-wrapper shape and IS real content (a host's
+  // profile overview), so a key-name-based skip would risk dropping
+  // legitimate text there too. Comparing against the actual known title
+  // VALUE is precise where a structural skip would be a guess; best-effort
+  // only (a couple of specific, defensive reads) since this is a cosmetic
+  // dedup, not a data-completeness concern — if Airbnb moves these fields,
+  // this silently stops filtering rather than losing anything.
+  function readListingTitleCandidates(data) {
+    const candidates = new Set();
+    try {
+      const node = data && data.niobeClientData && data.niobeClientData[0] && data.niobeClientData[0][1] && data.niobeClientData[0][1].data && data.niobeClientData[0][1].data.node;
+      const t1 = node && node.pdpPresentation && node.pdpPresentation.title && node.pdpPresentation.title.content && node.pdpPresentation.title.content.localizedString;
+      const t2 = node && node.description && node.description.name && node.description.name.localizedString;
+      if (typeof t1 === "string" && t1.trim()) candidates.add(t1.trim());
+      if (typeof t2 === "string" && t2.trim()) candidates.add(t2.trim());
+    } catch {
+      // best-effort — an unexpected shape here just means no titles to
+      // filter, not a failure of the actual extraction below.
+    }
+    return candidates;
+  }
+
   // Reads the current page's #data-deferred-state-0 script tag and returns
   // a { items: [{header, section, text}, ...] } payload in the same shape
   // buildCorpus() (extract.js) already consumes for Vrbo's Apollo path —
@@ -220,7 +248,9 @@
 
       const items = [];
       walkNiobeNode(niobeClientData, { header: null, section: null }, items, 0);
-      return { items };
+      const titleCandidates = readListingTitleCandidates(data);
+      const filteredItems = titleCandidates.size ? items.filter((it) => !titleCandidates.has(it.text)) : items;
+      return { items: filteredItems };
     } catch (e) {
       if (typeof console !== "undefined" && typeof console.warn === "function") {
         console.warn("vrbow: failed to read Airbnb structured PDP data", e);

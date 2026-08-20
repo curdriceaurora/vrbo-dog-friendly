@@ -183,6 +183,19 @@ describe("airbnb adapter: getPdpStructuredPayload against real fixtures", () => 
       assert.equal(seoNoise, undefined, `${file}: seoLinks marketing copy leaked into the walked items`);
     }
   });
+
+  test("the listing's own title/name does not appear as a duplicate item, but distinct real content with the same phrase does", () => {
+    const raw = loadFixtureRaw("toggle-only-19digit-sunny-cottage.json");
+    const payload = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    // Exact title match must be filtered out.
+    const exactTitle = payload.items.find((it) => it.text === "Sunny 1 bed cottage a few blocks from dog beach!");
+    assert.equal(exactTitle, undefined, "the listing's own title leaked into the walked items verbatim");
+    // But real, distinct content that merely mentions similar words (this
+    // fixture's actual "Dog Beach" neighborhood description) must survive —
+    // this is a value-equality filter, not a keyword-based one.
+    const realContent = payload.items.find((it) => /5-min walk to Dog Beach/i.test(it.text));
+    assert.ok(realContent, "real neighborhood description text was incorrectly filtered along with the title");
+  });
 });
 
 describe("airbnb adapter: end-to-end extraction (getPdpStructuredPayload -> buildCorpus -> extractPolicy)", () => {

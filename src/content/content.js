@@ -704,6 +704,33 @@
     </div>`;
   }
 
+  // Pure, DOM-free decision for the fully-sparse panel state (renderPanel
+  // below), split out so it's directly unit-testable without mocking
+  // document.createElement — the fully-sparse branch has real user-facing
+  // wording bugs to guard against (this is the exact split that fixed
+  // Airbnb's majority "allowed, no other detail" case reading as
+  // "unknown"), so its logic deserves a test that doesn't also depend on
+  // panel DOM construction.
+  function sparseStateMessage(petsAllowed) {
+    if (petsAllowed === true) {
+      // We DO have an answer (pets are allowed) — just no fine print.
+      // Showing the plain "weren't stated" wording here (as if nothing
+      // at all were known) would read as broken on a listing that
+      // affirmatively said yes. vdp-tone-good is the same global tone
+      // utility used elsewhere (badges, header) — no new CSS needed.
+      return {
+        text: "Allowed, no additional restrictions listed. Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.",
+        toneClass: " vdp-tone-good",
+      };
+    }
+    // petsAllowed itself isn't confirmed true — genuinely no answer, not
+    // just no fine print. Neutral wording, no tone class.
+    return {
+      text: "Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.",
+      toneClass: "",
+    };
+  }
+
   function renderPanel(policy) {
     removePanel();
 
@@ -781,28 +808,10 @@
         !raw.deposit &&
         !notes.length;
 
-      if (isFullySparse && policy.petsAllowed === true) {
-        // A confirmed "pets allowed" with none of the four detail fields
-        // stated anywhere — the majority outcome on some sites (Airbnb:
-        // 4/6 sampled listings in issue #12's research), not an edge case.
-        // Distinct from the branch below: we DO have an answer here, we
-        // just don't have fine print — showing "unconfirmed" wording on a
-        // listing that affirmatively said yes would read as broken.
-        // vdp-tone-good is the same global tone utility used elsewhere
-        // (badges, header) — no new CSS needed, just applied in this
-        // context too.
+      if (isFullySparse) {
+        const { text, toneClass } = sparseStateMessage(policy.petsAllowed);
         rowsHtml = `<div class="vdp-unconfirmed">
-          <p class="vdp-unconfirmed-text vdp-tone-good">Allowed, no additional restrictions listed. Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
-          ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
-        </div>`;
-      } else if (isFullySparse) {
-        // Every core field came back unconfirmed AND petsAllowed itself
-        // isn't confirmed true — a four-row table of "Not specified"
-        // would give that absence the same structural weight as a real
-        // finding. Collapse to one muted line instead; still names
-        // exactly what was checked, just not as row markup.
-        rowsHtml = `<div class="vdp-unconfirmed">
-          <p class="vdp-unconfirmed-text">Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
+          <p class="vdp-unconfirmed-text${toneClass}">${text}</p>
           ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
         </div>`;
       } else {
@@ -2376,6 +2385,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       __test: {
+        sparseStateMessage,
         initSearchManager,
         cleanupSearchManager,
         scanSearchCards,
