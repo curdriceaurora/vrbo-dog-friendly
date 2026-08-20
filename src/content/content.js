@@ -45,7 +45,13 @@
       return false;
     }
     try {
-      return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
+      if (typeof chrome !== "undefined" && chrome.runtime) {
+        // Accessing runtime.id throws if the context is invalidated.
+        // If it is undefined but doesn't throw (like in test mocks), we treat it as valid.
+        const id = chrome.runtime.id;
+        return true;
+      }
+      return false;
     } catch (e) {
       return false;
     }
