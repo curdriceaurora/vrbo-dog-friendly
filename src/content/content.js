@@ -33,6 +33,111 @@
   let pendingRescan = false;
   let observer = null;
 
+  let urlCheckIntervalId = null;
+  let isOrphaned = false;
+  let apolloDataListener = null;
+  let searchApolloDataListener = null;
+  let popstateListener = null;
+  let locationChangeListener = null;
+
+  function isContextValid() {
+    if (typeof globalThis !== "undefined" && globalThis.__vdpTestInvalidated) {
+      return false;
+    }
+    try {
+      return typeof chrome !== "undefined" && !!chrome.runtime && !!chrome.runtime.id;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Hook for testing context invalidation in E2E environments
+  window.addEventListener("vdp-test-trigger-invalidation", () => {
+    globalThis.__vdpTestInvalidated = true;
+  });
+
+  function cleanupOrphanedScript() {
+    if (isOrphaned) return;
+    isOrphaned = true;
+    if (urlCheckIntervalId) {
+      clearInterval(urlCheckIntervalId);
+      urlCheckIntervalId = null;
+    }
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    if (apolloDataListener) {
+      window.removeEventListener("vdp-apollo-data", apolloDataListener);
+    }
+    if (searchApolloDataListener) {
+      window.removeEventListener("vdp-search-apollo-data", searchApolloDataListener);
+    }
+    if (popstateListener) {
+      window.removeEventListener("popstate", popstateListener);
+    }
+    if (locationChangeListener) {
+      window.removeEventListener("vdp-locationchange", locationChangeListener);
+    }
+    cleanupSearchManager();
+    removePanel(true);
+  }
+
+  function safeStorageSet(data) {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
+    try {
+      chrome.storage?.local?.set?.(data);
+    } catch (e) {
+      if (e.message && e.message.includes("Extension context invalidated")) {
+        cleanupOrphanedScript();
+      }
+    }
+  }
+
+  function safeStorageGet(keys, callback) {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
+    try {
+      chrome.storage?.local?.get?.(keys, (res) => {
+        if (!isContextValid()) {
+          cleanupOrphanedScript();
+          return;
+        }
+        callback(res);
+      });
+    } catch (e) {
+      if (e.message && e.message.includes("Extension context invalidated")) {
+        cleanupOrphanedScript();
+      }
+    }
+  }
+
+  function createSafeStorageWrapper() {
+    const wrapped = {};
+    const methods = ["get", "set", "remove"];
+    for (const m of methods) {
+      wrapped[m] = function (...args) {
+        if (!isContextValid()) {
+          cleanupOrphanedScript();
+          return;
+        }
+        try {
+          chrome.storage?.local?.[m]?.(...args);
+        } catch (e) {
+          if (e.message && e.message.includes("Extension context invalidated")) {
+            cleanupOrphanedScript();
+          }
+        }
+      };
+    }
+    return wrapped;
+  }
+
   // ---------- text gathering: DOM (fallback layer) ----------
 
   // Parsing/extraction lives in extract.js (loaded ahead of this script in
@@ -845,7 +950,7 @@
         ? VDPExtract.normalizePolicy(rawPolicy, propId, "listing-page")
         : rawPolicy;
       window.__vdpLastPolicy = canonicalPolicy;
-      chrome.storage?.local?.set?.({ vdpLastPolicy: canonicalPolicy, vdpLastUrl: startUrl });
+      safeStorageSet({ vdpLastPolicy: canonicalPolicy, vdpLastUrl: startUrl });
       renderPanel(canonicalPolicy);
     } finally {
       isScanning = false;
@@ -1231,7 +1336,9 @@
   function initSearchManager() {
     if (!globalThis.VdpSearchFetcher) return;
     if (!searchQueue) {
-      searchQueue = globalThis.VdpSearchFetcher.createSearchFetchQueue();
+      searchQueue = globalThis.VdpSearchFetcher.createSearchFetchQueue({
+        storage: createSafeStorageWrapper()
+      });
     }
     if (!searchTooltipEl) {
       searchTooltipEl = document.createElement("div");
@@ -1970,6 +2077,10 @@
   }
 
   function onUrlMaybeChanged() {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
     if (location.href !== lastScannedUrl) {
       lastScannedUrl = location.href;
       hideTooltip();
@@ -1980,7 +2091,7 @@
         // request budget; only the per-card state of the previous result set is
         // dropped. The search -> listing branch below still disposes outright.
         pruneStaleSearchCards();
-        chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
+        safeStorageGet(["vrbow_enable_search_badging"], (data) => {
           if (!data || data.vrbow_enable_search_badging !== false) initSearchManager();
         });
       } else if (isListingUrl(location.href)) {
@@ -2000,24 +2111,44 @@
   }
 
   // Bridge data listener (page-bridge.js runs in the MAIN world).
-  window.addEventListener("vdp-apollo-data", (e) => {
+  apolloDataListener = (e) => {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
     latestApolloPayload = e.detail;
     scheduleRescan(150);
-  });
+  };
+  window.addEventListener("vdp-apollo-data", apolloDataListener);
+
   // Search-page Apollo fast path: the bridge answers this request
   // synchronously while the request event is still dispatching, so
   // requestSearchApolloData() can read the fresh payload in the same tick.
-  window.addEventListener("vdp-search-apollo-data", (e) => {
+  searchApolloDataListener = (e) => {
+    if (!isContextValid()) {
+      cleanupOrphanedScript();
+      return;
+    }
     latestSearchApolloData = e.detail;
-  });
+  };
+  window.addEventListener("vdp-search-apollo-data", searchApolloDataListener);
+
   // Ask the bridge for whatever it already has, in case it fired before
   // we attached this listener.
   window.dispatchEvent(new CustomEvent("vdp-request-apollo-data"));
 
   // SPA navigation detection
-  window.addEventListener("popstate", () => window.dispatchEvent(new Event("vdp-locationchange")));
-  window.addEventListener("vdp-locationchange", onUrlMaybeChanged);
-  setInterval(onUrlMaybeChanged, 1000);
+  popstateListener = () => {
+    window.dispatchEvent(new Event("vdp-locationchange"));
+  };
+  window.addEventListener("popstate", popstateListener);
+
+  locationChangeListener = () => {
+    onUrlMaybeChanged();
+  };
+  window.addEventListener("vdp-locationchange", locationChangeListener);
+
+  urlCheckIntervalId = setInterval(onUrlMaybeChanged, 1000);
 
   // MutationObserver, attached to document.body which permanently survives
   // SPA <main> swaps. Panel is attached to document.documentElement (outside body)
@@ -2086,7 +2217,7 @@
   startObserver();
 
   // initial run
-  chrome.storage?.local?.get?.(["vrbow_enable_search_badging"], (data) => {
+  safeStorageGet(["vrbow_enable_search_badging"], (data) => {
     const searchBadgingEnabled = data ? data.vrbow_enable_search_badging !== false : true; // Default ON
     if (isSearchUrl(location.href)) {
       if (searchBadgingEnabled) initSearchManager();
@@ -2097,29 +2228,53 @@
   });
 
   // Listen for settings toggle live
-  chrome.storage?.onChanged?.addListener?.((changes, area) => {
-    if (area === "local" && changes.vrbow_enable_search_badging) {
-      const enabled = changes.vrbow_enable_search_badging.newValue !== false;
-      if (isSearchUrl(location.href)) {
-        if (enabled) {
-          initSearchManager();
-        } else {
-          cleanupSearchManager();
+  try {
+    chrome.storage?.onChanged?.addListener?.((changes, area) => {
+      if (!isContextValid()) {
+        cleanupOrphanedScript();
+        return;
+      }
+      if (area === "local" && changes.vrbow_enable_search_badging) {
+        const enabled = changes.vrbow_enable_search_badging.newValue !== false;
+        if (isSearchUrl(location.href)) {
+          if (enabled) {
+            initSearchManager();
+          } else {
+            cleanupSearchManager();
+          }
         }
       }
+    });
+  } catch (e) {
+    if (e.message && e.message.includes("Extension context invalidated")) {
+      cleanupOrphanedScript();
     }
-  });
+  }
 
   // respond to popup requests
-  chrome.runtime?.onMessage?.addListener?.((msg, _sender, sendResponse) => {
-    if (msg?.type === "vdp-get-policy") {
-      sendResponse({ policy: window.__vdpLastPolicy || null, url: location.href });
-    } else if (msg?.type === "vdp-rescan") {
-      scan(true).then(() => sendResponse({ policy: window.__vdpLastPolicy || null }));
+  try {
+    chrome.runtime?.onMessage?.addListener?.((msg, _sender, sendResponse) => {
+      if (!isContextValid()) {
+        cleanupOrphanedScript();
+        return;
+      }
+      if (msg?.type === "vdp-get-policy") {
+        sendResponse({ policy: window.__vdpLastPolicy || null, url: location.href });
+      } else if (msg?.type === "vdp-rescan") {
+        scan(true).then(() => {
+          if (isContextValid()) {
+            sendResponse({ policy: window.__vdpLastPolicy || null });
+          }
+        });
+        return true;
+      }
       return true;
+    });
+  } catch (e) {
+    if (e.message && e.message.includes("Extension context invalidated")) {
+      cleanupOrphanedScript();
     }
-    return true;
-  });
+  }
 
   // Unit-test surface (node --test). `module` does not exist in the extension's
   // isolated world, so this block is inert in the browser; it exists so the card
