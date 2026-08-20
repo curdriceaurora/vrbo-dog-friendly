@@ -411,7 +411,7 @@
 /* Floating Hover & Focus Policy Tooltip */
 .vdp-search-tooltip {
   position: fixed;
-  width: 290px;
+  width: 300px;
   max-width: calc(100vw - 32px);
   background: var(--vdp-color-surface);
   border-radius: 12px;
@@ -468,7 +468,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 4px 0;
+  padding: 5px 0;
 }
 
 .vdp-tooltip-row + .vdp-tooltip-row {
@@ -478,12 +478,23 @@
 .vdp-tooltip-label {
   color: var(--vdp-color-text-secondary);
   font-weight: 500;
+  font-size: 11.5px;
 }
 
 .vdp-tooltip-val {
   font-weight: 600;
+  font-size: 11.5px;
   text-align: right;
   color: var(--vdp-color-text);
+  line-height: 1.35;
+}
+
+.vdp-tooltip-val-line {
+  display: block;
+}
+
+.vdp-tooltip-val-line + .vdp-tooltip-val-line {
+  margin-top: 2px;
 }
 
 .vdp-tooltip-notes {
@@ -501,6 +512,7 @@
 .vdp-tooltip-notes.vdp-tone-warn {
   background: var(--vdp-policy-warning-surface);
   color: var(--vdp-policy-warning-text);
+  border-left: 2px solid var(--vdp-color-border);
 }
 
 .vdp-tooltip-footer {

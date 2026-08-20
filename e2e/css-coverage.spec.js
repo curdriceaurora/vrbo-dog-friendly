@@ -92,6 +92,10 @@ test("exercises 100% of production theme rules across color schemes and forced c
           for (const row of document.querySelectorAll(".vdp-tooltip-row")) {
             getComputedStyle(row).borderTopStyle;
           }
+          for (const line of document.querySelectorAll(".vdp-tooltip-val-line")) {
+            getComputedStyle(line).display;
+            getComputedStyle(line).marginTop;
+          }
         });
       } else {
         const button = page.locator("#rescan");

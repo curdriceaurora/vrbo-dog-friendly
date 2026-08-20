@@ -1664,7 +1664,7 @@
     header.appendChild(closeBtn);
     searchTooltipEl.appendChild(header);
 
-    const addRow = (label, valueText, toneClass) => {
+    const addRow = (label, valueText, toneClass, valueLines = null) => {
       const row = document.createElement("div");
       row.className = "vdp-tooltip-row";
       const lbl = document.createElement("span");
@@ -1672,7 +1672,16 @@
       lbl.textContent = label;
       const val = document.createElement("span");
       val.className = "vdp-tooltip-val" + (toneClass ? " " + toneClass : "");
-      val.textContent = valueText;
+      if (Array.isArray(valueLines) && valueLines.length > 0) {
+        for (const line of valueLines) {
+          const lineSpan = document.createElement("span");
+          lineSpan.className = "vdp-tooltip-val-line";
+          lineSpan.textContent = line;
+          val.appendChild(lineSpan);
+        }
+      } else {
+        val.textContent = valueText;
+      }
       row.appendChild(lbl);
       row.appendChild(val);
       searchTooltipEl.appendChild(row);
@@ -1715,7 +1724,11 @@
       }
       const isTieredFee = p.fee?.tiered || (p.fee?.text && /\$0\s+(?:1st|first)/i.test(p.fee.text));
       if (isTieredFee) {
-        addRow("Pet fee", p.fee.text || "1st dog free, subsequent fee applies", "vdp-tone-warn");
+        if (p.fee?.text) {
+          addRow("Pet fee", p.fee.text, "vdp-tone-warn");
+        } else {
+          addRow("Pet fee", "", "vdp-tone-warn", ["1st dog free", "Subsequent fee applies"]);
+        }
         rowsAdded++;
       } else if (p.fee && p.fee.amount !== null) {
         const curSym = p.fee.currency === "USD" ? "$" : `${p.fee.currency} `;
@@ -1816,7 +1829,7 @@
     searchTooltipEl.style.display = "block";
     const rect = badge.getBoundingClientRect();
     const tooltipHeight = searchTooltipEl.offsetHeight || 180;
-    const tooltipWidth = 290;
+    const tooltipWidth = 300;
 
     let top = rect.bottom + 4;
     if (top + tooltipHeight > window.innerHeight - 10) {
