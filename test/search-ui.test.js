@@ -571,7 +571,10 @@ function installHarness() {
       local: mockChromeStorage,
       onChanged: { addListener() {} },
     },
-    runtime: { onMessage: { addListener() {} } },
+    runtime: {
+      id: "mock-extension-id",
+      onMessage: { addListener() {} }
+    },
   };
 
   // Nothing in this suite may reach the network.
