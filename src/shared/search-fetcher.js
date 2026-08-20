@@ -956,7 +956,7 @@
           const siteRegistry = (typeof globalThis !== "undefined" && globalThis.VdpSiteRegistry) ||
             (typeof require === "function" ? require("./site-registry.js") : null);
           if (siteRegistry && typeof siteRegistry.parseListingData === "function") {
-            parsed = siteRegistry.parseListingData(targetUrl, html, targetUrl, propertyId, canonicalId);
+            parsed = siteRegistry.parseListingData(targetUrl, html, propertyId, canonicalId);
           } else {
             parsed = parseListingHtml(html, propertyId, canonicalId);
           }

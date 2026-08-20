@@ -17,6 +17,15 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function (extractModule) {
   "use strict";
 
+  const DEFAULT_SEARCH_CARD_SELECTOR =
+    '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-testid="property-card"], article[data-stid*="card"], div[data-stid*="property-card"]';
+
+  const DEFAULT_CARD_CONTENT_SELECTORS = [
+    ".uitk-card-content",
+    '[data-stid*="content"]',
+    '[data-stid*="price"]',
+  ];
+
   const cachedExtractor =
     extractModule && typeof extractModule.extractPropertyId === "function" ? extractModule : null;
 
@@ -111,6 +120,8 @@
     ) {
       return globalThis.VdpSearchFetcher.parseListingHtml(html, propertyId, canonicalId);
     }
+    // Lazy circular require: search-fetcher ↔ site-registry reference each other via runtime require() in Node.
+    // Must remain lazy inside function body to avoid breaking module load order at startup.
     if (typeof require === "function") {
       try {
         const sf = require("./search-fetcher.js");
@@ -138,12 +149,8 @@
     decorateFetchUrl: vrboDecorateFetchUrl,
     getCacheKey: (propertyId) => `vrbow_cache_${propertyId}`,
     parseListingData: vrboParseListingData,
-    searchCardSelector: '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-testid="property-card"], article[data-stid*="card"], div[data-stid*="property-card"]',
-    cardContentSelector: [
-      ".uitk-card-content",
-      '[data-stid*="content"]',
-      '[data-stid*="price"]',
-    ],
+    searchCardSelector: DEFAULT_SEARCH_CARD_SELECTOR,
+    cardContentSelector: DEFAULT_CARD_CONTENT_SELECTORS,
   };
 
   const SITES = [vrboSite];
@@ -198,23 +205,14 @@
     const site = typeof urlOrHostname === "string"
       ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
       : urlOrHostname;
-    return (
-      site?.searchCardSelector ||
-      '[data-stid="lodging-card-responsive"], [data-stid="property-card"], [data-testid="property-card"], article[data-stid*="card"], div[data-stid*="property-card"]'
-    );
+    return site?.searchCardSelector || DEFAULT_SEARCH_CARD_SELECTOR;
   }
 
   function getCardContentSelector(urlOrHostname) {
     const site = typeof urlOrHostname === "string"
       ? (getSiteForUrl(urlOrHostname) || getSiteForHostname(urlOrHostname))
       : urlOrHostname;
-    return (
-      site?.cardContentSelector || [
-        ".uitk-card-content",
-        '[data-stid*="content"]',
-        '[data-stid*="price"]',
-      ]
-    );
+    return site?.cardContentSelector || DEFAULT_CARD_CONTENT_SELECTORS;
   }
 
   function getCacheKey(urlOrSite, propertyId) {
@@ -227,21 +225,36 @@
     return `vrbow_cache_${propertyId}`;
   }
 
-  function parseListingData(urlOrSite, html, urlStr, propertyId, canonicalId) {
+  function parseListingData(urlOrSite, html, propertyIdOrUrl, canonicalIdOrPropId, canonicalId) {
     const site = typeof urlOrSite === "string"
       ? (getSiteForUrl(urlOrSite) || getSiteForHostname(urlOrSite))
       : urlOrSite;
+
+    let urlStr = typeof urlOrSite === "string" ? urlOrSite : "";
+    let propertyId = propertyIdOrUrl;
+    let effectiveCanonicalId = canonicalIdOrPropId;
+    if (
+      typeof propertyIdOrUrl === "string" &&
+      (propertyIdOrUrl.startsWith("http://") ||
+        propertyIdOrUrl.startsWith("https://") ||
+        propertyIdOrUrl.startsWith("/"))
+    ) {
+      urlStr = propertyIdOrUrl;
+      propertyId = canonicalIdOrPropId;
+      effectiveCanonicalId = canonicalId;
+    }
+
     if (site && typeof site.parseListingData === "function") {
       return site.parseListingData(
         html,
-        urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""),
+        urlStr,
         propertyId,
-        canonicalId
+        effectiveCanonicalId
       );
     }
     const ext = getExtractor();
     if (ext && typeof ext.extractListingData === "function") {
-      return ext.extractListingData(html, urlStr || (typeof urlOrSite === "string" ? urlOrSite : ""));
+      return ext.extractListingData(html, urlStr);
     }
     return null;
   }
