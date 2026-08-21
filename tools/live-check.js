@@ -500,10 +500,33 @@ async function checkListing(port, url, settleMs) {
     const panel = JSON.parse(panelRes.result.value);
 
     const mainRes = await cdp.send("Runtime.evaluate", {
-      expression: `JSON.stringify({ bridgeRan: !!window.__vdpBridgeData, bridgeItems: window.__vdpBridgeData?.items?.length ?? 0, policyLeaked: !!window.__vdpLastPolicy })`,
+      expression: `JSON.stringify({
+        bridgeRan: !!window.__vdpBridgeData,
+        bridgeItems: window.__vdpBridgeData?.items?.length ?? 0,
+        policyLeaked: !!window.__vdpLastPolicy,
+        apolloKeys: window.__APOLLO_STATE__ ? Object.keys(window.__APOLLO_STATE__).length : 0,
+        propertyInfoKeys: window.__APOLLO_STATE__
+          ? Object.keys(window.__APOLLO_STATE__).filter((k) => k.startsWith("PropertyInfo:")).length
+          : 0
+      })`,
       returnByValue: true,
     });
     const main = JSON.parse(mainRes.result.value);
+
+    // NOTE (2026-08-21): Vrbo now ships a 3-key __APOLLO_STATE__ shell in the
+    // SSR HTML (ROOT_QUERY + 2 InlineNotification, zero PropertyInfo —
+    // measured across 7 real captures) and hydrates the real PropertyInfo
+    // record client-side afterwards. Measured live on 2488800, that record
+    // arrives fully populated (~66KB: amenities, propertyContentSectionGroups,
+    // propertyHighlightedDetails) — and page-bridge STILL never publishes
+    // __vdpBridgeData. So a bridgeRan failure here is real, not an artifact
+    // of the new page architecture, and must keep failing hard. See #49: the
+    // working theory is that page-bridge's ~10.9s Apollo poll window (from
+    // document_start) can expire before that hydration lands.
+    //
+    // The apolloKeys/propertyInfoKeys fields captured above exist to make
+    // that distinction visible in the output rather than inferable only by
+    // hand-probing the page.
 
     // A rendered panel alone is far too weak. The DOM fallback can paint a
     // perfectly good panel from visible page text while the MAIN-world
@@ -511,7 +534,15 @@ async function checkListing(port, url, settleMs) {
     // harness exists to cover, so it must be asserted, not merely printed.
     const failures = [];
     if (!panel.rendered) failures.push("panel did not render");
-    if (!main.bridgeRan) failures.push("page-bridge produced no payload in the MAIN world (no __APOLLO_STATE__, or it never ran)");
+    if (!main.bridgeRan) {
+      failures.push(
+        `page-bridge produced no payload in the MAIN world ` +
+          `(__APOLLO_STATE__: ${main.apolloKeys} key(s), ${main.propertyInfoKeys} PropertyInfo) — ` +
+          (main.propertyInfoKeys > 0
+            ? `the graph IS populated, so the bridge failed to read it`
+            : `no PropertyInfo yet; may be pre-hydration or the bridge never ran`)
+      );
+    }
     else if (main.bridgeItems === 0) failures.push("page-bridge produced a payload but extracted 0 Apollo items");
     if (main.policyLeaked) failures.push("isolated-world state leaked into MAIN (world boundary broken)");
 

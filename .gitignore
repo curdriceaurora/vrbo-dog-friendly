@@ -7,6 +7,14 @@ test-results/
 # message excerpts and timestamps. Not for a public repo.
 test/vrbo_unique_listings.csv
 
+# Locally saved real listing captures used for manual verification
+# (Safari .webarchive / "Save As" page dumps). Deliberately NOT committed:
+# they are ~1-16MB each and carry real listing content. tools/verify-listings.txt
+# records the URLs so the corpus is reproducible without the payloads.
+airbnb_listings/
+vrbo-listings/
+listing_*/
+
 # Local agent memory and customizations (not committed)
 .agents/
 .claude/
