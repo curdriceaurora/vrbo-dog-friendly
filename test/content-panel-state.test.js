@@ -19,6 +19,7 @@
 
 const { test, describe, before } = require("node:test");
 const assert = require("node:assert/strict");
+const { MockCustomEvent, MockEvent, installIntervalGuard, installVdpGlobals } = require("./helpers/content-env-stub.js");
 
 let sparseStateMessage;
 
@@ -42,17 +43,13 @@ before(() => {
     runtime: { id: "mock-extension-id", onMessage: { addListener() {} } },
   };
   globalThis.MutationObserver = class { observe() {} disconnect() {} };
-  globalThis.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init ? init.detail : undefined; } };
-  globalThis.Event = class { constructor(type) { this.type = type; } };
+  globalThis.CustomEvent = MockCustomEvent;
+  globalThis.Event = MockEvent;
   // Prevents the module-scope setInterval(onUrlMaybeChanged, 1000) call
   // from keeping a real timer alive — this test process would otherwise
   // never exit.
-  globalThis.setInterval = () => ({ mockInterval: true });
-  globalThis.clearInterval = () => {};
-
-  globalThis.VdpSiteRegistry = require("../src/shared/site-registry.js");
-  globalThis.VDPExtract = require("../src/shared/extract.js");
-  globalThis.VdpFormatters = require("../src/shared/formatters.js");
+  installIntervalGuard();
+  installVdpGlobals();
 
   ({ sparseStateMessage } = require("../src/content/content.js").__test);
 });
