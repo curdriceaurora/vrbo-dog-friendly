@@ -80,14 +80,19 @@
   const cachedExtractor =
     extractModule && typeof extractModule.extractPropertyId === "function" ? extractModule : null;
 
-  function parseUrl(urlStr, baseUrl) {
+  // defaultOrigin lets a caller outside this module (a site adapter, e.g.
+  // sites/airbnb/adapter.js) reuse this exact parsing logic with its own
+  // site's origin as the root-relative-path fallback, instead of keeping
+  // a second copy of this same three-branch try/catch with a different
+  // hardcoded origin.
+  function parseUrl(urlStr, baseUrl, defaultOrigin) {
     if (!urlStr || typeof urlStr !== "string") return null;
     try {
       if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(urlStr)) {
         return new URL(urlStr);
       }
       if (urlStr.startsWith("/")) {
-        return new URL(urlStr, baseUrl || "https://www.vrbo.com");
+        return new URL(urlStr, baseUrl || defaultOrigin || "https://www.vrbo.com");
       }
       if (baseUrl) {
         return new URL(urlStr, baseUrl);
@@ -298,6 +303,21 @@
     };
   }
 
+  // No DEFAULT_ fallback here (unlike the getters above) — there's no
+  // sensible generic structured-payload reader across sites the way there
+  // is a generic selector string. A site with no getPdpStructuredPayload
+  // (Vrbo, whose data arrives via the page-bridge.js event instead) or an
+  // unresolved site both just return null; the caller (content.js's
+  // getStructuredPdpPayload) already falls back to its own
+  // event-fed latestApolloPayload in that case.
+  function getPdpStructuredPayload(urlOrSite) {
+    const site = resolveSite(urlOrSite);
+    if (site && typeof site.getPdpStructuredPayload === "function") {
+      return site.getPdpStructuredPayload();
+    }
+    return null;
+  }
+
   function getCacheKey(urlOrSite, propertyId) {
     const site = resolveSite(urlOrSite);
     if (site && typeof site.getCacheKey === "function") {
@@ -306,6 +326,16 @@
     return `vrbow_cache_${propertyId}`;
   }
 
+  // Two call shapes are supported: (urlOrSite, html, propertyId, canonicalId)
+  // when urlOrSite is already the full URL, or (urlOrSite, html, url,
+  // propertyId, canonicalId) when urlOrSite is a bare site/hostname and the
+  // URL itself needs to travel as its own argument (the search-fetcher
+  // queue's background-prefetch path calls it this way, resolving the site
+  // once up front and passing propertyIdOrUrl as the real listing URL).
+  // Sniffed by whether propertyIdOrUrl looks like a URL/path rather than
+  // taking an explicit argument-count branch, since both shapes are
+  // 4-5 positional args deep and a caller passing the wrong one wouldn't
+  // be caught by arity alone either way.
   function parseListingData(urlOrSite, html, propertyIdOrUrl, canonicalIdOrPropId, canonicalId) {
     const site = resolveSite(urlOrSite);
 
@@ -331,9 +361,17 @@
         effectiveCanonicalId
       );
     }
-    const ext = getExtractor();
-    if (ext && typeof ext.extractListingData === "function") {
-      return ext.extractListingData(html, urlStr);
+    // The generic VDPExtract.extractListingData fallback is Vrbo-shaped
+    // (parses Apollo-state-style HTML) — only reachable here when NO site
+    // could even be resolved (unrecognized hostname), never when a real
+    // site was identified but simply hasn't defined its own parser. The
+    // latter would otherwise silently run Vrbo's parser against a
+    // different site's HTML and return garbage rather than nothing.
+    if (!site) {
+      const ext = getExtractor();
+      if (ext && typeof ext.extractListingData === "function") {
+        return ext.extractListingData(html, urlStr);
+      }
     }
     return null;
   }
@@ -351,6 +389,7 @@
   }
 
   return {
+    parseUrl,
     getSiteForUrl,
     getSiteForHostname,
     isListingUrl,
@@ -362,6 +401,7 @@
     getCardContentSelector,
     getPdpContentColumnSelector,
     getPdpSectionConfig,
+    getPdpStructuredPayload,
     getCacheKey,
     parseListingData,
     registerSite,

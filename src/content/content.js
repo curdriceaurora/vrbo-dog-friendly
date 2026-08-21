@@ -704,6 +704,33 @@
     </div>`;
   }
 
+  // Pure, DOM-free decision for the fully-sparse panel state (renderPanel
+  // below), split out so it's directly unit-testable without mocking
+  // document.createElement — the fully-sparse branch has real user-facing
+  // wording bugs to guard against (this is the exact split that fixed
+  // Airbnb's majority "allowed, no other detail" case reading as
+  // "unknown"), so its logic deserves a test that doesn't also depend on
+  // panel DOM construction.
+  function sparseStateMessage(petsAllowed) {
+    if (petsAllowed === true) {
+      // We DO have an answer (pets are allowed) — just no fine print.
+      // Showing the plain "weren't stated" wording here (as if nothing
+      // at all were known) would read as broken on a listing that
+      // affirmatively said yes. vdp-tone-good is the same global tone
+      // utility used elsewhere (badges, header) — no new CSS needed.
+      return {
+        text: "Allowed, no additional restrictions listed. Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.",
+        toneClass: " vdp-tone-good",
+      };
+    }
+    // petsAllowed itself isn't confirmed true — genuinely no answer, not
+    // just no fine print. Neutral wording, no tone class.
+    return {
+      text: "Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.",
+      toneClass: "",
+    };
+  }
+
   function renderPanel(policy) {
     removePanel();
 
@@ -782,12 +809,9 @@
         !notes.length;
 
       if (isFullySparse) {
-        // Every core field came back unconfirmed — a four-row table of
-        // "Not specified" would give that absence the same structural
-        // weight as a real finding. Collapse to one muted line instead;
-        // still names exactly what was checked, just not as row markup.
+        const { text, toneClass } = sparseStateMessage(policy.petsAllowed);
         rowsHtml = `<div class="vdp-unconfirmed">
-          <p class="vdp-unconfirmed-text">Max dogs, weight limit, fee, and pre-registration weren't stated anywhere on this listing.</p>
+          <p class="vdp-unconfirmed-text${toneClass}">${text}</p>
           ${sourceBadge ? `<span class="vdp-unconfirmed-src">${escapeHtml(sourceBadge)}</span>` : ""}
         </div>`;
       } else {
@@ -955,6 +979,34 @@
 
   // ---------- scan orchestration ----------
 
+  // Vrbo's structured PDP data arrives via the vdp-apollo-data event from
+  // page-bridge.js (a MAIN-world bridge, needed because window.__APOLLO_STATE__
+  // isn't reachable from the isolated world). Airbnb's data is plain DOM
+  // text content instead (#data-deferred-state-0), readable directly from
+  // this world with no bridge — so its adapter exposes a synchronous
+  // getPdpStructuredPayload() rather than needing an event listener.
+  // Resolved fresh on every call, never cached: unlike the PDP DOM
+  // selectors/section-config (invariant for one content-script instance's
+  // lifetime), this is the actual page content and must reflect whatever
+  // the current listing's page just rendered.
+  // The `|| latestApolloPayload` fallback is the one place this doesn't
+  // match every sibling getter's site?.X || DEFAULT_X shape (those
+  // defaults live entirely inside site-registry.js; this one reaches into
+  // a content.js-local variable). Considered moving it there — giving
+  // vrboSite its own getPdpStructuredPayload — but vrboSite is defined in
+  // site-registry.js's own module closure, with no access to
+  // latestApolloPayload, which only content.js's page-bridge.js event
+  // listener populates; closing over it from the other module isn't
+  // possible without content.js reaching back in to mutate vrboSite after
+  // the fact, which trades this one documented special case for a
+  // cross-module mutation of another module's object — not clearly an
+  // improvement. Left as-is.
+  function getStructuredPdpPayload() {
+    const reg = getSiteRegistry();
+    const payload = reg?.getPdpStructuredPayload?.(location.href);
+    return payload || latestApolloPayload;
+  }
+
   async function scan(force) {
     // Don't drop a scan request that lands while one is in flight. The
     // expand pass can hold the lock for a couple of seconds, and the
@@ -985,11 +1037,24 @@
       // on item count alone reported "No dog policy details detected" on
       // exactly those listings. A forced rescan always expands, since the
       // user asking for one is asking us to look harder.
-      let entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+      //
+      // Computed once and reused across both buildCorpus calls below:
+      // expandCollapsedSections() only reveals more visible DOM text for
+      // collectDomPetSentences() — it can't change a site's structured
+      // payload (Airbnb's #data-deferred-state-0 is embedded once at SSR
+      // time; Vrbo's Apollo state is likewise fixed per navigation), so
+      // re-deriving it on the second pass would just re-run the same
+      // JSON.parse + tree walk for a byte-identical result. That's not
+      // free for Airbnb specifically: its toggle-only case (no entries on
+      // the first pass, hence the *common* trigger for this second pass)
+      // means the redundant walk would fire on a majority of real scans,
+      // not an edge case.
+      const structuredPayload = getStructuredPdpPayload();
+      let entries = buildCorpus(structuredPayload, collectDomPetSentences());
       if (!entries.length || force) {
         await expandCollapsedSections();
         if (location.href !== startUrl) return;
-        entries = buildCorpus(latestApolloPayload, collectDomPetSentences());
+        entries = buildCorpus(structuredPayload, collectDomPetSentences());
       }
       if (location.href !== startUrl) return;
       const rawPolicy = extractPolicy(entries);
@@ -2341,6 +2406,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       __test: {
+        sparseStateMessage,
         initSearchManager,
         cleanupSearchManager,
         scanSearchCards,

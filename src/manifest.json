@@ -19,7 +19,8 @@
   },
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
-    "*://*.vrbo.com/*"
+    "*://*.vrbo.com/*",
+    "*://*.airbnb.com/*"
   ],
   "content_scripts": [
     {
@@ -35,6 +36,14 @@
         "*://*.vrbo.com/*"
       ],
       "js": ["shared/site-registry.js", "shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
+      "css": ["content/tokens.css", "content/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.airbnb.com/*"
+      ],
+      "js": ["shared/site-registry.js", "sites/airbnb/adapter.js", "shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
       "css": ["content/tokens.css", "content/content.css"],
       "run_at": "document_idle"
     }

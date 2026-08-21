@@ -390,6 +390,31 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
     }
   });
 
+  test("getPdpStructuredPayload delegates to a site's own reader when present, and returns null (not a default) otherwise", () => {
+    // Vrbo defines no getPdpStructuredPayload — its structured data
+    // arrives via the page-bridge.js event instead, not a synchronous
+    // reader — so the registry-level getter must return null, not throw
+    // or silently invent a fallback. content.js's own caller is what
+    // falls back to latestApolloPayload in that case.
+    assert.equal(siteRegistry.getPdpStructuredPayload("https://www.vrbo.com/123456"), null);
+    assert.equal(siteRegistry.getPdpStructuredPayload("https://unknown-site.example/x"), null);
+
+    const customSite = {
+      id: "structured-payload-test",
+      matchesHostname: (h) => /structured-payload-test\.example$/i.test(h),
+      isListingUrl: () => true,
+      isSearchUrl: () => false,
+      getPdpStructuredPayload: () => ({ items: [{ header: "Pets", section: "Pets", text: "Dogs allowed" }] }),
+    };
+    siteRegistry.registerSite(customSite);
+    try {
+      const payload = siteRegistry.getPdpStructuredPayload("https://structured-payload-test.example/listing/1");
+      assert.deepEqual(payload, { items: [{ header: "Pets", section: "Pets", text: "Dogs allowed" }] });
+    } finally {
+      siteRegistry.unregisterSite("structured-payload-test");
+    }
+  });
+
   test("registry getCacheKey creates site-qualified cache keys", () => {
     assert.equal(siteRegistry.getCacheKey("https://www.vrbo.com/123456", "123456"), "vrbow_cache_123456");
     assert.equal(vrbo.getCacheKey("9999"), "vrbow_cache_9999");
@@ -431,6 +456,38 @@ describe("site-registry: site adapter capabilities & DOM selectors", () => {
       );
       assert.ok(vrboParsed);
       assert.equal(vrboParsed.policy?.maxDogs, 2);
+    } finally {
+      globalThis.VDPExtract = origExtract;
+    }
+  });
+
+  test("parseListingData returns null for a resolved site with no parser of its own, instead of silently running Vrbo's parser against it", () => {
+    const origExtract = globalThis.VDPExtract;
+    try {
+      globalThis.VDPExtract = {
+        extractListingData(html, url) {
+          return { mockParsed: true, htmlLength: html.length, url };
+        },
+      };
+      const siteWithoutParser = {
+        id: "no-parser-test",
+        matchesHostname: (h) => /no-parser-test\.example$/i.test(h),
+      };
+      siteRegistry.registerSite(siteWithoutParser);
+      try {
+        const result = siteRegistry.parseListingData(
+          "https://no-parser-test.example/listing/1",
+          "<html>irrelevant</html>"
+        );
+        assert.equal(result, null, "a resolved site with no parseListingData must return null, not fall through to VDPExtract's Vrbo-shaped parser");
+      } finally {
+        siteRegistry.unregisterSite("no-parser-test");
+      }
+
+      // The unresolved-hostname case (genuinely no site identified at all)
+      // must still use the generic fallback — unchanged from before.
+      const unresolved = siteRegistry.parseListingData("https://truly-unknown.example/x", "<html>test</html>");
+      assert.deepEqual(unresolved, { mockParsed: true, htmlLength: 17, url: "https://truly-unknown.example/x" });
     } finally {
       globalThis.VDPExtract = origExtract;
     }
