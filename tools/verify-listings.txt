@@ -1,0 +1,58 @@
+# Cross-site manual verification corpus — 3 Vrbo + 3 Airbnb, spliced
+# alternating so a verification pass exercises both adapters back to back
+# and site-registry's resolution has to switch sites on every hop.
+#
+# Separate from live-listings.txt on purpose: that file is Vrbo-only and
+# drives the tools/live-check.js CDP runner. This one is a hand-verification
+# manifest (open each in a real, human-driven Chrome profile with the
+# unpacked extension loaded from src/) — Vrbo's PerimeterX and Airbnb's
+# DataDome both hard-block automated/--load-extension sessions, so there is
+# deliberately no script that walks this list.
+#
+# Vrbo picks: chosen for ROUTE-SHAPE coverage, the only axis distinguishable
+# offline (no captured Vrbo payloads exist in this repo). Each exercises a
+# different branch of site-registry's tiered getPropertyId extraction.
+#
+# Airbnb picks: chosen from measured extraction output across all 6 captures
+# in airbnb_listings/ (walked-item counts and resolved policy fields below
+# are real, not estimated).
+
+# 1. Vrbo — plain /<id> route (the common shape)
+https://www.vrbo.com/1245792
+
+# 2. Airbnb — Upstay Resort, Kissimmee FL. Richest structured extraction of
+#    the six: maxDogs=2 AND fee=$99 per pet, 240 walked items (largest
+#    payload). This is the buried-cap case the original #12 manual research
+#    MISSED and only the generic walker found — the regression canary for
+#    ever narrowing that walk. 8-digit id.
+https://www.airbnb.com/rooms/46192879
+
+# 3. Vrbo — /<id>ha suffix route variant
+https://www.vrbo.com/9623963ha
+
+# 4. Airbnb — Sunny 1 bed cottage, San Diego. 19-digit listing id, well past
+#    Number.MAX_SAFE_INTEGER: the string-safety canary (any Number()/parseInt
+#    coercion silently corrupts this one and nothing else would show it).
+#    Also the title-dedup case — its own title must be filtered while the
+#    two genuine "Dog Beach" description notes survive.
+https://www.airbnb.com/rooms/1187760251755966099
+
+# 5. Vrbo — /pdp/lo/<id> route variant
+https://www.vrbo.com/pdp/lo/114888296
+
+# 6. Airbnb — Midtown NYC studio. Pure sparse case: petsAllowed=true with
+#    ZERO otherNotes and no cap/fee/weight — drives the "Allowed, no
+#    additional restrictions listed" panel branch added in #12, which is the
+#    COMMON real-world Airbnb outcome (4 of the 6 captures). 18-digit id.
+https://www.airbnb.com/rooms/624694699394680598
+
+# Alternates, if a pick above goes dead:
+#   Baywatch Retreat  https://www.airbnb.com/rooms/42406610
+#     buried $40/night fee in description prose + 6 otherNotes; partially
+#     redundant with Upstay (both prove fee extraction), which is why it
+#     lost the slot despite being the flagship buried-fee example.
+#   NE Portland Guesthouse  https://www.airbnb.com/rooms/783475961349345030
+#     host-pets edge case: "Pet(s) live on property" must surface as an
+#     informational note and must NOT become a false guest restriction.
+#   Portland ME 2BR  https://www.airbnb.com/rooms/655872078552789521
+#     second pure-sparse example (0 notes), interchangeable with the NYC one.
