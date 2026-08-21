@@ -17,7 +17,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const adapter = require("../src/sites/airbnb/adapter.js");
-const { airbnbSite } = adapter;
+const { airbnbSite, stripHtml } = adapter;
 const extract = require("../src/shared/extract.js");
 
 const FIXTURES_DIR = path.join(__dirname, "fixtures", "airbnb");
@@ -160,6 +160,65 @@ describe("airbnb adapter: URL matching and property id extraction", () => {
       delete require.cache[require.resolve("../src/sites/airbnb/adapter.js")];
       require("../src/sites/airbnb/adapter.js"); // restore the module-level `adapter`/`airbnbSite` bindings used by every other test in this file
     }
+  });
+});
+
+describe("airbnb adapter: stripHtml preserves sentence boundaries", () => {
+  test("a <br>-joined multi-line blob keeps its newline, not a collapsed space", () => {
+    const result = stripHtml("Dogs welcome<br>No smoking allowed");
+    assert.equal(result, "Dogs welcome\nNo smoking allowed");
+  });
+
+  test("runs of horizontal whitespace still collapse to one space", () => {
+    const result = stripHtml("Dogs   welcome   here<br>No   smoking   allowed  ");
+    assert.equal(result, "Dogs welcome here\nNo smoking allowed");
+  });
+
+  test("regression: without the newline, an unrelated clause fused onto a pet sentence would leak into otherNotes — with it, extract.js's getSentences() splits them apart and the unrelated clause is correctly dropped", () => {
+    // Mirrors a real freeform "About this property" style blob: two
+    // unrelated clauses joined by <br>, sitting in a section with no
+    // dedicated "Pets" header (so buildCorpus's per-sentence keyword
+    // filter — not wholesale trust — is what has to do the separating).
+    const payload = {
+      niobeClientData: [
+        [
+          "StaysPdpSections:{}",
+          {
+            data: {
+              presentation: {
+                stayProductDetailPage: {
+                  sections: {
+                    sections: [
+                      {
+                        sectionComponentType: "PDP_DESCRIPTION_MODAL",
+                        section: {
+                          __typename: "GeneralListContentSection",
+                          items: [
+                            {
+                              __typename: "BasicListItem",
+                              html: { __typename: "Html", htmlText: "Dogs welcome.<br>No smoking allowed." },
+                            },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            variables: {},
+          },
+        ],
+      ],
+    };
+    const raw = JSON.stringify(payload);
+    const structured = withMockDocument(raw, () => airbnbSite.getPdpStructuredPayload());
+    const corpus = extract.buildCorpus(structured, []);
+    const smokingSentence = corpus.find((c) => /no smoking allowed/i.test(c.text));
+    assert.equal(smokingSentence, undefined, "the unrelated 'No smoking allowed' clause should have been split apart and filtered, not fused into the pet-relevant sentence");
+    const dogsSentence = corpus.find((c) => /dogs welcome/i.test(c.text));
+    assert.ok(dogsSentence, "the actual pet-relevant sentence should still survive");
+    assert.equal(dogsSentence.text.trim(), "Dogs welcome.", "the surviving sentence should be just the pet clause, not fused with the unrelated one");
   });
 });
 

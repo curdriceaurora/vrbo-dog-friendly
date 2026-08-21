@@ -170,6 +170,13 @@
   const SKIP_DESCEND_KEYS = new Set(["seoLinks", "seoFeatures", "metadata"]);
 
   function stripHtml(s) {
+    // The entity decoding below is a deliberately small local subset, not a
+    // duplicate of extract.js's getSentences() (which runs its own, more
+    // complete decoder downstream on every sentence). It's kept here
+    // because this function's output also feeds the exact-string title-dedup
+    // comparison below (titleCandidates.has(it.text)) — that comparison
+    // needs this text decoded the same way the title-candidate strings
+    // already are, before getSentences ever runs.
     return s
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<[^>]+>/g, "")
@@ -177,7 +184,17 @@
       .replace(/&amp;/g, "&")
       .replace(/&#8217;|&rsquo;/g, "’")
       .replace(/&quot;/g, '"')
-      .replace(/\s+/g, " ")
+      // Horizontal whitespace only — preserve the \n's from <br> above (and
+      // any literal \n already in the JSON text). extract.js's
+      // getSentences() splits on \n+ to separate sentences in multi-line
+      // blobs; collapsing them away here would fuse e.g. "Dogs welcome" and
+      // "No smoking allowed" into one sentence before getSentences ever
+      // sees a boundary, letting the unrelated clause ride along into
+      // otherNotes instead of being evaluated (and discarded) on its own.
+      // getSentences does its own final `\s+` -> " " normalization per
+      // split sentence, so nothing downstream depends on this collapsing
+      // newlines itself.
+      .replace(/[^\S\r\n]+/g, " ")
       .trim();
   }
 
