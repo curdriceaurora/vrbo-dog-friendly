@@ -3,9 +3,10 @@ const fs = require("node:fs");
 const { expect, test } = require("@playwright/test");
 const { installNetworkGuard } = require("./guardrail.js");
 const { BURIED_FEE_PAYLOAD: AIRBNB_NIOBE_CLIENT_DATA } = require("./airbnb-payloads.js");
+const { PET_FEE_PAYLOAD: EXPEDIA_PET_FEE_PAYLOAD, pageHtml: expediaPageHtml } = require("./expedia-payloads.js");
 
 const ROOT = path.join(__dirname, "..");
-const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js", "adapter.js"]);
+const TARGET_SCRIPTS = new Set(["content.js", "popup.js", "page-bridge.js", "search-fetcher.js", "extract.js", "formatters.js", "site-registry.js", "airbnb-adapter.js", "expedia-adapter.js"]);
 
 function calculateExecutionMask(text, functionEntries) {
   if (!text || text.length === 0) return new Uint8Array(0);
@@ -25,7 +26,7 @@ function calculateExecutionMask(text, functionEntries) {
   return bytes;
 }
 
-test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, page-bridge.js, and the airbnb adapter", async ({ browser }) => {
+test("8.2.4: exercises and reports browser-path coverage for production content.js, popup.js, page-bridge.js, and site adapters", async ({ browser }) => {
   const aggregate = new Map();
   const context = await browser.newContext();
   const guard = await installNetworkGuard(context);
@@ -39,6 +40,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   const contentJs = fs.readFileSync(path.join(ROOT, "src", "content", "content.js"), "utf8");
   const popupJs = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.js"), "utf8");
   const airbnbAdapterJs = fs.readFileSync(path.join(ROOT, "src", "sites", "airbnb", "adapter.js"), "utf8");
+  const expediaAdapterJs = fs.readFileSync(path.join(ROOT, "src", "sites", "expedia", "adapter.js"), "utf8");
   const tokensCss = fs.readFileSync(path.join(ROOT, "src", "content", "tokens.css"), "utf8");
   const contentCss = fs.readFileSync(path.join(ROOT, "src", "content", "content.css"), "utf8");
   const popupCss = fs.readFileSync(path.join(ROOT, "src", "popup", "popup.css"), "utf8");
@@ -60,11 +62,18 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   // identical to the vrbo.com routes above, since Playwright routes match
   // full URLs, not just paths.
   await context.route("https://www.airbnb.com/site-registry.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: siteRegistryJs }));
-  await context.route("https://www.airbnb.com/adapter.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: airbnbAdapterJs }));
+  await context.route("https://www.airbnb.com/airbnb-adapter.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: airbnbAdapterJs }));
   await context.route("https://www.airbnb.com/extract.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: extractJs }));
   await context.route("https://www.airbnb.com/search-fetcher.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: searchFetcherJs }));
   await context.route("https://www.airbnb.com/formatters.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: formattersJs }));
   await context.route("https://www.airbnb.com/content.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: contentJs }));
+
+  await context.route("https://www.expedia.com/site-registry.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: siteRegistryJs }));
+  await context.route("https://www.expedia.com/expedia-adapter.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: expediaAdapterJs }));
+  await context.route("https://www.expedia.com/extract.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: extractJs }));
+  await context.route("https://www.expedia.com/search-fetcher.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: searchFetcherJs }));
+  await context.route("https://www.expedia.com/formatters.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: formattersJs }));
+  await context.route("https://www.expedia.com/content.js", (r) => r.fulfill({ status: 200, contentType: "application/javascript", body: contentJs }));
 
   // Route mock listing fetch responses
   await context.route("https://www.vrbo.com/100001*", (r) => r.fulfill({
@@ -261,13 +270,42 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
     </head>
     <body>
       <script src="/site-registry.js"></script>
-      <script src="/adapter.js"></script>
+      <script src="/airbnb-adapter.js"></script>
       <script src="/extract.js"></script>
       <script src="/search-fetcher.js"></script>
       <script src="/formatters.js"></script>
       <script src="/content.js"></script>
     </body>
   </html>`;
+
+  const expediaListingHtml = expediaPageHtml(EXPEDIA_PET_FEE_PAYLOAD).replace("</head>", `
+      <style>${tokensCss}\n${contentCss}</style>
+      <script>
+        window.chrome = {
+          storage: {
+            local: {
+              store: {},
+              get(k, cb) { cb({}); },
+              set(k, cb) { cb && cb(); }
+            }
+          },
+          runtime: {
+            sendMessage(msg, cb) { cb && cb({}); },
+            onMessage: {
+              listeners: [],
+              addListener(fn) { this.listeners.push(fn); }
+            }
+          }
+        };
+      </script>
+    </head>`).replace("</body>", `
+      <script src="/site-registry.js"></script>
+      <script src="/expedia-adapter.js"></script>
+      <script src="/extract.js"></script>
+      <script src="/search-fetcher.js"></script>
+      <script src="/formatters.js"></script>
+      <script src="/content.js"></script>
+    </body>`);
 
   // 3. Popup scenario creator
   function createPopupHtml(tabUrl, policyResponse, lastError = null) {
@@ -327,6 +365,10 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   await context.route("https://www.airbnb.com/rooms/42406610*", (route) => {
     route.fulfill({ status: 200, contentType: "text/html", body: airbnbListingHtml });
+  });
+
+  await context.route(`${EXPEDIA_PET_FEE_PAYLOAD.url}*`, (route) => {
+    route.fulfill({ status: 200, contentType: "text/html", body: expediaListingHtml });
   });
 
   function collectCoverage(entries) {
@@ -433,7 +475,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   // -------------------------------------------------------------------------
   // Execute Airbnb Listing Flow (sites/airbnb/adapter.js browser-path
-  // coverage — the manifest's real airbnb.com content-script bundle, not
+  // coverage — the airbnb.com content-script bundle shape, not
   // just a Node-level require)
   // -------------------------------------------------------------------------
   const airbnbPage = await context.newPage();
@@ -450,6 +492,22 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
 
   collectCoverage(await airbnbPage.coverage.stopJSCoverage());
   await airbnbPage.close();
+
+  // -------------------------------------------------------------------------
+  // Execute Expedia Listing Flow (sites/expedia/adapter.js browser-path
+  // coverage — microdata/JSON-LD adapter path, no page bridge)
+  // -------------------------------------------------------------------------
+  const expediaPage = await context.newPage();
+  await expediaPage.coverage.startJSCoverage();
+  await expediaPage.goto(EXPEDIA_PET_FEE_PAYLOAD.url);
+
+  const expediaPanel = expediaPage.locator("#vdp-panel");
+  await expect(expediaPanel).toBeVisible({ timeout: 5000 });
+  await expect(expediaPanel).toContainText("Dog policy");
+  await expect(expediaPanel).toContainText("Fee");
+
+  collectCoverage(await expediaPage.coverage.stopJSCoverage());
+  await expediaPage.close();
 
   // -------------------------------------------------------------------------
   // Execute Popup Flows across All Policy Branches
@@ -526,7 +584,7 @@ test("8.2.4: exercises and reports browser-path coverage for production content.
   console.log("8.2.4 Browser-Path JavaScript Coverage Report");
   console.log("===============================================================================");
 
-  for (const script of ["content.js", "popup.js", "page-bridge.js", "adapter.js"]) {
+  for (const script of ["content.js", "popup.js", "page-bridge.js", "airbnb-adapter.js", "expedia-adapter.js"]) {
     const cov = aggregate.get(script);
     let covered = 0;
     if (cov && cov.mask) {

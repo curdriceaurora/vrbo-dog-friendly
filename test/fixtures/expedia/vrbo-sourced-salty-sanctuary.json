@@ -1,0 +1,24 @@
+{
+  "fixtureSource": "SALTY SANCTUARY! 2 bed 2.5 bath Just steps to Pensacola Beach.html",
+  "url": "https://www.expedia.com/Pensacola-Beach-Hotels-SALTY-SANCTUARY-2-Bed-25-Bath-Just-Steps-To-Pensacola-Beach.h132849859.Hotel-Information",
+  "propertyId": "132849859",
+  "kind": "vrbo-sourced",
+  "petsAllowedMeta": [
+    "Pets allowed",
+    "Service animals are welcome, and are exempt from fees",
+    "Welcoming dogs only",
+    "2 total (up to 20 lbs per pet)",
+    "Note from host: Pet policy can be flexible. please ask"
+  ],
+  "faqPage": {
+    "mainEntity": [
+      {
+        "name": "Is SALTY SANCTUARY! 2 bed 2.5 bath Just steps to Pensacola Beach pet-friendly?",
+        "acceptedAnswer": {
+          "text": "Yes, this property allows dogs (limit 2 total) with a maximum weight of up to 20 lbs per pet."
+        }
+      }
+    ]
+  },
+  "propertySource": "Provided by Vrbo, part of Expedia Group."
+}

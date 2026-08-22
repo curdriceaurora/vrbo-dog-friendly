@@ -1,0 +1,24 @@
+{
+  "fixtureSource": "Pensacola Beach with deck views of the Gulf .Pet friendly ...html",
+  "url": "https://www.expedia.com/Pensacola-Beach-Hotels-Beach-House-With-Deck-Views-And-Steps-From-The-Gulf-Of-Mexico-Santa-Rosa-Sound.h76515873.Hotel-Information",
+  "propertyId": "76515873",
+  "kind": "vrbo-sourced",
+  "petsAllowedMeta": [
+    "Pets allowed",
+    "Service animals are welcome, and are exempt from fees",
+    "Welcoming dogs and cats only",
+    "2 total (up to 50 lbs per pet)",
+    "Note from host: Pet fee is per pet. Accept up to 3"
+  ],
+  "faqPage": {
+    "mainEntity": [
+      {
+        "name": "Is Pensacola Beach with deck views of the Gulf .Pet friendly .. pet-friendly?",
+        "acceptedAnswer": {
+          "text": "Yes, this property allows cats and dogs (limit 2 total) with a maximum weight of up to 50 lbs per pet."
+        }
+      }
+    ]
+  },
+  "propertySource": "Provided by Vrbo, part of Expedia Group."
+}

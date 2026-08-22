@@ -45,17 +45,37 @@ function runNodeCoverage() {
 function parseCoverageTable(output) {
   const lines = output.split("\n");
   const reports = {};
+  const stack = [];
 
   for (const line of lines) {
-    // Match line format: ℹ filename.js |  93.84 |    83.52 |   96.30 | uncovered
-    const match = /ℹ\s+([\w.-]+|\b[a-z ]+files\b)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/i.exec(line);
-    if (match) {
-      const file = match[1].trim();
+    // Match coverage tree rows. Node prints nested directories as blank
+    // metric rows and files as numeric metric rows; preserve indentation so
+    // same-basename modules (sites/*/adapter.js) do not overwrite each other.
+    const rowMatch = /^ℹ(\s+)([^|]+?)\s*\|\s*([^|]*)\|\s*([^|]*)\|\s*([^|]*)/i.exec(line);
+    if (!rowMatch) continue;
+
+    const indent = rowMatch[1].length;
+    const name = rowMatch[2].trim();
+    if (!name || /\bfiles\b/i.test(name)) continue;
+
+    while (stack.length && stack[stack.length - 1].indent >= indent) {
+      stack.pop();
+    }
+
+    const linePct = rowMatch[3].trim();
+    const branchPct = rowMatch[4].trim();
+    const funcsPct = rowMatch[5].trim();
+    const hasMetrics = /^[\d.]+$/.test(linePct) && /^[\d.]+$/.test(branchPct) && /^[\d.]+$/.test(funcsPct);
+
+    if (hasMetrics) {
+      const file = [...stack.map((entry) => entry.name), name].join("/");
       reports[file] = {
-        line: parseFloat(match[2]),
-        branch: parseFloat(match[3]),
-        funcs: parseFloat(match[4]),
+        line: parseFloat(linePct),
+        branch: parseFloat(branchPct),
+        funcs: parseFloat(funcsPct),
       };
+    } else {
+      stack.push({ indent, name });
     }
   }
 
@@ -85,7 +105,13 @@ async function main() {
   // Note: content.js, popup.js, and page-bridge.js are browser-coupled scripts whose
   // browser-path coverage is measured and enforced via Playwright in e2e/js-coverage.spec.js.
   // check-coverage.js specifically enforces Node module thresholds for standalone modules.
-  const TARGET_NODE_MODULES = new Set(["extract.js", "search-fetcher.js", "site-registry.js", "adapter.js"]);
+  const TARGET_NODE_MODULES = new Set([
+    "src/shared/extract.js",
+    "src/shared/search-fetcher.js",
+    "src/shared/site-registry.js",
+    "src/sites/airbnb/adapter.js",
+    "src/sites/expedia/adapter.js",
+  ]);
 
   // Checked before the section header prints, so a missing row reads as a bare
   // failure rather than an empty-looking evaluation that happens to exit 1.

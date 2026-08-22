@@ -20,7 +20,8 @@
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "*://*.vrbo.com/*",
-    "*://*.airbnb.com/*"
+    "*://*.airbnb.com/*",
+    "*://*.expedia.com/*"
   ],
   "content_scripts": [
     {
@@ -44,6 +45,14 @@
         "*://*.airbnb.com/*"
       ],
       "js": ["shared/site-registry.js", "sites/airbnb/adapter.js", "shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
+      "css": ["content/tokens.css", "content/content.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.expedia.com/*"
+      ],
+      "js": ["shared/site-registry.js", "sites/expedia/adapter.js", "shared/extract.js", "shared/search-fetcher.js", "shared/formatters.js", "content/content.js"],
       "css": ["content/tokens.css", "content/content.css"],
       "run_at": "document_idle"
     }
