@@ -32,6 +32,8 @@
   const NAV_EVENT = "vdp-locationchange";
 
   let lastPayloadKey = null;
+  let lastResolvedApolloKey = null;
+  let lastResolvedListingId = null;
 
   function resolveRef(state, node, visited) {
     if (node && typeof node === "object" && typeof node.__ref === "string") {
@@ -42,29 +44,42 @@
     return node;
   }
 
-  function findApolloRoot(state, id) {
+  function findApolloRoot(state, id, opts = {}) {
     if (!state || !id || typeof state !== "object") return null;
     const strId = String(id);
+    const lowerId = strId.toLowerCase();
     const candidates = [
       `PropertyInfo:${strId}`,
       `propertyInfo:${strId}`,
+      `PropertyInfo:${lowerId}`,
+      `propertyInfo:${lowerId}`,
     ];
     for (const key of candidates) {
       if (state[key]) return { key, root: state[key] };
     }
-    const lowerId = strId.toLowerCase();
-    const lowerCandidates = [
-      `PropertyInfo:${lowerId}`,
-      `propertyInfo:${lowerId}`,
-    ];
-    for (const key of lowerCandidates) {
-      if (state[key]) return { key, root: state[key] };
-    }
+
+    const propertyInfoKeys = [];
     for (const k in state) {
       if (!Object.prototype.hasOwnProperty.call(state, k)) continue;
       const lowerKey = k.toLowerCase();
-      if (lowerKey === `propertyinfo:${lowerId}`) {
-        return { key: k, root: state[k] };
+      if (!lowerKey.startsWith("propertyinfo:")) continue;
+      propertyInfoKeys.push(k);
+      if (lowerKey === `propertyinfo:${lowerId}`) return { key: k, root: state[k] };
+
+      const node = state[k];
+      if (!node || typeof node !== "object") continue;
+      const nodeIds = [node.propertyId, node.vrboPropertyId, node.expediaPropertyId, node.id]
+        .filter((value) => value != null)
+        .map((value) => String(value).toLowerCase());
+      if (nodeIds.includes(lowerId)) return { key: k, root: node };
+    }
+
+    if (opts.allowSoleRecord && propertyInfoKeys.length === 1) {
+      const key = propertyInfoKeys[0];
+      // During SPA navigation, do not reuse listing A's sole record for B
+      // while Apollo is still hydrating B's PropertyInfo graph.
+      if (key !== lastResolvedApolloKey || strId === lastResolvedListingId) {
+        return { key, root: state[key] };
       }
     }
     return null;
@@ -128,9 +143,11 @@
     const currentId = getListingIdFromUrl();
     if (!currentId) return null;
 
-    const match = findApolloRoot(state, currentId);
+    const match = findApolloRoot(state, currentId, { allowSoleRecord: true });
     if (!match || !match.root) return null;
     const { key: infoKey, root } = match;
+    lastResolvedApolloKey = infoKey;
+    lastResolvedListingId = currentId;
 
     const out = [];
     walkCollect(state, root, null, null, out, new Set(), 0);
@@ -167,6 +184,8 @@
     const ids = Array.isArray(propertyIds) ? propertyIds.filter((id) => typeof id === "string" && id) : [];
     const results = {};
     for (const id of ids.slice(0, 40)) {
+      // Search must not use the PDP sole-record fallback; a lone record here
+      // may be stale or belong to another result card.
       const match = findApolloRoot(state, id);
       if (!match || !match.root) continue;
       const root = match.root;
@@ -193,6 +212,7 @@
   function tryDispatch(force) {
     const payload = extractFromApollo();
     const key = payloadKey(payload);
+    window.__vdpBridgeRan = true;
     if (!force && key === lastPayloadKey) return payload;
     lastPayloadKey = key;
     window.__vdpBridgeData = payload;

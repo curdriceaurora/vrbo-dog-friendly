@@ -433,7 +433,7 @@ async function checkListing(port, url, settleMs) {
     // alongside ours, so it answers "can this browser load extensions at
     // all" without depending on OUR manifest being correct.
     const probe = await cdp.send("Runtime.evaluate", {
-      expression: `JSON.stringify({ canary: !!window.__vdpCanary, bridge: typeof window.__vdpBridgeData !== "undefined" })`,
+      expression: `JSON.stringify({ canary: !!window.__vdpCanary, bridge: !!window.__vdpBridgeRan || typeof window.__vdpBridgeData !== "undefined" })`,
       returnByValue: true,
     });
     const { canary, bridge } = JSON.parse(probe.result.value);
@@ -500,7 +500,7 @@ async function checkListing(port, url, settleMs) {
     const panel = JSON.parse(panelRes.result.value);
 
     const mainRes = await cdp.send("Runtime.evaluate", {
-      expression: `JSON.stringify({ bridgeRan: !!window.__vdpBridgeData, bridgeItems: window.__vdpBridgeData?.items?.length ?? 0, policyLeaked: !!window.__vdpLastPolicy })`,
+      expression: `JSON.stringify({ bridgeRan: !!window.__vdpBridgeRan, bridgeDataIsNull: window.__vdpBridgeData === null, bridgeItems: window.__vdpBridgeData?.items?.length ?? 0, policyLeaked: !!window.__vdpLastPolicy })`,
       returnByValue: true,
     });
     const main = JSON.parse(mainRes.result.value);
@@ -511,7 +511,8 @@ async function checkListing(port, url, settleMs) {
     // harness exists to cover, so it must be asserted, not merely printed.
     const failures = [];
     if (!panel.rendered) failures.push("panel did not render");
-    if (!main.bridgeRan) failures.push("page-bridge produced no payload in the MAIN world (no __APOLLO_STATE__, or it never ran)");
+    if (!main.bridgeRan) failures.push("page-bridge never ran in the MAIN world");
+    else if (main.bridgeDataIsNull) failures.push("page-bridge ran but returned null Apollo data");
     else if (main.bridgeItems === 0) failures.push("page-bridge produced a payload but extracted 0 Apollo items");
     if (main.policyLeaked) failures.push("isolated-world state leaked into MAIN (world boundary broken)");
 

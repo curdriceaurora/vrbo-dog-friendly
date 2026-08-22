@@ -27,13 +27,13 @@ const BRIDGE_SOURCE = fs.readFileSync(path.join(__dirname, "..", "src", "content
 // dispatched on the mocked window fire synchronously (mirroring how
 // CustomEvents cross the isolated/MAIN world boundary in Chrome), so the
 // request/response exchange can be asserted in a single tick.
-function loadBridge(apolloState) {
+function loadBridge(apolloState, opts = {}) {
   const listeners = new Map();
   const windowObj = {
     __APOLLO_STATE__: apolloState,
     location: {
-      pathname: "/Hotel-Search?destination=Miami",
-      href: "https://www.vrbo.com/Hotel-Search?destination=Miami",
+      pathname: opts.pathname || "/Hotel-Search",
+      href: `https://www.vrbo.com${opts.pathname || "/Hotel-Search"}${opts.search ?? "?destination=Miami"}`,
     },
     dispatchEvent(event) {
       const cbs = listeners.get(event.type);
@@ -75,7 +75,7 @@ function loadBridge(apolloState) {
   vm.runInContext(BRIDGE_SOURCE, sandbox);
 
   function request(propertyIds, requestId = 1) {
-    let response = null;
+    let response = undefined;
     const onData = (e) => {
       response = e.detail;
     };
@@ -86,7 +86,19 @@ function loadBridge(apolloState) {
     return response;
   }
 
-  return { window: windowObj, request };
+  function requestListing() {
+    let response = undefined;
+    const onData = (e) => {
+      response = e.detail;
+    };
+    windowObj.addEventListener("vdp-apollo-data", onData);
+    const req = new MockCustomEvent("vdp-request-apollo-data", {});
+    windowObj.dispatchEvent(req);
+    windowObj.removeEventListener("vdp-apollo-data", onData);
+    return response;
+  }
+
+  return { window: windowObj, request, requestListing };
 }
 
 function loadBridgeWithTwoProperties() {
@@ -104,6 +116,17 @@ function loadBridgeWithTwoProperties() {
       value: "No pets allowed.",
     },
   });
+}
+
+function apolloWithPetRecord(key, fields = {}) {
+  return {
+    [key]: { ...fields, rules: { __ref: "RulesBlock:pet" } },
+    "RulesBlock:pet": { ruleList: [{ __ref: "RuleItem:pet" }] },
+    "RuleItem:pet": {
+      header: { text: "Pets" },
+      value: "Dogs welcome, maximum 2 dogs under 50 lbs.",
+    },
+  };
 }
 
 test("8.1.1 synthetic search-page Apollo state resolves two property IDs without any fetch", async (t) => {
@@ -215,6 +238,40 @@ test("8.1.1 findApolloRoot only matches PropertyInfo: keys, not generic Property
 
   const payload = bridge.request(["111"], 1);
   assert.equal(payload.results["111"], undefined, "a bare Property: key must not resolve the fast path");
+});
+
+test("8.1.1 search-page Apollo resolves alias ID fields but not sole unrelated records", () => {
+  const aliasBridge = loadBridge(apolloWithPetRecord("PropertyInfo:71616755", {
+    id: "71616755",
+    vrboPropertyId: "2488800HA",
+  }));
+  const aliasPayload = aliasBridge.request(["2488800ha"], 11);
+  assert.ok(aliasPayload.results["2488800ha"], "search should use explicit ID aliases when present");
+  assert.equal(aliasPayload.results["2488800ha"].items.some((it) => it.text.includes("Dogs welcome")), true);
+
+  const unrelatedBridge = loadBridge(apolloWithPetRecord("PropertyInfo:71616755", { id: "71616755" }));
+  const unrelatedPayload = unrelatedBridge.request(["2488800"], 12);
+  assert.equal(unrelatedPayload.results["2488800"], undefined, "search must not use PDP's sole-record fallback");
+});
+
+test("8.1.1 listing-page sole fallback resolves once but is not reused after SPA navigation", () => {
+  const bridge = loadBridge(apolloWithPetRecord("PropertyInfo:71616755", { id: "71616755" }), {
+    pathname: "/2488800",
+    search: "",
+  });
+
+  const firstPayload = bridge.requestListing();
+  assert.equal(firstPayload.ok, true);
+  assert.equal(firstPayload.propertyId, "71616755");
+  assert.notEqual(firstPayload.propertyId, "2488800", "URL id mismatch proves this used the PDP sole-record fallback");
+  assert.equal(firstPayload.items.some((it) => it.text.includes("Dogs welcome")), true);
+
+  bridge.window.location.pathname = "/5202987";
+  bridge.window.location.href = "https://www.vrbo.com/5202987";
+  const stalePayload = bridge.requestListing();
+  assert.equal(stalePayload, null, "stale sole record from the previous listing must not populate the new page");
+  assert.equal(bridge.window.__vdpBridgeRan, true);
+  assert.equal(bridge.window.__vdpBridgeData, null);
 });
 
 test("8.1.1 resolveSearchApolloRecord returns null for records with no concrete policy", () => {
