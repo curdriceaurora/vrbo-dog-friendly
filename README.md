@@ -4,7 +4,7 @@
 
 # Vrbow: Vrbo Dog Policy Callout
 
-**A Chrome extension that extracts pet rules from Vrbo listings and shows them in a summary card.**
+**A Chrome extension that extracts pet rules from Vrbo, Airbnb, and Expedia listings and shows them in a summary card.**
 
 <br>
 
@@ -16,13 +16,13 @@
 
 ## Why?
 
-Vrbo does not present pet policies in a consistent place. Hosts may put restrictions in House Rules, Amenities, or About this property, sometimes behind collapsed sections. Rules can also conflict within the same listing.
+Booking sites do not present pet policies in a consistent place. Hosts may put restrictions in House Rules, Amenities, About this property, hotel policy sections, or structured page metadata. Rules can also conflict within the same listing.
 
 A property marked Pets allowed may still have limits on dog count, weight, fees, breeds, or require prior host approval. Checking all of this manually across several listings gets tedious quickly.
 
 ## What
 
-When you open a Vrbo listing, the extension reads the available pet policy data and consolidates it into an on-page summary card in the top-right corner:
+When you open a supported listing, the extension reads the available pet policy data and consolidates it into an on-page summary card in the top-right corner:
 
 - Whether dogs are allowed
 - Maximum number of dogs and weight limits
@@ -76,7 +76,7 @@ The extension can also add pet policy badges directly to Vrbo search results, ma
 
 ## Scope and Alternatives
 
-- **Vrbo Only**: This extension operates only on `vrbo.com` property listings. It does not run on Airbnb, Expedia, or other booking websites.
+- **Supported listing pages**: This extension runs on Vrbo, Airbnb, and Expedia property listing pages. Search-result badges currently apply to Vrbo only.
 - **Search Alternative**: To search across properties with custom pet filters (such as dog weight, pet count, or fee limits), use [BringFido](https://www.bringfido.com).
 
 ## Development and Support

@@ -1,0 +1,24 @@
+{
+  "fixtureSource": "Beautiful Townhouse on the Sugar White Sands of Pensacola Beach, Fla.html",
+  "url": "https://www.expedia.com/Pensacola-Beach-Hotels-Beautiful-Townhouse-On-The-Sugar-White-Sands-Of-Pensacola-Beach.h33552466.Hotel-Information",
+  "propertyId": "33552466",
+  "kind": "vrbo-sourced",
+  "petsAllowedMeta": [
+    "Pets allowed",
+    "Service animals are welcome, and are exempt from fees",
+    "Welcoming dogs only",
+    "1 total (up to 50 lbs per pet)",
+    "Note from host: With owner approval. Pet Cleaning Fee $75"
+  ],
+  "faqPage": {
+    "mainEntity": [
+      {
+        "name": "Is Beautiful Townhouse on the Sugar White Sands of Pensacola Beach, Fla pet-friendly?",
+        "acceptedAnswer": {
+          "text": "Yes, this property allows dogs (limit 1 total) with a maximum weight of up to 50 lbs per pet."
+        }
+      }
+    ]
+  },
+  "propertySource": "Provided by Vrbo, part of Expedia Group."
+}

@@ -5,7 +5,7 @@
     "test": "node --test",
     "test:coverage": "node tools/check-coverage.js",
     "test:theme": "playwright test",
-    "test:all": "node --check src/shared/site-registry.js && node --check src/content/content.js && node --check src/shared/extract.js && node --check src/content/page-bridge.js && node --check src/popup/popup.js && node --check src/shared/search-fetcher.js && node --check src/shared/formatters.js && node --check src/sites/airbnb/adapter.js && node tools/check-coverage.js && playwright test",
+    "test:all": "node --check src/shared/site-registry.js && node --check src/content/content.js && node --check src/shared/extract.js && node --check src/content/page-bridge.js && node --check src/popup/popup.js && node --check src/shared/search-fetcher.js && node --check src/shared/formatters.js && node --check src/sites/airbnb/adapter.js && node --check src/sites/expedia/adapter.js && node tools/check-coverage.js && playwright test",
     "build": "node tools/build-zip.js",
     "package": "node tools/build-zip.js"
   },

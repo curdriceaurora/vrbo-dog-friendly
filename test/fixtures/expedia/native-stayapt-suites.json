@@ -1,0 +1,23 @@
+{
+  "fixtureSource": "stayAPT Suites Pensacola-UWF_West Florida Hospital Area.html",
+  "url": "https://www.expedia.com/Pensacola-Hotels-StayAPT-Suites-Pensacola-UWFWest-Florida-Hospital-Area.h102382938.Hotel-Information",
+  "propertyId": "102382938",
+  "kind": "native",
+  "petsAllowedMeta": [
+    "Pets allowed for an extra charge of USD 25 per pet, per night (maximum USD 150 per stay)",
+    "Service animals are welcome, and are exempt from fees",
+    "Welcoming dogs and cats only",
+    "2 total (up to 75 lbs per pet)"
+  ],
+  "faqPage": {
+    "mainEntity": [
+      {
+        "name": "Is stayAPT Suites Pensacola-UWF/West Florida Hospital Area pet-friendly?",
+        "acceptedAnswer": {
+          "text": "Yes, this property allows cats and dogs (limit 2 total) with a maximum weight of up to 75 lbs per pet. There's a fee of USD 25 per pet, per night. Service animals are exempt from fees."
+        }
+      }
+    ]
+  },
+  "propertySource": null
+}

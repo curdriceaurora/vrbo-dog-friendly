@@ -1,0 +1,23 @@
+{
+  "fixtureSource": "Perdido Beach Bungalow.html",
+  "url": "https://www.expedia.com/Pensacola-Hotels-Perdido-Beach-Bungalow.h118681795.Hotel-Information",
+  "propertyId": "118681795",
+  "kind": "native",
+  "petsAllowedMeta": [
+    "Pets allowed for an extra charge of USD 87.55 per pet, per stay",
+    "Service animals are welcome, and are exempt from fees",
+    "Welcoming dogs only",
+    "2 total (up to 35 lbs per pet)"
+  ],
+  "faqPage": {
+    "mainEntity": [
+      {
+        "name": "Is Perdido Beach Bungalow pet-friendly?",
+        "acceptedAnswer": {
+          "text": "Yes, this property allows dogs (limit 2 total) with a maximum weight of up to 35 lbs per pet. There's a fee of USD 87.55 per pet, per stay. Service animals are exempt from fees."
+        }
+      }
+    ]
+  },
+  "propertySource": null
+}
