@@ -501,7 +501,9 @@ async function checkListing(port, url, settleMs) {
 
     const mainRes = await cdp.send("Runtime.evaluate", {
       expression: `JSON.stringify({
-        bridgeRan: !!window.__vdpBridgeData,
+        bridgeRan: !!window.__vdpBridgeRan,
+        bridgeDataDefined: typeof window.__vdpBridgeData !== "undefined",
+        bridgeDataIsNull: window.__vdpBridgeData === null,
         bridgeItems: window.__vdpBridgeData?.items?.length ?? 0,
         policyLeaked: !!window.__vdpLastPolicy,
         apolloKeys: window.__APOLLO_STATE__ ? Object.keys(window.__APOLLO_STATE__).length : 0,
@@ -534,13 +536,18 @@ async function checkListing(port, url, settleMs) {
     // harness exists to cover, so it must be asserted, not merely printed.
     const failures = [];
     if (!panel.rendered) failures.push("panel did not render");
+    const graphShape = `__APOLLO_STATE__: ${main.apolloKeys} key(s), ${main.propertyInfoKeys} PropertyInfo`;
     if (!main.bridgeRan) {
+      // The bridge sets __vdpBridgeRan on its very first tryDispatch, so a
+      // falsy flag really does mean it never executed — a MAIN-world load
+      // failure, not a resolution miss.
+      failures.push(`page-bridge never executed in the MAIN world (${graphShape})`);
+    } else if (main.bridgeDataIsNull) {
       failures.push(
-        `page-bridge produced no payload in the MAIN world ` +
-          `(__APOLLO_STATE__: ${main.apolloKeys} key(s), ${main.propertyInfoKeys} PropertyInfo) — ` +
+        `page-bridge ran but resolved no PropertyInfo record (${graphShape}) — ` +
           (main.propertyInfoKeys > 0
-            ? `the graph IS populated, so the bridge failed to read it`
-            : `no PropertyInfo yet; may be pre-hydration or the bridge never ran`)
+            ? `the graph IS populated, so findApolloRoot failed to match it`
+            : `no PropertyInfo present; likely pre-hydration`)
       );
     }
     else if (main.bridgeItems === 0) failures.push("page-bridge produced a payload but extracted 0 Apollo items");
